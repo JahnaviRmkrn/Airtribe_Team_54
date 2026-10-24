@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Meetup room</title>
+  <title>muop - Meetup room</title>
+  <link rel="icon" href="/muop-mark.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
   <meta name="description" content="Join the meetup room: share your budget, area and availability, then vote on where to go.">
   <meta name="robots" content="noindex">
   <meta name="referrer" content="no-referrer">
@@ -11,7 +15,15 @@
 </head>
 <body>
   <header class="r-top">
-    <span class="r-brand"><span class="r-logo">◆</span> Meetup room</span>
+    <span class="r-brand">
+      <svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <path d="M14 32 L24 14 L34 32 L14 32 Z" stroke="#2E1F14" stroke-width="2.4" stroke-linejoin="round" opacity="0.9"/>
+        <circle cx="14" cy="32" r="7" fill="#F6AC0D" stroke="#2E1F14" stroke-width="2.4"/>
+        <circle cx="24" cy="14" r="7" fill="#04C1E1" stroke="#2E1F14" stroke-width="2.4"/>
+        <circle cx="34" cy="32" r="7" fill="#75E4DE" stroke="#2E1F14" stroke-width="2.4"/>
+      </svg>
+      muop <span class="r-logo">meetup room</span>
+    </span>
     <span id="status-pill" class="pill">Loading…</span>
   </header>
 

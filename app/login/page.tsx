@@ -148,7 +148,10 @@ export default function LoginPage() {
   return (
     <main className="login-page">
       <div className="login-card">
-        <h1>Organizer</h1>
+        <h1>
+          <img src="/muop-mark.svg" alt="" width={34} height={34} />
+          muop
+        </h1>
         <p className="login-sub">Sign in or create your account</p>
 
         <div className="social-stack">

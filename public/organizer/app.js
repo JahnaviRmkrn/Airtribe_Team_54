@@ -107,9 +107,13 @@ const roomUrl = (token) => location.origin + '/m/' + token;
 
 async function dashboardView() {
   renderLoading('Loading your dashboard...');
-  let d;
+  let d, graphContacts = [];
   try {
     d = await api('/api/me/dashboard');
+    try {
+      const rc = await api('/api/me/contacts');
+      graphContacts = Array.isArray(rc) ? rc : (rc.contacts || []);
+    } catch (e2) { graphContacts = []; }
   } catch (e) { return renderError(e, dashboardView); }
 
   const counts = d.contact_counts || {};
@@ -164,6 +168,16 @@ async function dashboardView() {
       <button class="primary" id="qa-meetup">Plan a meetup</button>
     </div>
     <section class="card">
+      <h2>Your network</h2>
+      <p class="muted">Each dot is a person. The section is their category; the closer to the centre, the sooner they are due a check-in.</p>
+      ${networkGraphSVG(graphContacts)}
+    </section>
+    <section class="card">
+      <h2>Calendar</h2>
+      <p class="muted">This month: follow-ups and meetups on their dates.</p>
+      ${calendarHTML(graphContacts, meetups)}
+    </section>
+    <section class="card">
       <h2>Follow-ups</h2>
       ${(followups.overdue || []).map((f) => followupRow(f, true)).join('')}
       ${(followups.upcoming || []).map((f) => followupRow(f, false)).join('')}
@@ -197,6 +211,101 @@ async function dashboardView() {
   el('qa-meetup').onclick = () => go('#/meetups');
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
   document.querySelectorAll('[data-done]').forEach((b) => { b.onclick = () => markDoneForm(b); });
+  document.querySelectorAll('[data-gcontact]').forEach((n) => {
+    n.style.cursor = 'pointer';
+    n.onclick = () => go('#/contacts/' + encodeURIComponent(n.dataset.gcontact));
+  });
+}
+
+// --- network graph (dashboard) -------------------------------------------
+// Sectors = real contact categories; rings = real follow-up timing buckets
+// (overdue / due within 7 days / later or unscheduled). No invented ranks.
+
+function networkGraphSVG(contacts) {
+  const SIZE = 520, C = SIZE / 2;
+  const RINGS = [85, 150, 215];
+  const BANDS = [[26, 78], [92, 143], [157, 208]];
+  const RING_LABELS = ['Overdue', 'This week', 'Later'];
+  const DOT_FILL = { personal: '#E89B00', professional: '#04C1E1', community: '#3FAE9C' };
+  const now = Date.now();
+  const WEEK = 7 * 24 * 3600 * 1000;
+  const hash = (t) => { let h = 0; for (const ch of String(t)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
+  const urgency = (c) => {
+    if (!c.next_followup_at) return 2;
+    const t = new Date(c.next_followup_at).getTime();
+    if (isNaN(t)) return 2;
+    if (t < now - 24 * 3600 * 1000) return 0;
+    if (t < now + WEEK) return 1;
+    return 2;
+  };
+  const perSlot = {};
+  const dots = (contacts || []).map((c) => {
+    const ci = Math.max(0, CATEGORIES.indexOf(c.category));
+    const u = urgency(c);
+    const key = ci + '-' + u;
+    const n = (perSlot[key] = (perSlot[key] || 0) + 1) - 1;
+    const h = hash((c.id || '') + (c.name || ''));
+    const spread = 42;
+    const angleDeg = ci * 120 - 90 + (((h + n * 53) % 100) / 100 - 0.5) * 2 * spread + (n % 2 ? 9 : -9);
+    const r = BANDS[u][0] + (((h >> 8) + n * 37) % 100) / 100 * (BANDS[u][1] - BANDS[u][0]);
+    const a = angleDeg * Math.PI / 180;
+    const x = C + r * Math.cos(a), y = C + r * Math.sin(a);
+    const sub = c.next_followup_at ? ' · next check-in ' + fmtDay(c.next_followup_at) : ' · no check-in date';
+    return `<circle data-gcontact="${esc(c.id || '')}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="${DOT_FILL[c.category] || '#9a9a9a'}" stroke="#fff" stroke-width="2"><title>${esc((c.name || 'Someone') + sub)}</title></circle>`;
+  }).join('');
+  const rings = RINGS.map((r) => `<circle cx="${C}" cy="${C}" r="${r}" fill="none" stroke="rgba(60,42,20,0.18)" stroke-width="1" stroke-dasharray="4 5"/>`).join('');
+  const ringLabels = RING_LABELS.map((t, i) => {
+    const r = (BANDS[i][0] + BANDS[i][1]) / 2;
+    return `<text x="${C}" y="${(C - r + 4).toFixed(1)}" text-anchor="middle" class="graph-ring-label">${t}</text>`;
+  }).join('');
+  const spokes = CATEGORIES.map((cname, i) => {
+    const a = (i * 120 - 90) * Math.PI / 180;
+    const x2 = C + RINGS[2] * Math.cos(a), y2 = C + RINGS[2] * Math.sin(a);
+    const lx = C + (RINGS[2] + 24) * Math.cos(a), ly = C + (RINGS[2] + 24) * Math.sin(a) + 4;
+    return `<line x1="${C}" y1="${C}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="rgba(60,42,20,0.12)" stroke-width="1"/>` +
+      `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" class="graph-sector-label" fill="${DOT_FILL[cname]}">${catLabel(cname)}</text>`;
+  }).join('');
+  const legend = CATEGORIES.map((cname) =>
+    `<span class="graph-legend-item"><i style="background:${DOT_FILL[cname]}"></i>${catLabel(cname)}</span>`).join('');
+  if (!(contacts || []).length) return '<p class="muted">Add your people to see them here.</p>';
+  return `<div class="network-graph"><svg viewBox="0 0 ${SIZE} ${SIZE}" role="img" aria-label="Network graph of your contacts">
+    <circle cx="${C}" cy="${C}" r="${RINGS[2]}" fill="rgba(255,255,255,0.55)" stroke="rgba(60,42,20,0.22)" stroke-width="1"/>
+    ${rings}${spokes}${ringLabels}
+    <circle cx="${C}" cy="${C}" r="12" fill="#3d2b1f"/><text x="${C}" y="${(C + 4)}" text-anchor="middle" class="graph-you">You</text>
+    ${dots}
+  </svg><div class="graph-legend">${legend}<span class="muted">Closer to centre = check-in due sooner. Tap a dot to open the person.</span></div></div>`;
+}
+
+// --- calendar (dashboard) --------------------------------------------------
+// Current month grid; entries come only from real follow-up and meetup dates.
+
+function calendarHTML(contacts, meetups) {
+  const now = new Date();
+  const year = now.getFullYear(), month = now.getMonth();
+  const monthName = now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const first = new Date(year, month, 1);
+  const startOffset = first.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const events = {};
+  const add = (iso, kind, label) => {
+    const t = new Date(iso);
+    if (isNaN(t) || t.getFullYear() !== year || t.getMonth() !== month) return;
+    const day = t.getDate();
+    (events[day] = events[day] || []).push({ kind, label });
+  };
+  (contacts || []).forEach((c) => c.next_followup_at && add(c.next_followup_at, 'followup', (c.name || 'Follow-up')));
+  (meetups || []).forEach((m) => m.starts_at && add(m.starts_at, 'meetup', (m.title || 'Meetup')));
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) cells.push('<div class="cal-cell cal-pad"></div>');
+  for (let day = 1; day <= daysInMonth; day++) {
+    const evs = events[day] || [];
+    const today = day === now.getDate() ? ' cal-today' : '';
+    const dots = evs.slice(0, 4).map((e) => `<i class="cal-dot ${e.kind}" title="${esc(e.label)}"></i>`).join('');
+    cells.push(`<div class="cal-cell${today}"><span class="cal-day">${day}</span><span class="cal-dots">${dots}</span></div>`);
+  }
+  const names = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => `<div class="cal-head">${d}</div>`).join('');
+  return `<div class="calendar"><div class="cal-month">${esc(monthName)}</div><div class="cal-grid">${names}${cells.join('')}</div>
+    <div class="graph-legend"><span class="graph-legend-item"><i class="cal-dot followup"></i>Follow-up</span><span class="graph-legend-item"><i class="cal-dot meetup"></i>Meetup</span></div></div>`;
 }
 
 function goalsComparison(goals, act) {
