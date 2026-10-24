@@ -7,9 +7,11 @@
 // Nothing is saved here: the caller pre-fills the editable confirm screen and
 // only the user's explicit Confirm persists anything.
 //
-// Voice needs ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID on the server; the
-// browser only ever sees a short-lived signed URL from /api/voice/signed-url.
-// The typed fallback (POST /api/extract) always works.
+// Voice uses ElevenLabs when ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID are set
+// (the browser only ever sees a short-lived signed URL from /api/voice/signed-url).
+// Otherwise it records a clip with the mic and POSTs it to /api/voice/transcribe,
+// where Gemini (GEMINI_API_KEY, server-only) transcribes it. Either way the
+// transcript goes through /api/extract. The typed fallback always works.
 
 (() => {
   // Pinned version + Subresource Integrity, loaded only when the mic is tapped.
@@ -48,6 +50,7 @@
   function mount(root, onResult) {
     const lines = []; // { who: 'user' | 'agent', text }
     let convo = null;
+    let rec = null; // Gemini path: { recorder, stream, chunks, timer }
     let starting = false;
     let extracting = false;
     let left = false; // set once the user leaves this screen; late async work is dropped
@@ -166,7 +169,7 @@
           signed = await getJSON('/api/voice/signed-url');
           if (left) return;
         } catch (e) {
-          if (e.status === 503) return voiceUnavailable();
+          if (e.status === 503) return startRecording(); // no ElevenLabs: record + Gemini
           throw e;
         }
         const sdk = await loadSdk();
@@ -203,8 +206,64 @@
       }
     }
 
+    // --- Gemini path: record a clip, transcribe on the server --------------
+    const RECORD_TYPES = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm'];
+    const MAX_RECORD_MS = 90_000;
+
+    async function startRecording() {
+      if (!window.MediaRecorder || !navigator.mediaDevices) return voiceUnavailable('This browser cannot record audio.');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (left) { stream.getTracks().forEach((t) => t.stop()); return; }
+      const mimeType = RECORD_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const chunks = [];
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      recorder.onstop = () => uploadRecording(chunks, recorder.mimeType || mimeType || 'audio/webm');
+      recorder.start();
+      rec = { recorder, stream, timer: setTimeout(() => stop(), MAX_RECORD_MS) };
+      status('Listening - tell me about the people who matter, then tap "Done talking".');
+      setMode('live');
+      $('end').classList.remove('hidden');
+    }
+
+    function endRecording(upload) {
+      if (!rec) return;
+      const { recorder, stream, timer } = rec;
+      rec = null;
+      clearTimeout(timer);
+      if (!upload) { recorder.ondataavailable = null; recorder.onstop = null; }
+      if (recorder.state !== 'inactive') recorder.stop();
+      stream.getTracks().forEach((t) => t.stop()); // mic light off right away
+    }
+
+    async function uploadRecording(chunks, type) {
+      if (left) return;
+      const blob = new Blob(chunks, { type });
+      status('Transcribing...');
+      setMode('thinking');
+      try {
+        const res = await getJSON('/api/voice/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': type.split(';')[0] },
+          body: blob,
+        });
+        if (left) return;
+        const transcript = (res.transcript || '').trim();
+        if (!transcript) { status("Didn't catch that - tap the mic and try again."); setMode('idle'); return; }
+        addLine('user', transcript);
+        extract(transcript);
+      } catch (e) {
+        if (left) return;
+        if (e.status === 503 && /not configured/i.test(e.message)) return voiceUnavailable();
+        error('Could not transcribe: ' + e.message);
+        status('Tap the mic to try again, or type it instead.');
+        setMode('idle');
+      }
+    }
+
     async function stop() {
       $('end').classList.add('hidden');
+      if (rec) return endRecording(true); // upload -> transcribe -> extract
       if (convo) {
         const c = convo;
         convo = null;
@@ -217,10 +276,11 @@
     const onLeave = () => {
       left = true;
       if (convo) { const c = convo; convo = null; c.endSession().catch(() => {}); }
+      endRecording(false);
     };
     window.addEventListener('hashchange', onLeave, { once: true });
 
-    $('orb').onclick = () => (convo ? stop() : start());
+    $('orb').onclick = () => (convo || rec ? stop() : start());
     $('end').onclick = stop;
     $('extract').onclick = () => extract($('text').value);
 
