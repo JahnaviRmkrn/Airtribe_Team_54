@@ -133,6 +133,10 @@ fieldset legend { font-family: "Newsreader", Georgia, serif; font-size: 15px; pa
 }
 
 @media (max-width: 640px) {
+  .topbar { flex-wrap: wrap; row-gap: 4px; padding: 10px 16px; }
+  #nav.nav { display: flex; width: 100%; justify-content: space-between; }
+  #nav.nav.hidden { display: none; }
+  .nav a { margin-left: 0; padding: 6px 12px; font-size: 14px; }
   .inline-form { grid-template-columns: 1fr; }
   .ob-row { grid-template-columns: 1fr; }
   .ob-row .remove-row { margin-bottom: 0; }

@@ -150,6 +150,16 @@ async function dashboardView() {
 
   el('app').innerHTML = `
     <h1>Dashboard</h1>
+    <section class="card">
+      <h2>Your network</h2>
+      <p class="muted">Each dot is a person. The section is their category; the closer to the centre, the sooner they are due a check-in.</p>
+      ${networkGraphSVG(graphContacts)}
+    </section>
+    <section class="card">
+      <h2>Calendar</h2>
+      <p class="muted">This month: follow-ups and meetups on their dates.</p>
+      ${calendarHTML(graphContacts, meetups)}
+    </section>
     <div class="stats">
       <div class="stat card">
         <div class="stat-num">${totalContacts}</div>
@@ -167,16 +177,6 @@ async function dashboardView() {
       <button class="primary" id="qa-add">Add person</button>
       <button class="primary" id="qa-meetup">Plan a meetup</button>
     </div>
-    <section class="card">
-      <h2>Your network</h2>
-      <p class="muted">Each dot is a person. The section is their category; the closer to the centre, the sooner they are due a check-in.</p>
-      ${networkGraphSVG(graphContacts)}
-    </section>
-    <section class="card">
-      <h2>Calendar</h2>
-      <p class="muted">This month: follow-ups and meetups on their dates.</p>
-      ${calendarHTML(graphContacts, meetups)}
-    </section>
     <section class="card">
       <h2>Follow-ups</h2>
       ${(followups.overdue || []).map((f) => followupRow(f, true)).join('')}
