@@ -50,6 +50,7 @@
     let convo = null;
     let starting = false;
     let extracting = false;
+    let left = false; // set once the user leaves this screen; late async work is dropped
 
     // Static markup only; all dynamic text below goes through textContent.
     root.innerHTML = `
@@ -110,6 +111,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ transcript }),
         });
+        if (left) return;
         const n = res.contacts.length;
         status('Found ' + n + ' ' + (n === 1 ? 'person' : 'people') + ' - review below. Nothing is saved until you confirm.');
         setMode('done');
@@ -142,12 +144,14 @@
         let signed;
         try {
           signed = await getJSON('/api/voice/signed-url');
+          if (left) return;
         } catch (e) {
           if (e.status === 503) return voiceUnavailable();
           throw e;
         }
         const sdk = await loadSdk();
-        convo = await sdk.Conversation.startSession({
+        if (left) return;
+        const session = await sdk.Conversation.startSession({
           signedUrl: signed.signed_url,
           onConnect: () => {
             status('Listening - tell me about the people who matter.');
@@ -157,6 +161,7 @@
           onDisconnect: () => {
             convo = null;
             $('end').classList.add('hidden');
+            if (left) return;
             if (lines.some((l) => l.who === 'user')) extract(transcriptText());
             else { status('Call ended. Tap the mic to try again.'); setMode('idle'); }
           },
@@ -164,6 +169,9 @@
           onModeChange: ({ mode }) => { if (convo) setMode(mode === 'speaking' ? 'speaking' : 'live'); },
           onError: (msg) => error('Voice error: ' + (msg && msg.message ? msg.message : msg)),
         });
+        // Left while connecting: close the call so the mic doesn't stay on.
+        if (left) { session.endSession().catch(() => {}); return; }
+        convo = session;
       } catch (e) {
         convo = null;
         setMode('idle');
@@ -186,7 +194,10 @@
     }
 
     // Leaving the onboarding screen ends any live call.
-    const onLeave = () => { if (convo) { const c = convo; convo = null; c.endSession().catch(() => {}); } };
+    const onLeave = () => {
+      left = true;
+      if (convo) { const c = convo; convo = null; c.endSession().catch(() => {}); }
+    };
     window.addEventListener('hashchange', onLeave, { once: true });
 
     $('orb').onclick = () => (convo ? stop() : start());

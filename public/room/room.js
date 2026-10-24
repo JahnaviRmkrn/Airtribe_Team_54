@@ -357,8 +357,8 @@ function renderPrefs() {
       <input name="guest_name" maxlength="60" required value="${esc(mine.guest_name)}"></label>
     <div class="field"><span class="field-label">Budget per person (₹)</span>
       <div class="two">
-        <input name="budget_min" type="number" min="0" step="50" inputmode="numeric" placeholder="Min" aria-label="Minimum budget" value="${Number(p.budget_min) || ''}">
-        <input name="budget_max" type="number" min="0" step="50" inputmode="numeric" placeholder="Max" aria-label="Maximum budget" value="${Number(p.budget_max) || ''}">
+        <input name="budget_min" type="number" min="0" step="50" inputmode="numeric" placeholder="Min" aria-label="Minimum budget" value="${p.budget_min == null ? '' : Number(p.budget_min)}">
+        <input name="budget_max" type="number" min="0" step="50" inputmode="numeric" placeholder="Max" aria-label="Maximum budget" value="${p.budget_max == null ? '' : Number(p.budget_max)}">
       </div></div>
     <label class="field"><span class="field-label">Area</span>
       <input name="area" maxlength="80" list="area-list" placeholder="Anywhere" value="${esc(p.area || '')}">
