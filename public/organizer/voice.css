@@ -58,3 +58,24 @@
 
 .vx-char { width: 112px; height: 112px; }
 @media (max-width: 420px) { .vx-char { width: 84px; height: 84px; } }
+/* --- site-wide voice assistant (live.js) ---------------------------------- */
+.voice-fab {
+  position: fixed; right: 20px; bottom: 20px; z-index: 30; width: 58px; height: 58px; border-radius: 50%;
+  border: 0; cursor: pointer; color: #2e1f14; background: linear-gradient(135deg, #f6ac0d, #f3c94a);
+  box-shadow: 0 10px 28px rgba(46, 31, 20, 0.25); display: grid; place-items: center;
+}
+.voice-fab.on { background: linear-gradient(135deg, #04c1e1, #75e4de); }
+.voice-fab[data-state="speaking"] { animation: vfab 1.1s ease-in-out infinite; }
+@keyframes vfab { 50% { transform: scale(1.08); } }
+.voice-panel {
+  position: fixed; right: 20px; bottom: 90px; z-index: 30; width: min(340px, calc(100vw - 32px));
+  padding: 12px 14px; border-radius: 16px; background: rgba(255, 253, 244, 0.97);
+  border: 1px solid #efe6d4; box-shadow: 0 12px 32px rgba(46, 31, 20, 0.18); font-size: 14px;
+}
+.voice-panel.hidden { display: none; }
+.voice-panel-status { font-weight: 600; margin-bottom: 6px; }
+.voice-line { padding: 4px 0; }
+.voice-line.user { color: #6b5a48; }
+.voice-line.user::before { content: "You: "; font-weight: 600; }
+.voice-line.agent::before { content: "muop: "; font-weight: 600; color: #0787a1; }
+@media (prefers-reduced-motion: reduce) { .voice-fab[data-state="speaking"] { animation: none; } }

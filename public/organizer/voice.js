@@ -7,7 +7,8 @@
 // Nothing is saved here: the caller pre-fills the editable confirm screen and
 // only the user's explicit Confirm persists anything.
 //
-// Voice uses ElevenLabs when ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID are set
+// Voice prefers a live spoken conversation with Gemini Live (live.js, token from
+// /api/voice/live-token) that fills the rows as you talk. Next it uses ElevenLabs when ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID are set
 // (the browser only ever sees a short-lived signed URL from /api/voice/signed-url).
 // Otherwise it records a clip with the mic and POSTs it to /api/voice/transcribe,
 // where Gemini (GEMINI_API_KEY, server-only) transcribes it. Either way the
@@ -50,7 +51,9 @@
   function mount(root, onResult) {
     const lines = []; // { who: 'user' | 'agent', text }
     let convo = null;
-    let rec = null; // Gemini path: { recorder, stream, chunks, timer }
+    let rec = null; // Gemini record path: { recorder, stream, chunks, timer }
+    let live = null; // Gemini Live session (live.js)
+    let fillTimer = null;
     let starting = false;
     let extracting = false;
     let left = false; // set once the user leaves this screen; late async work is dropped
@@ -121,6 +124,22 @@
 
     const transcriptText = () => lines.map((l) => (l.who === 'user' ? 'User: ' : 'Agent: ') + l.text).join('\n');
 
+    // While talking live: refresh the rows in the background, without touching the call UI.
+    function scheduleFill() {
+      clearTimeout(fillTimer);
+      fillTimer = setTimeout(async () => {
+        if (left || extracting || !live) return;
+        try {
+          const res = await getJSON('/api/extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transcript: transcriptText() }),
+          });
+          if (!left && live) onResult(res);
+        } catch { /* the final extract on hang-up reports errors */ }
+      }, 1200);
+    }
+
     async function extract(transcript) {
       if (extracting || !transcript.trim()) return;
       extracting = true;
@@ -157,13 +176,47 @@
       $('fallback').open = true;
     }
 
+    const LIVE_INSTRUCTIONS = [
+      "You are muop's onboarding guide, helping the user set up the people they want to stay in touch with.",
+      'Have a short, friendly spoken conversation (about a minute). Ask one brief question at a time.',
+      'Help them name up to 5 people: for each, how they know them (personal, professional or community), one or two interests, and roughly how often to check in.',
+      'Then ask how they want to split their attention across personal, professional and community - it must add up to 100 percent.',
+      'Repeat names back so spelling can be checked. Do not invent people or details.',
+      "When you have enough, give a one-line summary and tell them to tap 'Done talking' to review and confirm. Nothing is saved until they confirm.",
+    ].join('\n');
+
+    async function startLive() {
+      live = await window.LiveVoice.start({
+        instructions: LIVE_INSTRUCTIONS,
+        onUser: (t) => { addLine('user', t); scheduleFill(); },
+        onModel: (t) => addLine('agent', t),
+        onError: (msg) => error('Voice error: ' + msg),
+        onState: (st) => {
+          if (left) return;
+          if (st === 'listening') { status('Listening - tell me about the people who matter.'); setMode('live'); $('end').classList.remove('hidden'); }
+          else if (st === 'speaking') setMode('speaking');
+          else if (st === 'ended') {
+            live = null;
+            clearTimeout(fillTimer);
+            $('end').classList.add('hidden');
+            if (lines.some((l) => l.who === 'user')) extract(transcriptText());
+            else { status('Call ended. Tap the mic to try again.'); setMode('idle'); }
+          }
+        },
+      });
+      if (left) { live.stop(); live = null; }
+    }
+
     async function start() {
-      if (starting || convo) return;
+      if (starting || convo || live || rec) return;
       starting = true;
       error('');
       try {
         status('Connecting...');
         setMode('connecting');
+        if (window.LiveVoice) {
+          try { await startLive(); return; } catch (e) { if (e.status !== 503) throw e; } // 503: no Gemini key -> next option
+        }
         let signed;
         try {
           signed = await getJSON('/api/voice/signed-url');
@@ -264,6 +317,7 @@
     async function stop() {
       $('end').classList.add('hidden');
       if (rec) return endRecording(true); // upload -> transcribe -> extract
+      if (live) { const l = live; return l.stop(); } // onState('ended') runs the final extract
       if (convo) {
         const c = convo;
         convo = null;
@@ -277,10 +331,12 @@
       left = true;
       if (convo) { const c = convo; convo = null; c.endSession().catch(() => {}); }
       endRecording(false);
+      clearTimeout(fillTimer);
+      if (live) { const l = live; live = null; l.stop(); }
     };
     window.addEventListener('hashchange', onLeave, { once: true });
 
-    $('orb').onclick = () => (convo || rec ? stop() : start());
+    $('orb').onclick = () => (convo || rec || live ? stop() : start());
     $('end').onclick = stop;
     $('extract').onclick = () => extract($('text').value);
 
