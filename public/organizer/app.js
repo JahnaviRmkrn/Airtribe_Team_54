@@ -76,6 +76,13 @@ let navGen = 0;
 const navToken = () => navGen;
 const stale = (token) => token !== navGen;
 
+// In-app back stack: pages you came from inside the app, latest last. Back
+// pops instead of pushing, so two taps can never ping-pong. Never leaves the
+// SPA, so state in other views survives exactly like ordinary nav taps.
+let currentHash = null;
+let navStack = [];
+let goingBack = false;
+
 function route() {
   navGen++;
   window.OrganizerOnboarding = null;
@@ -85,6 +92,21 @@ function route() {
   document.querySelectorAll('[data-nav]').forEach((a) => {
     a.classList.toggle('active', hash.startsWith('#/' + a.dataset.nav));
   });
+  // Topbar back button: hidden on the first page, everywhere else goes to the
+  // last in-app page - or the dashboard when entered directly (no history).
+  const backBtn = el('nav-back');
+  if (backBtn) {
+    backBtn.classList.toggle('hidden', hash === '#/dashboard');
+    backBtn.onclick = () => {
+      const target = navStack.length ? navStack.pop() : '#/dashboard'; // direct entry: fall back to the first page
+      goingBack = true;
+      go(target);
+    };
+  }
+  if (goingBack) goingBack = false;
+  else if (currentHash && currentHash !== hash) navStack.push(currentHash);
+  if (navStack.length > 50) navStack = navStack.slice(-50);
+  currentHash = hash;
   const contactMatch = hash.match(/^#\/contacts\/(.+)$/);
   if (contactMatch) return contactDetailView(decodeURIComponent(contactMatch[1]));
   const views = {
@@ -93,6 +115,7 @@ function route() {
     '#/meetups': meetupsView,
     '#/onboarding': () => onboardingView(),
     '#/welcome': welcomeView,
+    '#/profile': profileView,
   };
   (views[hash] || dashboardView)();
 }
@@ -227,15 +250,14 @@ async function dashboardView() {
   const act = d.recorded_activity || { label: 'Recorded activity', total: 0, by_category: {}, sufficient_data: false };
   const followups = d.followups || { overdue: [], upcoming: [] };
   const meetups = d.upcoming_meetups || [];
-  const recent = d.recent_activity || [];
 
   if (d.is_empty) {
     if (stale(nav)) return;
   el('app').innerHTML = `
       <h1>Dashboard</h1>
       <div class="card state-box">
-        <h2>Welcome to Organizer</h2>
-        <p class="muted">Nothing here yet. Add your people and plan your first meetup.</p>
+        <h2>Welcome to muop 💛</h2>
+        <p class="muted">Nothing here yet. Add your favourite people and plan your first get-together.</p>
         <div class="quick-actions" style="justify-content:center">
           <button class="primary" id="qa-add">Add person</button>
           <button class="primary" id="qa-meetup">Plan a meetup</button>
@@ -281,6 +303,7 @@ async function dashboardView() {
       </div>
     </div>
     ${summary}
+    ${guideCardHTML()}
     <div class="dash-grid">
     <section class="card">
       <h2>Your network</h2>
@@ -326,24 +349,14 @@ async function dashboardView() {
         </div>`).join('') : '<p class="muted">No meetups planned yet. Plan one to get people together.</p>'}
     </section>
     </div>
-    ${peopleCard(graphContacts)}
-    <section class="card">
-      <h2>Recent activity</h2>
-      ${recent.length ? recent.map((r) => `
-        <div class="row">
-          <div><strong>${esc((r.contact && r.contact.name) || 'Someone')}</strong>
-            ${r.contact && r.contact.category ? `<span class="tag">${esc(catLabel(r.contact.category))}</span>` : ''}
-            <div class="muted">${esc((r.type || '').replace(/_/g, ' '))} · ${esc(fmtDate(r.occurred_at))}</div>
-            ${r.notes ? `<div class="muted">${esc(r.notes)}</div>` : ''}
-          </div>
-        </div>`).join('') : '<p class="muted">No activity recorded yet.</p>'}
-    </section>`;
+    ${peopleCard(graphContacts)}`;
 
   document.querySelectorAll('[data-person]').forEach((b) => { b.onclick = () => go('#/contacts/' + encodeURIComponent(b.dataset.person)); });
   el('qa-add').onclick = () => { sessionStorage.setItem('org_new_contact', '1'); go('#/contacts'); };
   el('qa-meetup').onclick = () => go('#/meetups');
   document.querySelectorAll('[data-jump]').forEach((b) => { b.onclick = () => el(b.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   wireCalendar();
+  wireGuideCard();
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
   document.querySelectorAll('[data-done]').forEach((b) => { b.onclick = () => markDoneForm(b); });
   document.querySelectorAll('[data-draft]').forEach((b) => {
@@ -945,17 +958,61 @@ const toRow = (c) => ({
 // Shown to new users before setup, and reachable any time from "Guide".
 
 const CAPABILITIES = [
-  ['1', 'Keep your people close', 'Add friends, colleagues and community. Group them as Personal, Professional or Community and set how often you want to check in.'],
-  ['2', 'See who needs you', 'Your dashboard shows a network map and a calendar. The closer someone is to the centre, the sooner a check-in is due.'],
-  ['3', 'Log check-ins', 'Note what happened after a coffee or a call. The next reminder is set for you, or you pick the date.'],
-  ['4', 'Plan meetups together', 'Create a meetup and share its room link. Guests add budget, area and free times, then vote on a shortlist of places. Nothing is ever sent for you.'],
-  ['5', 'Balance your attention', 'Set goals for Personal, Professional and Community, then compare them with where your time actually went.'],
+  ['💛', 'Keep your people close', 'Add friends, colleagues and community. Group them as Personal, Professional or Community and set how often you want to check in.'],
+  ['🧭', 'See who needs you', 'Your dashboard shows a network map and a calendar. The closer someone is to the centre, the sooner a check-in is due.'],
+  ['☕', 'Log check-ins', 'Note what happened after a coffee or a call. The next reminder is set for you, or you pick the date.'],
+  ['🎉', 'Plan meetups together', 'Create a meetup and share its room link. Guests add budget, area and free times, then vote on a shortlist of places. Nothing is ever sent for you.'],
+  ['⚖️', 'Balance your attention', 'Set goals for Personal, Professional and Community, then compare them with where your time actually went.'],
 ];
+
+
+// The friendly muop guide character (same face as the voice onboarding widget).
+const MUOP_CHAR = `
+  <svg class="vx-char" viewBox="0 0 96 96" role="img" aria-label="muop, your friendly guide">
+    <g class="vx-sat s1"><circle cx="80" cy="24" r="8" fill="#04C1E1" stroke="#2E1F14" stroke-width="2.4"/></g>
+    <g class="vx-sat s2"><circle cx="14" cy="30" r="6" fill="#75E4DE" stroke="#2E1F14" stroke-width="2.4"/></g>
+    <g class="vx-body">
+      <circle cx="48" cy="54" r="30" fill="#F6AC0D" stroke="#2E1F14" stroke-width="2.4"/>
+      <ellipse cx="36" cy="64" rx="5" ry="3.2" fill="#FFF3C4" opacity="0.7"/>
+      <ellipse cx="60" cy="64" rx="5" ry="3.2" fill="#FFF3C4" opacity="0.7"/>
+      <g class="vx-eyes"><circle cx="38" cy="50" r="3.4" fill="#2E1F14"/><circle cx="58" cy="50" r="3.4" fill="#2E1F14"/></g>
+      <path class="vx-smile" d="M38 61 Q48 70 58 61" fill="none" stroke="#2E1F14" stroke-width="2.6" stroke-linecap="round"/>
+    </g>
+  </svg>`;
+
+// Pretty, collapsible guide card on the first page. The collapse choice is remembered.
+function guideCardHTML() {
+  return `
+    <details class="card guide-card" id="guide-card" open>
+      <summary>
+        <span class="guide-char" aria-hidden="true">${MUOP_CHAR}</span>
+        <span class="guide-title">
+          <span class="eyebrow">Your muop guide</span>
+          <span class="guide-h">Five little things muop does for you</span>
+        </span>
+        <span class="guide-caret" aria-hidden="true">&#9662;</span>
+      </summary>
+      <ul class="cap-list pretty">
+        ${CAPABILITIES.map(([ic, t, d], i) => `<li class="cap-${i + 1}"><span class="cap-ic" aria-hidden="true">${ic}</span><div><strong>${esc(t)}</strong><div class="muted">${esc(d)}</div></div></li>`).join('')}
+      </ul>
+    </details>`;
+}
+
+function wireGuideCard() {
+  const gc = el('guide-card');
+  if (!gc) return;
+  try { gc.open = localStorage.getItem('org_guide_open') !== '0'; } catch { /* stays open */ }
+  gc.addEventListener('toggle', () => {
+    try { localStorage.setItem('org_guide_open', gc.open ? '1' : '0'); } catch { /* ignore */ }
+  });
+}
 
 function welcomeView(opts = {}) {
   const returning = !!opts.returning || localStorage.getItem('org_onboarded') === '1';
   el('app').innerHTML = `
-    <section class="card welcome">
+    <section class="card welcome ob-cute">
+      <div class="ob-deco" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+      <div class="welcome-char" aria-hidden="true">${MUOP_CHAR}</div>
       <p class="eyebrow">${returning ? 'Guide' : 'Welcome to muop'}</p>
       <h1>${returning ? 'What you can do with muop' : 'Stay close to the people who matter'}</h1>
       <p class="muted lede-lg">muop helps you remember to check in, and makes meeting up easy. Here is what you can do.</p>
@@ -1009,9 +1066,11 @@ function onboardingView() {
 
   function renderDone(added) {
     el('app').innerHTML = `
-      <section class="card welcome">
-        <p class="eyebrow">You are set</p>
-        <h1>${added.length} ${added.length === 1 ? 'person' : 'people'} added. What next?</h1>
+      <section class="card welcome ob-cute">
+        <div class="ob-deco" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+        <p class="ob-yay" aria-hidden="true">🎉 ⭐ 💛</p>
+        <p class="eyebrow">All set</p>
+        <h1>${added.length} ${added.length === 1 ? 'person' : 'people'} added - lovely! What next?</h1>
         <div class="next-grid">
           <button class="next-card" id="d-checkin"><strong>Log a check-in</strong><span class="muted">Record a recent catch-up with ${esc(added[0].name)}.</span></button>
           <button class="next-card" id="d-meetup"><strong>Plan a meetup</strong><span class="muted">Create a room link to share with friends.</span></button>
@@ -1061,17 +1120,18 @@ function onboardingView() {
     if (voice) voice.stop();
     step = 1;
     el('app').innerHTML = `
-      <section class="card">
-        <div class="step-dots">Step 1 of 2 · People</div>
-        <h1>Let's find your people</h1>
+      <section class="card ob-cute">
+        <div class="ob-deco" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+        <div class="step-dots step-pill">Step 1 of 2 · Your people 🌷</div>
+        <h1>Who do you want to stay close to?</h1>
         <div id="voice-mount"></div>
         <h2 class="ob-sub">Your people <span class="muted">(up to 5)</span></h2>
-        <p class="muted">Anyone I hear or you type appears here. Check and edit them. Nothing is saved until you finish setup.</p>
+        <p class="muted">Anyone I hear or you type appears here. Check them, fix them, make them yours. Nothing is saved until you finish setup.</p>
         <div id="ob-rows"></div>
         <p><button class="link-btn" id="ob-add">+ Add another</button></p>
         <p class="error" id="ob-error"></p>
         <div class="quick-actions">
-          <button class="primary" id="ob-next">Next: goals</button>
+          <button class="primary" id="ob-next">Next: your goals →</button>
           <button id="ob-skip">Skip for now</button>
         </div>
         <p><button class="link-btn" id="ob-welcome">← What can muop do?</button></p>
@@ -1123,10 +1183,11 @@ function onboardingView() {
 
   function renderStep2() {
     el('app').innerHTML = `
-      <section class="card">
-        <div class="step-dots">Step 2 of 2 · Goals</div>
-        <h1>How do you want to split your attention?</h1>
-        <p class="muted">Must total 100%.</p>
+      <section class="card ob-cute">
+        <div class="ob-deco" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+        <div class="step-dots step-pill">Step 2 of 2 · Your goals 🎈</div>
+        <h1>How do you want to share your time?</h1>
+        <p class="muted">Split 100% between the parts of your life. You can change this anytime from your Profile.</p>
         <div class="goals-grid">
           ${CATEGORIES.map((c) => `<label>${catLabel(c)} <input type="number" class="goal-input" data-cat="${c}" min="0" max="100" value="${goals[c] || 0}"></label>`).join('')}
         </div>
@@ -1134,7 +1195,7 @@ function onboardingView() {
         <p class="error" id="ob-error"></p>
         <div class="quick-actions">
           <button id="ob-back">Back</button>
-          <button class="primary" id="ob-confirm">Save and finish</button>
+          <button class="primary" id="ob-confirm">Save and finish 🎉</button>
           <button id="ob-skip">Skip for now</button>
         </div>
       </section>`;
@@ -1173,6 +1234,106 @@ function onboardingView() {
   }
 
   renderStep1();
+}
+
+
+// --- profile: your account, your goals, and the full activity log -----------
+
+async function profileView() {
+  const nav = navToken();
+  renderLoading('Loading your profile...');
+  let me = null, d = null, interactions = [];
+  try {
+    [me, d] = await Promise.all([api('/api/me'), api('/api/me/dashboard')]);
+    try {
+      const ri = await api('/api/me/interactions?limit=100');
+      interactions = ri.interactions || [];
+    } catch { interactions = []; }
+  } catch (e) { if (stale(nav)) return; return renderError(e, profileView); }
+  if (stale(nav)) return;
+
+  const u = (me && me.user) || {};
+  const counts = d.contact_counts || {};
+  const totalContacts = CATEGORIES.reduce((sum, c) => sum + (counts[c] || 0), 0);
+  const act = d.recorded_activity || { total: 0 };
+  const meetups = d.upcoming_meetups || [];
+  const goals = { personal: 50, professional: 30, community: 20, ...(d.goals || {}) };
+  const initial = (String(u.email || 'm').trim().charAt(0) || 'm').toUpperCase();
+  const CAT_META = { personal: ['#F6AC0D', '\u{1F49B}'], professional: ['#04C1E1', '\u{1F4BC}'], community: ['#3FAE9C', '\u{1F331}'] };
+
+  el('app').className = 'container';
+  el('app').innerHTML = `
+    <div class="page-head">
+      <div><h1>Profile</h1><p class="muted lede">Your account, your goals, and everything you have logged.</p></div>
+    </div>
+    <section class="card me-card">
+      <div class="me-head">
+        <span class="me-avatar" aria-hidden="true">${esc(initial)}</span>
+        <div>
+          <h2 class="me-name">${esc(u.email || 'muop member')}</h2>
+          ${u.created_at ? `<div class="muted">With muop since ${esc(fmtDay(u.created_at))}</div>` : ''}
+        </div>
+      </div>
+      <div class="me-grid">
+        <div class="me-item"><div class="me-num">${totalContacts}</div><div class="me-k">${totalContacts === 1 ? 'person' : 'people'}</div><div class="muted">${CATEGORIES.map((c) => `${catLabel(c)} ${counts[c] || 0}`).join(' · ')}</div></div>
+        <div class="me-item"><div class="me-num">${act.total || 0}</div><div class="me-k">check-ins logged</div><div class="muted">${esc(act.label || 'interactions on record')}</div></div>
+        <div class="me-item"><div class="me-num">${meetups.length}</div><div class="me-k">${meetups.length === 1 ? 'meetup planned' : 'meetups planned'}</div><div class="muted">open right now</div></div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Your goals</h2>
+      <p class="muted">How you want to split your attention.</p>
+      <div class="me-goal-bars">
+        ${CATEGORIES.map((c) => `
+          <div class="goal-bar"><strong>${CAT_META[c][1]} ${catLabel(c)}</strong> · ${goals[c] || 0}%
+            <div class="bar-track"><div class="bar-actual" style="width:${Math.min(100, Math.max(0, goals[c] || 0))}%; background:${CAT_META[c][0]}"></div></div>
+          </div>`).join('')}
+      </div>
+      <div class="quick-actions"><button id="me-edit-goals">Edit goals</button></div>
+      <div id="me-goals-form" class="hidden">
+        <div class="goals-grid">
+          ${CATEGORIES.map((c) => `<label>${catLabel(c)} <input type="number" class="me-goal-input" data-cat="${c}" min="0" max="100" value="${goals[c] || 0}"></label>`).join('')}
+        </div>
+        <p>Total: <strong id="me-goals-total">100</strong>% <span class="muted">(must be 100)</span></p>
+        <p class="error" id="me-goals-error"></p>
+        <div class="quick-actions">
+          <button class="primary" id="me-goals-save">Save goals</button>
+          <button id="me-goals-cancel">Cancel</button>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Activity log</h2>
+      <p class="muted">Everything you have logged, newest first.</p>
+      ${interactions.length ? `<ol class="timeline me-log">${interactions.map((i) => `
+        <li><span class="tl-dot"></span>
+          <strong>${esc((i.contact && i.contact.name) || 'Someone')}</strong>
+          ${i.contact && i.contact.category ? `<span class="tag">${esc(catLabel(i.contact.category))}</span>` : ''}
+          <div class="muted">${esc(String(i.type || '').replace(/_/g, ' '))} · ${esc(fmtDate(i.occurred_at))}</div>
+          ${i.notes ? `<div class="notes muted">${esc(i.notes)}</div>` : ''}
+        </li>`).join('')}</ol>`
+      : '<p class="muted">Nothing logged yet. Log a check-in from a contact page or the dashboard.</p>'}
+    </section>`;
+
+  el('me-edit-goals').onclick = () => { el('me-goals-form').classList.remove('hidden'); el('me-edit-goals').classList.add('hidden'); };
+  el('me-goals-cancel').onclick = () => { el('me-goals-form').classList.add('hidden'); el('me-edit-goals').classList.remove('hidden'); };
+  const inputs = [...document.querySelectorAll('.me-goal-input')];
+  const total = () => inputs.reduce((sum, i) => sum + (parseInt(i.value, 10) || 0), 0);
+  inputs.forEach((i) => { i.oninput = () => { el('me-goals-total').textContent = total(); }; });
+  el('me-goals-save').onclick = async () => {
+    el('me-goals-error').textContent = '';
+    if (total() !== 100) { el('me-goals-error').textContent = 'Goals must total 100% - currently ' + total() + '%.'; return; }
+    el('me-goals-save').disabled = true;
+    try {
+      const body = Object.fromEntries(inputs.map((i) => [i.dataset.cat, parseInt(i.value, 10) || 0]));
+      await api('/api/me/goals', { method: 'PUT', body: JSON.stringify(body) });
+      flash('Goals saved.');
+      profileView();
+    } catch (e) {
+      el('me-goals-save').disabled = false;
+      el('me-goals-error').textContent = e.message;
+    }
+  };
 }
 
 // --- boot ------------------------------------------------------------------------

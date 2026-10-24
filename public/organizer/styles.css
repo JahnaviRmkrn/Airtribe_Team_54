@@ -329,4 +329,80 @@ a.button:hover { border-color: #75e4de; }
   .row:not(.spread) { flex-wrap: wrap; }
   .row .actions { flex-shrink: 1; max-width: 100%; }
   .row:not(.spread) .actions { width: 100%; }
+/* --- guide card on the dashboard first page ------------------------------- */
+.guide-card {
+  background: linear-gradient(135deg, rgba(246, 172, 13, 0.14), rgba(117, 228, 222, 0.16) 55%, rgba(214, 235, 179, 0.28));
+  border: 1px solid #f0e2c4;
+  margin-top: 16px;
 }
+.guide-card summary { display: flex; align-items: center; gap: 14px; cursor: pointer; list-style: none; }
+.guide-card summary::-webkit-details-marker { display: none; }
+.guide-char { flex: none; display: inline-flex; }
+.guide-char .vx-char { width: 60px; height: 60px; }
+.guide-title { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.guide-h { font: 500 21px "Newsreader", Georgia, serif; }
+.guide-caret { color: #a0814f; font-size: 13px; transition: transform 0.15s ease; }
+.guide-card[open] .guide-caret { transform: rotate(180deg); }
+.guide-card .cap-list { margin: 14px 0 2px; }
+.cap-list.pretty { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.cap-list.pretty .cap-ic { font-size: 19px; }
+.cap-1 .cap-ic { background: rgba(246, 172, 13, 0.30); }
+.cap-2 .cap-ic { background: rgba(4, 193, 225, 0.20); }
+.cap-3 .cap-ic { background: rgba(117, 228, 222, 0.40); }
+.cap-4 .cap-ic { background: rgba(214, 235, 179, 0.70); }
+.cap-5 .cap-ic { background: rgba(243, 232, 3, 0.30); }
+
+/* --- profile: your details + activity log --------------------------------- */
+.me-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+.me-avatar {
+  width: 62px; height: 62px; border-radius: 50%; flex: none;
+  background: linear-gradient(135deg, #f6ac0d, #f3c94a);
+  color: #3b2a1a; display: grid; place-items: center;
+  font: 600 27px "Newsreader", Georgia, serif;
+  border: 2px solid rgba(46, 31, 20, 0.15);
+}
+.me-name { margin: 0 0 2px; font-size: 22px; word-break: break-all; }
+.me-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.me-item { background: rgba(255, 255, 255, 0.75); border: 1px solid #efe6d4; border-radius: 14px; padding: 12px 14px; }
+.me-num { font: 600 26px "Newsreader", Georgia, serif; }
+.me-k { font-size: 13px; font-weight: 600; }
+.me-goal-bars { margin-bottom: 12px; }
+.me-goal-bars .bar-actual { display: block; height: 100%; border-radius: 999px; }
+.me-log { margin-top: 8px; }
+
+/* --- cute onboarding + welcome -------------------------------------------- */
+.ob-cute {
+  position: relative; overflow: hidden;
+  background: linear-gradient(165deg, #fffdf8 30%, rgba(214, 235, 179, 0.30));
+  border-color: #f0e2c4;
+}
+.ob-cute > *:not(.ob-deco) { position: relative; }
+.ob-deco span { position: absolute; border-radius: 50%; pointer-events: none; }
+.ob-deco .b1 { width: 92px; height: 92px; background: #75e4de; opacity: 0.32; top: -32px; right: -22px; }
+.ob-deco .b2 { width: 54px; height: 54px; background: #f6ac0d; opacity: 0.22; top: 44px; right: 56px; }
+.ob-deco .b3 { width: 42px; height: 42px; background: #f3e803; opacity: 0.28; bottom: -16px; left: -12px; }
+.step-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(4, 193, 225, 0.13); border: 1px solid rgba(4, 193, 225, 0.32);
+  color: #0b7285; border-radius: 999px; padding: 5px 14px; font-weight: 600;
+}
+.ob-cute h1 { margin: 10px 0 6px; }
+.ob-yay { font-size: 26px; letter-spacing: 8px; margin: 0 0 4px; }
+.welcome-char { display: inline-flex; margin-bottom: 6px; }
+.welcome-char .vx-char { width: 74px; height: 74px; }
+
+/* Keep the floating voice button from ever resting on content: on phones the
+   page gets extra bottom room so every control can scroll fully clear of it. */
+@media (max-width: 640px) {
+  .container { padding-bottom: 116px; }
+}
+
+/* --- topbar back button ---------------------------------------------------- */
+.nav-back {
+  width: 34px; height: 34px; border-radius: 50%;
+  display: inline-grid; place-items: center;
+  padding: 0; margin-right: 10px; font-size: 17px; line-height: 1;
+  border: 1px solid #e5dcc8; background: rgba(255, 255, 255, 0.85);
+}
+.nav-back:hover:not(:disabled) { border-color: #f6ac0d; background: rgba(246, 172, 13, 0.18); }
+.topbar-left { display: inline-flex; align-items: center; }
