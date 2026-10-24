@@ -50,6 +50,9 @@ async function api(path, opts = {}) {
 
 // --- routing -------------------------------------------------------------
 
+// Every new view invalidates outstanding reads from previous navigation.
+let viewVersion = 0;
+
 function go(hash) { location.hash = hash; }
 
 function route() {
@@ -70,7 +73,9 @@ function route() {
 }
 
 function renderLoading(msg) {
+  const version = ++viewVersion;
   el('app').innerHTML = '<div class="card state-box"><span class="spinner"></span><p class="muted">' + esc(msg || 'Loading...') + '</p></div>';
+  return version;
 }
 
 function renderError(err, retry) {
@@ -106,11 +111,12 @@ const roomUrl = (token) => location.origin + '/m/' + token;
 // --- dashboard -----------------------------------------------------------
 
 async function dashboardView() {
-  renderLoading('Loading your dashboard...');
+  const version = renderLoading('Loading your dashboard...');
   let d;
   try {
     d = await api('/api/me/dashboard');
-  } catch (e) { return renderError(e, dashboardView); }
+  } catch (e) { if (version === viewVersion) renderError(e, dashboardView); return; }
+  if (version !== viewVersion) return;
 
   const counts = d.contact_counts || {};
   const totalContacts = CATEGORIES.reduce((s, c) => s + (counts[c] || 0), 0);
@@ -254,13 +260,14 @@ function markDoneForm(btn) {
 // --- contacts --------------------------------------------------------------
 
 async function contactsView() {
-  renderLoading('Loading contacts...');
+  const version = renderLoading('Loading contacts...');
   const filter = sessionStorage.getItem('org_filter') || '';
   let contacts;
   try {
     const r = await api('/api/me/contacts' + (filter ? '?category=' + encodeURIComponent(filter) : ''));
     contacts = Array.isArray(r) ? r : (r.contacts || []);
-  } catch (e) { return renderError(e, contactsView); }
+  } catch (e) { if (version === viewVersion) renderError(e, contactsView); return; }
+  if (version !== viewVersion) return;
 
   el('app').innerHTML = `
     <h1>Contacts</h1>
@@ -334,13 +341,14 @@ function contactRow(c) {
 // --- contact detail: profile + history, edit, delete ------------------------
 
 async function contactDetailView(id) {
-  renderLoading('Loading contact...');
+  const version = renderLoading('Loading contact...');
   let contact, interactions;
   try {
     const r = await api('/api/me/contacts/' + encodeURIComponent(id));
     contact = r.contact || r;
     interactions = r.interactions || [];
-  } catch (e) { return renderError(e, () => contactDetailView(id)); }
+  } catch (e) { if (version === viewVersion) renderError(e, () => contactDetailView(id)); return; }
+  if (version !== viewVersion) return;
 
   el('app').innerHTML = `
     <p><button class="link-btn" id="back">← All contacts</button></p>
@@ -448,12 +456,13 @@ function editContactForm(id, c) {
 // --- meetups -----------------------------------------------------------------
 
 async function meetupsView(created) {
-  renderLoading('Loading meetups...');
+  const version = renderLoading('Loading meetups...');
   let meetups;
   try {
     const r = await api('/api/me/meetups');
     meetups = Array.isArray(r) ? r : (r.meetups || []);
-  } catch (e) { return renderError(e, () => meetupsView()); }
+  } catch (e) { if (version === viewVersion) renderError(e, () => meetupsView()); return; }
+  if (version !== viewVersion) return;
 
   el('app').innerHTML = `
     <h1>Meetups</h1>
@@ -574,6 +583,7 @@ const toRow = (c) => ({
 });
 
 function onboardingView() {
+  ++viewVersion;
   const p = prefill();
   const rows = (p.contacts && p.contacts.length ? p.contacts.slice(0, 5) : [emptyRow()]).map(toRow);
   const goals = { personal: 50, professional: 30, community: 20, ...(p.goals || {}) };

@@ -125,3 +125,41 @@ describe('onboarding retries', () => {
     expect(context.location.hash).toBe('#/dashboard');
   });
 });
+
+describe('organizer navigation races', () => {
+  it.each([
+    ['dashboardView()', { is_empty: false }],
+    ['contactsView()', { contacts: [] }],
+    ["contactDetailView('alice')", { contact: { name: 'Alice' }, interactions: [] }],
+    ['meetupsView()', { meetups: [{ title: 'Stale meetup' }] }],
+  ])('ignores an old %s result after a newer view loads', async (view, result) => {
+    let resolve;
+    let request = 0;
+    const pending = new Promise((done) => { resolve = done; });
+    const { context, document } = organizer({
+      sessionStorage: { getItem: () => null },
+      fetch: async () => (++request === 1 ? pending : { ok: true, status: 200, json: async () => ({ meetups: [] }) }),
+    });
+    const stale = vm.runInContext(view, context);
+    await vm.runInContext('meetupsView()', context);
+    const latest = document.getElementById('app').innerHTML;
+    resolve({ ok: true, status: 200, json: async () => result });
+    await stale;
+    expect(document.getElementById('app').innerHTML).toBe(latest);
+  });
+
+  it('does not replace a newer view with an old request error', async () => {
+    let reject;
+    let request = 0;
+    const pending = new Promise((_done, fail) => { reject = fail; });
+    const { context, document } = organizer({
+      fetch: async () => (++request === 1 ? pending : { ok: true, status: 200, json: async () => ({ meetups: [] }) }),
+    });
+    const stale = vm.runInContext('dashboardView()', context);
+    await vm.runInContext('meetupsView()', context);
+    const latest = document.getElementById('app').innerHTML;
+    reject(new Error('Old request failed'));
+    await stale;
+    expect(document.getElementById('app').innerHTML).toBe(latest);
+  });
+});
