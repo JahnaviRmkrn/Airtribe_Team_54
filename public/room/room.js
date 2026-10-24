@@ -515,6 +515,9 @@ $('share-btn').onclick = async () => {
   }
 };
 
+// For the room voice helper (room-voice.js): read the view, call the room API, re-render.
+window.Room = { token: TOKEN, view: () => view, send, refresh, tallySlots, SLOTS };
+
 if (!TOKEN) {
   renderMissing();
 } else {
