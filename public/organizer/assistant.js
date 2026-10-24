@@ -83,7 +83,13 @@
         title: S('Short title, e.g. "Saturday brunch"'), activity: S('dinner, coffee, brunch, drinks, hike, movie...'),
         area: S('Neighbourhood or area (optional)'), starts_at: S('Date/time in ISO 8601 with offset (optional)'),
         budget: N('Budget per person in rupees (optional)'),
+        notes: S('Private planning notes for the organiser, e.g. "Meera is vegetarian" (optional)'),
       }, ['title']),
+    },
+    {
+      name: 'get_meeting_point',
+      description: 'For a meetup, get the fair middle point between where guests are coming from, how far the longest trip is, and the top venues ranked for everyone.',
+      parameters: obj({ title: S('Meetup title') }, ['title']),
     },
     { name: 'copy_meetup_link', description: 'Copy a meetup\'s room link to the clipboard.', parameters: obj({ title: S('Meetup title') }, ['title']) },
     {
@@ -293,8 +299,9 @@
       };
     },
 
-    async create_meetup({ title, activity, area, starts_at, budget }) {
+    async create_meetup({ title, activity, area, starts_at, budget, notes }) {
       const body = { title };
+      if (notes) body.notes = clip(notes, 2000);
       if (activity) body.activity = clip(activity, 40);
       if (area) body.area = area;
       if (starts_at && !Number.isNaN(Date.parse(starts_at))) body.starts_at = new Date(starts_at).toISOString();
@@ -303,6 +310,17 @@
       const m = r.meetup || r;
       if (pageName() === 'meetups') refresh(); else location.hash = '#/meetups';
       return { ok: true, title: m.title, link: m.room_token ? location.origin + '/m/' + m.room_token : null };
+    },
+
+    async get_meeting_point({ title }) {
+      const all = list(await api('/api/me/meetups'), 'meetups');
+      const m = all.find((x) => norm(x.title) === norm(title)) || all.find((x) => norm(x.title).includes(norm(title)));
+      if (!m || !m.room_token) return { error: `No meetup called "${title}".` };
+      const room = await api('/api/rooms/' + encodeURIComponent(m.room_token));
+      const mp = room.meeting_point || {};
+      const top = (room.shortlist || []).slice(0, 3).map((s) => ({ venue: s.venue && s.venue.name, area: s.venue && s.venue.area, why: (s.reasons || []).slice(0, 2), longest_trip_km: s.travel ? s.travel.max_km : undefined }));
+      if (!mp.near) return { meetup: m.title, people_sharing_location: mp.people || 0, note: 'Fewer than two guests have shared where they are coming from yet.', top_venues: top };
+      return { meetup: m.title, middle_near: mp.near, people_sharing_location: mp.people, longest_trip_km: mp.max_km, average_trip_km: mp.avg_km, top_venues: top };
     },
 
     async copy_meetup_link({ title }) {
