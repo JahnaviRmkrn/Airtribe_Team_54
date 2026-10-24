@@ -2,9 +2,10 @@ import 'server-only';
 import { clean, EXTRACT_PROMPT, llmOutput, ruleExtract, type ExtractResult } from './extract';
 
 // Calls the first configured LLM provider - DeepSeek (DEEPSEEK_API_KEY), then
-// Gemini (GEMINI_API_KEY), then OpenAI (OPENAI_API_KEY) - and on any failure
-// tries the next one, ending with the rule-based parser, so onboarding never
-// dead-ends. Keys are server-only and never reach the browser.
+// Gemini (GEMINI_API_KEY), then OpenAI (OPENAI_API_KEY; OPENAI_BASE_URL points
+// it at any OpenAI-compatible API) - and on any failure tries the next one,
+// ending with the rule-based parser, so onboarding never dead-ends.
+// Keys are server-only and never reach the browser.
 
 const TIMEOUT_MS = 20_000;
 
@@ -51,8 +52,9 @@ async function gemini(text: string, key: string): Promise<string> {
 }
 
 async function openai(text: string, key: string): Promise<string> {
+  const base = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
   const data = await postJson(
-    'https://api.openai.com/v1/chat/completions',
+    `${base}/chat/completions`,
     {
       model: process.env.EXTRACT_MODEL || 'gpt-4o-mini',
       temperature: 0,
