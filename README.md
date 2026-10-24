@@ -96,49 +96,47 @@ not joined), 403, 404 (unknown or expired room), 409, 410 (room closed).
 
 ---
 
-## Organizer app prototype (Person B, FastAPI + mock API)
+## Organizer app (Person B)
 
-This is the original prototype from `main`. It still runs against its own mock;
-it is being moved onto the API above (see the organizer integration spec).
-
-Person B deliverable: the Organizer app frontend, plus a FastAPI backend that
-mocks Person A's API until the real one is ready.
+The Organizer frontend lives in `public/organizer/` (`index.html`, `app.js`,
+`styles.css`) and is served by Next.js at `/organizer/`. It talks only to the
+real API above - same-origin `fetch('/api/me/...')` with
+`credentials: 'include'`; the Supabase cookie session does the auth. The old
+FastAPI prototype and its mock (`main.py`, `routers/`) are gone.
 
 ### Run
 
-```bash
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --reload
-```
-
-Open http://127.0.0.1:8000 - API docs at http://127.0.0.1:8000/docs
-Requires Python 3.10+.
+Run the Next.js app as above (`pnpm dev`), sign in at `/login`, then open
+http://localhost:3000/organizer/ . Any 401 from `/api/me/*` redirects to
+`/login?next=/organizer/`.
 
 ### What it does
 
-- **Login** - mock sign-in with any email.
-- **Onboarding** - editable confirm screen (name/email) with a text-input
-  fallback, and attention goals that must total 100%.
-- **Dashboard** - contact counts labeled separately from recorded activity,
-  open follow-ups, upcoming meetups, and "Add person" / "Plan a meetup"
-  quick actions.
-- **Contacts** - add / edit / delete with a category filter.
-- **Follow-ups** - mark done with a note.
-- **Meetups** - create a meetup and get a copyable room link.
-- Nothing is ever sent automatically - every action is an explicit tap.
-- State persists (server: `data/store.json`, client: localStorage), so
-  everything works after a page refresh. Responsive on phone and desktop.
-
-### Swapping in A's real API
-
-The frontend only talks to `/api/*`. `routers/api.py` is the mock; replace it
-with a proxy to A's real base URL when it is ready - no frontend changes
-needed.
-
-### Layout
-
-- `main.py` - app entrypoint; serves the frontend and mounts `/api`
-- `routers/api.py` - mock of Person A's API (auth, goals, contacts, follow-ups, meetups, activity)
-- `static/` - frontend (`index.html`, `app.js`, `styles.css`)
+- **Login** - Person A's `/login` (magic link or email + password). No token
+  handling in the frontend.
+- **Onboarding** - two-step editable confirm screen: up to 5 people (name,
+  category, interests, check-in frequency) plus "Add another", then goals for
+  Personal / Professional / Community with a live total that must equal 100.
+  Nothing is saved before Confirm, which calls `POST /api/me/contacts` with
+  `{ contacts: [...] }` and `PUT /api/me/goals`. Skip is allowed at any point.
+  Person C's voice extraction can pre-fill the screen by setting
+  `window.ORGANIZER_PREFILL` or sessionStorage `org_prefill` to
+  `{ contacts: [...], goals: {...} }` before the page loads.
+- **Dashboard** - one `GET /api/me/dashboard`. Contact counts and recorded
+  activity are shown as separately labelled numbers (the activity caption is
+  `recorded_activity.label`); a goals-vs-activity comparison appears only when
+  `recorded_activity.sufficient_data` is true. `is_empty` shows an empty state
+  with "Add person" and "Plan a meetup".
+- **Contacts** - list/filter (`?category=`), add (interests as comma-separated,
+  check-in frequency, next follow-up date), profile + interaction history,
+  edit via PATCH with only changed fields, delete.
+- **Follow-ups** - a follow-up is a contact's `next_followup_at`. Mark done
+  posts `/api/me/interactions` with a note; leaving the next date blank lets
+  the server roll it forward by the contact's check-in frequency.
+- **Meetups** - create (title, activity, area, optional date/time and budget
+  in INR - no contact picker; guests join via the link), then Copy link / Copy
+  invite text. The room page `/m/<token>` is Person C's; the app only links to
+  it. Meetups can be closed via PATCH `{ status: "closed" }`.
+- Errors render the API's `{ "error": "message" }`; every list has loading,
+  empty and error states; everything survives a refresh and works at phone and
+  desktop widths.
