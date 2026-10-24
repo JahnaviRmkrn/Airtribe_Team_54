@@ -40,7 +40,7 @@ async function deepseek(text: string, key: string): Promise<string> {
 }
 
 async function gemini(text: string, key: string): Promise<string> {
-  const model = encodeURIComponent(process.env.EXTRACT_MODEL || 'gemini-2.0-flash');
+  const model = encodeURIComponent(process.env.GEMINI_MODEL || 'gemini-3.8-flash');
   // Key goes in a header, not the query string, so it never lands in URL logs.
   const data = await postJson(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,

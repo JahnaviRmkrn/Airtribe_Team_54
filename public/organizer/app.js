@@ -63,6 +63,7 @@ const stale = (token) => token !== navGen;
 
 function route() {
   navGen++;
+  window.OrganizerOnboarding = null;
   el('nav').classList.remove('hidden');
   const hash = location.hash || '#/dashboard';
   document.querySelectorAll('[data-nav]').forEach((a) => {
@@ -767,6 +768,9 @@ function onboardingView() {
     if (merged.length >= 5 && kept.length + added.length > 5) {
       el('ob-error').textContent = 'Only the first 5 people were kept - you can add more from Contacts later.';
     }
+    // "That's everyone, save it": move on to the goals step. Saving still needs
+    // the explicit Confirm there, so a misheard command can't write anything.
+    if (res.action === 'confirm' && merged.some((r) => r.name)) el('ob-next').click();
   }
 
   function renderStep1() {
@@ -788,6 +792,8 @@ function onboardingView() {
       </section>`;
     renderRows();
     voice = window.Voice ? window.Voice.mount(el('voice-mount'), applyExtraction) : null;
+    // Lets the voice assistant (assistant.js) fill this form and move on.
+    window.OrganizerOnboarding = { apply: applyExtraction };
     el('ob-add').onclick = () => {
       if (rows.length >= 5) { el('ob-error').textContent = 'Up to 5 people for now - you can add more from Contacts later.'; return; }
       collectRows();
