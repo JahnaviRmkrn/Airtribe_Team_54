@@ -134,7 +134,9 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
       guestName: guest?.guest_name ?? 'Guest',
     });
   } catch (e) {
-    await db.from('meetup_payments').update({ status: 'failed' }).eq('id', row.id).is('pine_order_id', null);
+    await db.from('meetup_payments').update({ status: 'failed' })
+      .eq('id', row.id).eq('updated_at', row.updated_at)
+      .eq('status', 'pending').is('pine_order_id', null);
     throw e;
   }
 
@@ -142,8 +144,16 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
     .from('meetup_payments')
     .update({ pine_order_id: order.orderId, redirect_url: order.redirectUrl })
     .eq('id', row.id)
+    .eq('updated_at', row.updated_at)
+    .eq('status', 'pending')
+    .is('pine_order_id', null)
     .select(cols)
-    .single();
-  if (error || !saved) throw new HttpError(500, 'Could not save payment');
+    .maybeSingle();
+  if (error) throw new HttpError(503, 'Could not save payment, please retry');
+  if (!saved) {
+    // A newer request owns the row. Never expose or store this stale checkout.
+    await cancelOrder(order.orderId);
+    throw new HttpError(409, 'A newer payment attempt exists, please retry');
+  }
   return ok({ payment: view(saved as PaymentRow) }, 201);
 });
