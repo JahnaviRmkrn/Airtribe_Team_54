@@ -234,6 +234,8 @@ export default function LoginPage() {
     location.href = next;
   }
 
+  // Recovery link lands on /reset-password (via the auth callback's code
+  // exchange) so the user sets a new password instead of being signed in directly.
   async function forgotPassword() {
     if (!email) {
       setIsError(true);
@@ -243,7 +245,7 @@ export default function LoginPage() {
     setMsg('');
     setIsError(false);
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent('/reset-password')}`,
     });
     setBusy(null);
     setIsError(!!error);
