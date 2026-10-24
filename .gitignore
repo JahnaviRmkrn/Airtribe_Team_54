@@ -50,3 +50,6 @@ venv/
 .pytest_cache/
 .mypy_cache/
 data/store.json
+
+# TLC model checker scratch
+spec/states/
