@@ -63,6 +63,7 @@ const stale = (token) => token !== navGen;
 
 function route() {
   navGen++;
+  window.OrganizerOnboarding = null;
   el('nav').classList.remove('hidden');
   const hash = location.hash || '#/dashboard';
   document.querySelectorAll('[data-nav]').forEach((a) => {
@@ -791,6 +792,8 @@ function onboardingView() {
       </section>`;
     renderRows();
     voice = window.Voice ? window.Voice.mount(el('voice-mount'), applyExtraction) : null;
+    // Lets the voice assistant (assistant.js) fill this form and move on.
+    window.OrganizerOnboarding = { apply: applyExtraction };
     el('ob-add').onclick = () => {
       if (rows.length >= 5) { el('ob-error').textContent = 'Up to 5 people for now - you can add more from Contacts later.'; return; }
       collectRows();
