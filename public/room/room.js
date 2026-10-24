@@ -52,6 +52,7 @@ async function api(path = '', opts = {}) {
   if (!res.ok) {
     throw Object.assign(new Error(data.error || STATUS_MESSAGES[res.status] || 'Request failed (' + res.status + ')'), { status: res.status });
   }
+  if (res.status === 201 && opts.method === 'POST' && path === '/join') window.team54Track?.('guest_joined');
   return data;
 }
 const send = (method, path, body) => api(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });

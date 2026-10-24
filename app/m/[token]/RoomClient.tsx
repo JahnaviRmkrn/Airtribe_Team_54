@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import './room.css';
+import { track } from '@vercel/analytics';
 
 // Shapes mirror the public room API (see README "Public room API").
 type Preferences = {
@@ -249,6 +250,7 @@ export default function RoomClient() {
         guest_secret: string;
         room: RoomView;
       };
+      track('guest_joined');
       localStorage.setItem(secretKey, data.guest_secret);
       setView(data.room);
       showNotice(`You’re in, ${form.guest_name.trim()}! Scroll down to vote for a place.`);
