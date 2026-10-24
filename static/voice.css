@@ -44,14 +44,36 @@
 @keyframes vx-ripple { 0% { transform: scale(1); opacity: 0.7; } 100% { transform: scale(1.75); opacity: 0; } }
 @keyframes vx-breathe { 50% { transform: scale(0.92); opacity: 0.75; } }
 
-.vx-end {
+.vx-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vx-clear {
+  background: hsl(250 25% 20% / 0.7);
+  border: 1px solid var(--line, hsl(250 30% 80% / 0.18));
+  color: var(--muted, hsl(245 12% 75%));
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.vx-clear:hover {
+  background: hsl(250 25% 26% / 0.9);
+  color: #fff;
+  border-color: var(--line-strong, hsl(250 30% 80% / 0.35));
+}
+.vx-end {
   background: hsl(330 90% 66% / 0.15);
   border: 1px solid hsl(330 90% 66% / 0.5);
   color: hsl(330 100% 85%);
   font-weight: 600;
   padding: 8px 14px;
   border-radius: 10px;
+  cursor: pointer;
 }
 .vx-log {
   margin-top: 16px;

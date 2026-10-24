@@ -1,98 +1,104 @@
+"use strict";
 // Moup App - Client Controller (TypeScript)
 // Handles routing, auth, real-time onboarding form hydration, contacts, and meetup coordination.
-const state = {
-    get token() {
-        return localStorage.getItem('org_token');
-    },
-    set token(v) {
-        if (v)
-            localStorage.setItem('org_token', v);
-        else
-            localStorage.removeItem('org_token');
-    },
-    get email() {
-        return localStorage.getItem('org_email') || '';
-    },
-    set email(v) {
-        localStorage.setItem('org_email', v);
-    },
-    get onboarded() {
-        return localStorage.getItem('org_onboarded') === '1';
-    },
-    set onboarded(v) {
-        localStorage.setItem('org_onboarded', v ? '1' : '0');
-    },
-};
-const CATEGORIES = ['Family', 'Friends', 'Work', 'Mentors'];
-async function api(path, opts = {}) {
-    const res = await fetch('/api' + path, {
-        headers: { 'Content-Type': 'application/json' },
-        ...opts,
-    });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || res.statusText);
-    }
-    return res.json();
-}
-const el = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] || c));
-function go(hash) {
-    location.hash = hash;
-}
-async function quickLogin(email = 'alex@example.com') {
-    const r = await api('/login', {
-        method: 'POST',
-        body: JSON.stringify({ email }),
-    });
-    state.token = r.token;
-    state.email = r.email;
-    go(state.onboarded ? '#/dashboard' : '#/onboarding');
-}
-function route() {
-    const isAuth = !!state.token;
-    const navPub = el('nav-public');
-    const navAuth = el('nav-auth');
-    if (navPub)
-        navPub.classList.toggle('hidden', isAuth);
-    if (navAuth)
-        navAuth.classList.toggle('hidden', !isAuth);
-    const hash = location.hash || '#/';
-    // Public unauthenticated routes
-    if (!isAuth) {
-        if (hash === '#/login')
-            return loginView();
-        return landingView();
-    }
-    // Authenticated state machine
-    if (!state.onboarded && hash !== '#/onboarding')
-        return go('#/onboarding');
-    if (state.onboarded &&
-        (hash === '#/' ||
-            hash === '#/login' ||
-            hash === '#/onboarding' ||
-            hash === '#/features' ||
-            hash === '#/how-it-works')) {
-        return go('#/dashboard');
-    }
-    // Update active state in nav
-    ['#nav-dash', '#nav-contacts', '#nav-meetups'].forEach((sel) => {
-        const a = el(sel.replace('#', ''));
-        if (a)
-            a.classList.toggle('active', a.getAttribute('href') === hash);
-    });
-    const views = {
-        '#/onboarding': onboardingView,
-        '#/dashboard': dashboardView,
-        '#/contacts': contactsView,
-        '#/meetups': meetupsView,
+(() => {
+    const state = {
+        get token() {
+            return localStorage.getItem('org_token');
+        },
+        set token(v) {
+            if (v)
+                localStorage.setItem('org_token', v);
+            else
+                localStorage.removeItem('org_token');
+        },
+        get email() {
+            return localStorage.getItem('org_email') || '';
+        },
+        set email(v) {
+            localStorage.setItem('org_email', v);
+        },
+        get onboarded() {
+            return localStorage.getItem('org_onboarded') === '1';
+        },
+        set onboarded(v) {
+            localStorage.setItem('org_onboarded', v ? '1' : '0');
+        },
     };
-    (views[hash] || dashboardView)();
-}
-// --- landing page ----------------------------------------------------
-function landingView() {
-    el('app').className = 'container wide';
-    el('app').innerHTML = `
+    const CATEGORIES = ['Family', 'Friends', 'Work', 'Mentors'];
+    async function api(path, opts = {}) {
+        const res = await fetch('/api' + path, {
+            headers: { 'Content-Type': 'application/json' },
+            ...opts,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || res.statusText);
+        }
+        return res.json();
+    }
+    const el = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] || c));
+    function go(hash) {
+        location.hash = hash;
+    }
+    async function quickLogin(email = 'alex@example.com') {
+        const r = await api('/login', {
+            method: 'POST',
+            body: JSON.stringify({ email }),
+        });
+        state.token = r.token;
+        state.email = r.email;
+        go(state.onboarded ? '#/dashboard' : '#/onboarding');
+    }
+    function route() {
+        const isAuth = !!state.token;
+        const navPub = el('nav-public');
+        const navAuth = el('nav-auth');
+        if (navPub)
+            navPub.classList.toggle('hidden', isAuth);
+        if (navAuth)
+            navAuth.classList.toggle('hidden', !isAuth);
+        const hash = location.hash || '#/';
+        // Public unauthenticated routes
+        if (!isAuth) {
+            if (hash === '#/login')
+                return loginView();
+            if (hash === '#/onboarding') {
+                state.token = 'demo_token';
+                state.email = state.email || 'alex@example.com';
+                return onboardingView();
+            }
+            return landingView();
+        }
+        // Authenticated state machine
+        if (!state.onboarded && hash !== '#/onboarding')
+            return go('#/onboarding');
+        if (state.onboarded &&
+            (hash === '#/' ||
+                hash === '#/login' ||
+                hash === '#/features' ||
+                hash === '#/how-it-works')) {
+            return go('#/dashboard');
+        }
+        // Update active state in nav
+        ['#nav-dash', '#nav-contacts', '#nav-meetups'].forEach((sel) => {
+            const a = el(sel.replace('#', ''));
+            if (a)
+                a.classList.toggle('active', a.getAttribute('href') === hash);
+        });
+        const views = {
+            '#/onboarding': onboardingView,
+            '#/dashboard': dashboardView,
+            '#/contacts': contactsView,
+            '#/meetups': meetupsView,
+        };
+        (views[hash] || dashboardView)();
+    }
+    // --- landing page ----------------------------------------------------
+    function landingView() {
+        el('app').className = 'container wide';
+        el('app').innerHTML = `
     <section class="landing-hero">
       <span class="pill accent">⚡ AI Builders Day · Team 54</span>
       <h1>Stay close to the people who actually matter.</h1>
@@ -157,15 +163,15 @@ function landingView() {
     <footer class="landing-footer">
       <p>Built with ❤️ by Team 54 for AI Builders Day · Voice, Meetups, and Relational CRM</p>
     </footer>`;
-    el('hero-demo-btn').onclick = () => quickLogin('demo@team54.app');
-    el('hero-signin-btn').onclick = () => go('#/login');
-    el('showcase-try-btn').onclick = () => quickLogin('alex@team54.app');
-    el('footer-demo-btn').onclick = () => quickLogin('demo@team54.app');
-}
-// --- login -----------------------------------------------------------
-function loginView() {
-    el('app').className = 'container';
-    el('app').innerHTML = `
+        el('hero-demo-btn').onclick = () => quickLogin('demo@team54.app');
+        el('hero-signin-btn').onclick = () => go('#/login');
+        el('showcase-try-btn').onclick = () => quickLogin('alex@team54.app');
+        el('footer-demo-btn').onclick = () => quickLogin('demo@team54.app');
+    }
+    // --- login -----------------------------------------------------------
+    function loginView() {
+        el('app').className = 'container';
+        el('app').innerHTML = `
     <section class="card narrow">
       <h1>Sign in</h1>
       <p class="muted">Enter your email to sign in or access your workspace.</p>
@@ -182,17 +188,17 @@ function loginView() {
       <button class="btn ghost" id="login-quick-demo" type="button" style="width:100%;">⚡ One-Click Instant Demo</button>
       <p class="muted" style="text-align:center; margin-top:14px;">Demo mode enabled — no password needed.</p>
     </section>`;
-    el('login-form').onsubmit = async (e) => {
-        e.preventDefault();
-        await quickLogin(el('login-email').value);
-    };
-    el('login-quick-demo').onclick = () => quickLogin('demo@team54.app');
-}
-// --- onboarding: editable confirm screen + text fallback -------------
-function onboardingView() {
-    el('app').className = 'container';
-    const name = state.email.split('@')[0] || '';
-    el('app').innerHTML = `
+        el('login-form').onsubmit = async (e) => {
+            e.preventDefault();
+            await quickLogin(el('login-email').value);
+        };
+        el('login-quick-demo').onclick = () => quickLogin('demo@team54.app');
+    }
+    // --- onboarding: editable confirm screen + text fallback -------------
+    function onboardingView() {
+        el('app').className = 'container';
+        const name = state.email.split('@')[0] || '';
+        el('app').innerHTML = `
     <section class="card">
       <h1>Confirm your details</h1>
       <p class="muted">Check and edit anything before continuing.</p>
@@ -218,103 +224,103 @@ function onboardingView() {
       <p id="ob-error" class="error"></p>
       <button id="ob-save" class="primary">Confirm &amp; continue</button>
     </section>`;
-    const inputs = [...document.querySelectorAll('.goal-input')];
-    const total = () => inputs.reduce((s, i) => s + (parseInt(i.value) || 0), 0);
-    const refresh = () => {
-        el('goals-total').textContent = String(total());
-    };
-    inputs.forEach((i) => {
-        i.oninput = refresh;
-    });
-    el('goals-apply').onclick = () => {
-        const area = el('goals-text');
-        area.value.split(',').forEach((part) => {
-            const m = part.trim().match(/^(.+?)\s+(\d+)$/);
-            if (m) {
-                const inp = inputs.find((i) => i.dataset.cat?.toLowerCase() === m[1].trim().toLowerCase());
-                if (inp)
-                    inp.value = m[2];
-            }
+        const inputs = [...document.querySelectorAll('.goal-input')];
+        const total = () => inputs.reduce((s, i) => s + (parseInt(i.value) || 0), 0);
+        const refresh = () => {
+            el('goals-total').textContent = String(total());
+        };
+        inputs.forEach((i) => {
+            i.oninput = refresh;
         });
-        refresh();
-    };
-    const renderExtracted = (contacts) => {
-        el('ob-contacts-wrap').classList.toggle('hidden', !contacts.length);
-        el('ob-contacts').innerHTML = contacts
-            .map((c) => `
+        el('goals-apply').onclick = () => {
+            const area = el('goals-text');
+            area.value.split(',').forEach((part) => {
+                const m = part.trim().match(/^(.+?)\s+(\d+)$/);
+                if (m) {
+                    const inp = inputs.find((i) => i.dataset.cat?.toLowerCase() === m[1].trim().toLowerCase());
+                    if (inp)
+                        inp.value = m[2];
+                }
+            });
+            refresh();
+        };
+        const renderExtracted = (contacts) => {
+            el('ob-contacts-wrap').classList.toggle('hidden', !contacts.length);
+            el('ob-contacts').innerHTML = contacts
+                .map((c) => `
       <div class="ob-contact">
         <input class="ob-c-name" value="${esc(c.name)}" aria-label="Name">
         <select class="ob-c-cat" aria-label="Category">${CATEGORIES.map((x) => `<option ${x === c.category ? 'selected' : ''}>${x}</option>`).join('')}</select>
         <input class="ob-c-notes ob-notes" value="${esc(c.notes || '')}" placeholder="Notes" aria-label="Notes">
         <button type="button" class="danger ob-c-del" aria-label="Remove ${esc(c.name)}">Remove</button>
       </div>`)
-            .join('');
-        el('ob-contacts')
-            .querySelectorAll('.ob-c-del')
-            .forEach((b) => {
-            b.onclick = () => {
-                b.closest('.ob-contact')?.remove();
-                if (!el('ob-contacts').children.length)
-                    el('ob-contacts-wrap').classList.add('hidden');
-            };
-        });
-    };
-    if (window.Voice) {
-        window.Voice.mount(el('voice-mount'), (res) => {
-            if (res.name && el('ob-name')) {
-                el('ob-name').value = res.name;
-            }
-            if (res.goals) {
-                inputs.forEach((i) => {
-                    const cat = i.dataset.cat;
-                    if (res.goals[cat] !== undefined)
-                        i.value = String(res.goals[cat]);
-                });
-                refresh();
-            }
-            el('ob-source').textContent = res.source === 'rules' ? 'live voice' : 'voice AI';
-            if (res.contacts && res.contacts.length) {
-                renderExtracted(res.contacts);
-            }
-            if (res.action === 'confirm') {
-                const btn = el('ob-save');
-                btn.scrollIntoView({ behavior: 'smooth' });
-                if (total() === 100) {
-                    btn.click();
+                .join('');
+            el('ob-contacts')
+                .querySelectorAll('.ob-c-del')
+                .forEach((b) => {
+                b.onclick = () => {
+                    b.closest('.ob-contact')?.remove();
+                    if (!el('ob-contacts').children.length)
+                        el('ob-contacts-wrap').classList.add('hidden');
+                };
+            });
+        };
+        if (window.Voice) {
+            window.Voice.mount(el('voice-mount'), (res) => {
+                if (res.name && el('ob-name')) {
+                    el('ob-name').value = res.name;
                 }
-                else {
-                    el('ob-error').textContent = 'Please make sure goals total 100% before confirming.';
+                if (res.goals) {
+                    inputs.forEach((i) => {
+                        const cat = i.dataset.cat;
+                        if (res.goals[cat] !== undefined)
+                            i.value = String(res.goals[cat]);
+                    });
+                    refresh();
                 }
-            }
-        });
-    }
-    el('ob-save').onclick = async () => {
-        if (total() !== 100) {
-            el('ob-error').textContent = 'Goals must total 100% - currently ' + total() + '%.';
-            return;
+                el('ob-source').textContent = res.source === 'rules' ? 'live voice' : 'voice AI';
+                if (res.contacts && res.contacts.length) {
+                    renderExtracted(res.contacts);
+                }
+                if (res.action === 'confirm') {
+                    const btn = el('ob-save');
+                    btn.scrollIntoView({ behavior: 'smooth' });
+                    if (total() === 100) {
+                        btn.click();
+                    }
+                    else {
+                        el('ob-error').textContent = 'Please make sure goals total 100% before confirming.';
+                    }
+                }
+            });
         }
-        const goals = Object.fromEntries(inputs.map((i) => [i.dataset.cat, parseInt(i.value) || 0]));
-        await api('/goals', { method: 'PUT', body: JSON.stringify({ goals }) });
-        const rows = [...document.querySelectorAll('.ob-contact')]
-            .map((r) => ({
-            name: r.querySelector('.ob-c-name').value.trim(),
-            category: r.querySelector('.ob-c-cat').value,
-            notes: r.querySelector('.ob-c-notes').value.trim(),
-        }))
-            .filter((c) => c.name);
-        for (const c of rows)
-            await api('/contacts', { method: 'POST', body: JSON.stringify(c) });
-        state.onboarded = true;
-        go('#/dashboard');
-    };
-}
-// --- dashboard ----------------------------------------------------------
-async function dashboardView() {
-    el('app').className = 'container';
-    const s = await api('/summary');
-    const contacts = await api('/contacts');
-    const nameOf = (id) => contacts.find((c) => c.id === id)?.name || 'Someone';
-    el('app').innerHTML = `
+        el('ob-save').onclick = async () => {
+            if (total() !== 100) {
+                el('ob-error').textContent = 'Goals must total 100% - currently ' + total() + '%.';
+                return;
+            }
+            const goals = Object.fromEntries(inputs.map((i) => [i.dataset.cat, parseInt(i.value) || 0]));
+            await api('/goals', { method: 'PUT', body: JSON.stringify({ goals }) });
+            const rows = [...document.querySelectorAll('.ob-contact')]
+                .map((r) => ({
+                name: r.querySelector('.ob-c-name').value.trim(),
+                category: r.querySelector('.ob-c-cat').value,
+                notes: r.querySelector('.ob-c-notes').value.trim(),
+            }))
+                .filter((c) => c.name);
+            for (const c of rows)
+                await api('/contacts', { method: 'POST', body: JSON.stringify(c) });
+            state.onboarded = true;
+            go('#/dashboard');
+        };
+    }
+    // --- dashboard ----------------------------------------------------------
+    async function dashboardView() {
+        el('app').className = 'container';
+        const s = await api('/summary');
+        const contacts = await api('/contacts');
+        const nameOf = (id) => contacts.find((c) => c.id === id)?.name || 'Someone';
+        el('app').innerHTML = `
     <h1>Dashboard</h1>
     <div class="stats">
       <div class="stat card">
@@ -335,72 +341,72 @@ async function dashboardView() {
     <section class="card">
       <h2>Follow-ups</h2>
       ${s.open_followups.length
-        ? s.open_followups
-            .map((f) => `
+            ? s.open_followups
+                .map((f) => `
         <div class="row">
           <div><strong>${esc(nameOf(f.contact_id))}</strong> - due ${esc(f.due)}
             ${f.note ? `<div class="muted">${esc(f.note)}</div>` : ''}</div>
           <button data-done="${f.id}">Mark done</button>
         </div>`)
-            .join('')
-        : '<p class="muted">No open follow-ups.</p>'}
+                .join('')
+            : '<p class="muted">No open follow-ups.</p>'}
     </section>
     <section class="card">
       <h2>Upcoming meetups</h2>
       ${s.upcoming_meetups.length
-        ? s.upcoming_meetups
-            .map((m) => `
+            ? s.upcoming_meetups
+                .map((m) => `
         <div class="row">
           <div><strong>${esc(m.title)}</strong> - ${esc(m.when)}
             <div class="muted mono">${esc(m.room_link)}</div></div>
           <button data-copy="${esc(m.room_link)}">Copy link</button>
         </div>`)
-            .join('')
-        : '<p class="muted">No meetups planned.</p>'}
+                .join('')
+            : '<p class="muted">No meetups planned.</p>'}
     </section>`;
-    el('qa-add').onclick = () => {
-        sessionStorage.setItem('org_new_contact', '1');
-        go('#/contacts');
-    };
-    el('qa-meetup').onclick = () => go('#/meetups');
-    document.querySelectorAll('[data-copy]').forEach((b) => {
-        b.onclick = () => copyLink(b.dataset.copy, b);
-    });
-    document.querySelectorAll('[data-done]').forEach((b) => {
-        b.onclick = () => markDone(b.dataset.done);
-    });
-}
-function copyLink(text, btn) {
-    const done = () => {
-        btn.textContent = 'Copied!';
-        setTimeout(() => {
-            btn.textContent = 'Copy link';
-        }, 1500);
-    };
-    if (navigator.clipboard) {
-        navigator.clipboard.writeText(text).then(done);
+        el('qa-add').onclick = () => {
+            sessionStorage.setItem('org_new_contact', '1');
+            go('#/contacts');
+        };
+        el('qa-meetup').onclick = () => go('#/meetups');
+        document.querySelectorAll('[data-copy]').forEach((b) => {
+            b.onclick = () => copyLink(b.dataset.copy, b);
+        });
+        document.querySelectorAll('[data-done]').forEach((b) => {
+            b.onclick = () => markDone(b.dataset.done);
+        });
     }
-    else {
-        const t = document.createElement('textarea');
-        t.value = text;
-        document.body.appendChild(t);
-        t.select();
-        document.execCommand('copy');
-        t.remove();
-        done();
+    function copyLink(text, btn) {
+        const done = () => {
+            btn.textContent = 'Copied!';
+            setTimeout(() => {
+                btn.textContent = 'Copy link';
+            }, 1500);
+        };
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(done);
+        }
+        else {
+            const t = document.createElement('textarea');
+            t.value = text;
+            document.body.appendChild(t);
+            t.select();
+            document.execCommand('copy');
+            t.remove();
+            done();
+        }
     }
-}
-async function markDone(fid) {
-    const note = prompt('Add a note for this follow-up (optional):') || '';
-    await api('/followups/' + fid + '/done', { method: 'POST', body: JSON.stringify({ note }) });
-    dashboardView();
-}
-// --- contacts ---------------------------------------------------------
-async function contactsView() {
-    el('app').className = 'container';
-    const filter = sessionStorage.getItem('org_filter') || '';
-    const contacts = await api('/contacts' + (filter ? '?category=' + encodeURIComponent(filter) : ''));
-    el('app').innerHTML = `
+    async function markDone(fid) {
+        const note = prompt('Add a note for this follow-up (optional):') || '';
+        await api('/followups/' + fid + '/done', { method: 'POST', body: JSON.stringify({ note }) });
+        dashboardView();
+    }
+    // --- contacts ---------------------------------------------------------
+    async function contactsView() {
+        el('app').className = 'container';
+        const filter = sessionStorage.getItem('org_filter') || '';
+        const contacts = await api('/contacts' + (filter ? '?category=' + encodeURIComponent(filter) : ''));
+        el('app').innerHTML = `
     <h1>Contacts</h1>
     <section class="card">
       <h2>Add person</h2>
@@ -420,8 +426,8 @@ async function contactsView() {
         </select>
       </div>
       ${contacts.length
-        ? contacts
-            .map((c) => `
+            ? contacts
+                .map((c) => `
         <div class="row" data-cid="${c.id}">
           <div><strong>${esc(c.name)}</strong> <span class="tag">${esc(c.category)}</span>
             ${c.notes ? `<div class="muted">${esc(c.notes)}</div>` : ''}</div>
@@ -430,47 +436,47 @@ async function contactsView() {
             <button class="danger" data-del="${c.id}">Delete</button>
           </div>
         </div>`)
-            .join('')
-        : '<p class="muted">No contacts yet.</p>'}
+                .join('')
+            : '<p class="muted">No contacts yet.</p>'}
     </section>`;
-    el('filter').onchange = () => {
-        sessionStorage.setItem('org_filter', el('filter').value);
-        contactsView();
-    };
-    el('add-form').onsubmit = async (e) => {
-        e.preventDefault();
-        await api('/contacts', {
-            method: 'POST',
-            body: JSON.stringify({
-                name: el('c-name').value,
-                category: el('c-cat').value,
-                notes: el('c-notes').value,
-            }),
+        el('filter').onchange = () => {
+            sessionStorage.setItem('org_filter', el('filter').value);
+            contactsView();
+        };
+        el('add-form').onsubmit = async (e) => {
+            e.preventDefault();
+            await api('/contacts', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: el('c-name').value,
+                    category: el('c-cat').value,
+                    notes: el('c-notes').value,
+                }),
+            });
+            contactsView();
+        };
+        document.querySelectorAll('[data-del]').forEach((b) => {
+            b.onclick = async () => {
+                if (confirm('Delete this contact?')) {
+                    await api('/contacts/' + b.dataset.del, { method: 'DELETE' });
+                    contactsView();
+                }
+            };
         });
-        contactsView();
-    };
-    document.querySelectorAll('[data-del]').forEach((b) => {
-        b.onclick = async () => {
-            if (confirm('Delete this contact?')) {
-                await api('/contacts/' + b.dataset.del, { method: 'DELETE' });
-                contactsView();
-            }
-        };
-    });
-    document.querySelectorAll('[data-edit]').forEach((b) => {
-        b.onclick = () => {
-            const cid = b.dataset.edit;
-            editRow(cid, contacts.find((c) => c.id === cid));
-        };
-    });
-    if (sessionStorage.getItem('org_new_contact')) {
-        sessionStorage.removeItem('org_new_contact');
-        el('c-name').focus();
+        document.querySelectorAll('[data-edit]').forEach((b) => {
+            b.onclick = () => {
+                const cid = b.dataset.edit;
+                editRow(cid, contacts.find((c) => c.id === cid));
+            };
+        });
+        if (sessionStorage.getItem('org_new_contact')) {
+            sessionStorage.removeItem('org_new_contact');
+            el('c-name').focus();
+        }
     }
-}
-function editRow(cid, c) {
-    const row = document.querySelector('[data-cid="' + cid + '"]');
-    row.innerHTML = `
+    function editRow(cid, c) {
+        const row = document.querySelector('[data-cid="' + cid + '"]');
+        row.innerHTML = `
     <div class="inline-form">
       <input id="e-name" value="${esc(c.name)}">
       <select id="e-cat">${CATEGORIES.map((x) => `<option ${x === c.category ? 'selected' : ''}>${x}</option>`).join('')}</select>
@@ -480,27 +486,27 @@ function editRow(cid, c) {
       <button class="primary" id="e-save">Save</button>
       <button id="e-cancel">Cancel</button>
     </div>`;
-    el('e-cancel').onclick = () => contactsView();
-    el('e-save').onclick = async () => {
-        await api('/contacts/' + cid, {
-            method: 'PUT',
-            body: JSON.stringify({
-                name: el('e-name').value,
-                category: el('e-cat').value,
-                notes: el('e-notes').value,
-            }),
-        });
-        contactsView();
-    };
-}
-// --- meetups -----------------------------------------------------------
-async function meetupsView() {
-    el('app').className = 'container';
-    const [meetups, contacts] = await Promise.all([
-        api('/meetups'),
-        api('/contacts'),
-    ]);
-    el('app').innerHTML = `
+        el('e-cancel').onclick = () => contactsView();
+        el('e-save').onclick = async () => {
+            await api('/contacts/' + cid, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    name: el('e-name').value,
+                    category: el('e-cat').value,
+                    notes: el('e-notes').value,
+                }),
+            });
+            contactsView();
+        };
+    }
+    // --- meetups -----------------------------------------------------------
+    async function meetupsView() {
+        el('app').className = 'container';
+        const [meetups, contacts] = await Promise.all([
+            api('/meetups'),
+            api('/contacts'),
+        ]);
+        el('app').innerHTML = `
     <h1>Meetups</h1>
     <section class="card">
       <h2>Plan a meetup</h2>
@@ -510,10 +516,10 @@ async function meetupsView() {
         <fieldset>
           <legend>Who is invited</legend>
           ${contacts.length
-        ? contacts
-            .map((c) => `<label class="check"><input type="checkbox" value="${c.id}"> ${esc(c.name)}</label>`)
-            .join('')
-        : '<p class="muted">Add contacts first.</p>'}
+            ? contacts
+                .map((c) => `<label class="check"><input type="checkbox" value="${c.id}"> ${esc(c.name)}</label>`)
+                .join('')
+            : '<p class="muted">Add contacts first.</p>'}
         </fieldset>
         <button class="primary" type="submit">Create meetup</button>
       </form>
@@ -521,49 +527,49 @@ async function meetupsView() {
     <section class="card">
       <h2>Planned</h2>
       ${meetups.length
-        ? meetups
-            .map((m) => `
+            ? meetups
+                .map((m) => `
         <div class="row">
           <div><strong>${esc(m.title)}</strong> - ${esc(m.when)}${m.venue ? ` · 📍 ${esc(m.venue)}` : ''}
             <div class="muted mono">${esc(m.room_link)}</div></div>
           <div>
             <button data-copy="${esc(m.room_link)}">Copy link</button>
             ${m.organizer_link
-            ? `<a href="${esc(m.organizer_link)}" target="_blank" rel="noopener"><button type="button">Open room</button></a>`
-            : ''}
+                ? `<a href="${esc(m.organizer_link)}" target="_blank" rel="noopener"><button type="button">Open room</button></a>`
+                : ''}
           </div>
         </div>`)
-            .join('')
-        : '<p class="muted">No meetups yet.</p>'}
+                .join('')
+            : '<p class="muted">No meetups yet.</p>'}
     </section>`;
-    el('m-form').onsubmit = async (e) => {
-        e.preventDefault();
-        const ids = [...document.querySelectorAll('input[type=checkbox]:checked')].map((i) => i.value);
-        await api('/meetups', {
-            method: 'POST',
-            body: JSON.stringify({
-                title: el('m-title').value,
-                when: el('m-when').value,
-                contact_ids: ids,
-            }),
+        el('m-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const ids = [...document.querySelectorAll('input[type=checkbox]:checked')].map((i) => i.value);
+            await api('/meetups', {
+                method: 'POST',
+                body: JSON.stringify({
+                    title: el('m-title').value,
+                    when: el('m-when').value,
+                    contact_ids: ids,
+                }),
+            });
+            meetupsView();
+        };
+        document.querySelectorAll('[data-copy]').forEach((b) => {
+            b.onclick = () => copyLink(b.dataset.copy, b);
         });
-        meetupsView();
-    };
-    document.querySelectorAll('[data-copy]').forEach((b) => {
-        b.onclick = () => copyLink(b.dataset.copy, b);
-    });
-}
-// --- boot ---------------------------------------------------------------
-if (el('top-demo-btn')) {
-    el('top-demo-btn').onclick = () => quickLogin('demo@team54.app');
-}
-if (el('logout')) {
-    el('logout').onclick = () => {
-        state.token = null;
-        state.onboarded = false;
-        go('#/');
-    };
-}
-window.onhashchange = route;
-route();
-export {};
+    }
+    // --- boot ---------------------------------------------------------------
+    if (el('top-demo-btn')) {
+        el('top-demo-btn').onclick = () => quickLogin('demo@team54.app');
+    }
+    if (el('logout')) {
+        el('logout').onclick = () => {
+            state.token = null;
+            state.onboarded = false;
+            go('#/');
+        };
+    }
+    window.onhashchange = route;
+    route();
+})();

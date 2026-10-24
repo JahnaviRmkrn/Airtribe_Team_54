@@ -2,6 +2,7 @@
 // Guests: join with name -> configure preferences -> vote on shortlist.
 // Organizer (?key=...): confirm a venue or close the room.
 
+(() => {
 const TOKEN = location.pathname.split('/').filter(Boolean).pop() || '';
 const ID_KEY = `room_${TOKEN}`;
 const ORG_KEY = `room_key_${TOKEN}`;
@@ -404,3 +405,5 @@ refresh();
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) refresh();
 });
+})();
+

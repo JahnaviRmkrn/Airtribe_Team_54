@@ -2,16 +2,6 @@
 // Communicates with ElevenLabs Conversational AI using WebSocket session tokens.
 // Captures conversation naturally and streams extracted relationship data in real-time.
 
-import type { ExtractResult, VoiceConfig, SignedUrlResponse } from './types';
-
-declare global {
-  interface Window {
-    Voice?: {
-      mount: (root: HTMLElement, onResult: (res: ExtractResult) => void) => { stop: () => void };
-    };
-  }
-}
-
 interface TranscriptLine {
   who: 'user' | 'agent';
   text: string;
@@ -45,7 +35,10 @@ interface TranscriptLine {
             <div class="vx-title">Voice Calibration</div>
             <div class="vx-status" id="vx-status">Initializing audio service…</div>
           </div>
-          <button class="vx-end hidden" id="vx-end" type="button">Conclude session</button>
+          <div class="vx-actions">
+            <button class="vx-clear hidden" id="vx-clear" type="button" title="Clear conversation history">Clear chat</button>
+            <button class="vx-end hidden" id="vx-end" type="button">Conclude session</button>
+          </div>
         </div>
         <div class="vx-log hidden" id="vx-log" aria-live="polite"></div>
         <details class="vx-fallback" id="vx-fallback">
@@ -77,13 +70,30 @@ interface TranscriptLine {
       }, 350);
     }
 
+    function clearChat() {
+      if (liveTimer) clearTimeout(liveTimer);
+      lines.length = 0;
+      const log = $('vx-log');
+      log.innerHTML = '';
+      log.classList.add('hidden');
+      $('vx-clear').classList.add('hidden');
+      const area = $('vx-text') as HTMLTextAreaElement;
+      if (area) area.value = '';
+      status(convo ? 'Chat cleared. Please speak your priority contacts.' : 'Chat cleared.');
+    }
+
     function addLine(who: 'user' | 'agent', text: string) {
       if (!text) return;
+      if (who === 'user' && /^\s*(?:clear\s+chat|clear\s+transcript|reset\s+chat|clear\s+messages)\s*$/i.test(text.trim())) {
+        clearChat();
+        return;
+      }
       lines.push({ who, text });
       const log = $('vx-log');
       log.classList.remove('hidden');
       log.insertAdjacentHTML('beforeend', `<div class="vx-msg ${who}"><span>${esc(text)}</span></div>`);
       log.scrollTop = log.scrollHeight;
+      $('vx-clear').classList.remove('hidden');
       scheduleLiveExtract();
     }
 
@@ -190,6 +200,7 @@ interface TranscriptLine {
 
     $('vx-orb').onclick = () => (convo ? stop() : start());
     $('vx-end').onclick = stop;
+    $('vx-clear').onclick = clearChat;
     $('vx-extract').onclick = () => {
       const area = $('vx-text') as HTMLTextAreaElement;
       extract(area.value);

@@ -1,8 +1,7 @@
 // Moup App - Client Controller (TypeScript)
 // Handles routing, auth, real-time onboarding form hydration, contacts, and meetup coordination.
 
-import type { RelationshipCategory, ExtractResult, Contact, AttentionGoals } from './types';
-
+(() => {
 interface AppState {
   token: string | null;
   email: string;
@@ -75,6 +74,11 @@ function route(): void {
   // Public unauthenticated routes
   if (!isAuth) {
     if (hash === '#/login') return loginView();
+    if (hash === '#/onboarding') {
+      state.token = 'demo_token';
+      state.email = state.email || 'alex@example.com';
+      return onboardingView();
+    }
     return landingView();
   }
 
@@ -84,7 +88,6 @@ function route(): void {
     state.onboarded &&
     (hash === '#/' ||
       hash === '#/login' ||
-      hash === '#/onboarding' ||
       hash === '#/features' ||
       hash === '#/how-it-works')
   ) {
@@ -639,3 +642,5 @@ if (el('logout')) {
 }
 window.onhashchange = route;
 route();
+})();
+
