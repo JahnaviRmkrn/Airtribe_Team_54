@@ -92,7 +92,7 @@ export async function getOrderStatus(orderId: string): Promise<PaymentStatus> {
 export async function cancelOrder(orderId: string) {
   const res = await call('cancelOrder', { order_id: orderId });
   const status = (res.data as { status?: string } | undefined)?.status;
-  if (status?.toUpperCase() !== 'CANCELLED') {
+  if (typeof status !== 'string' || status.toUpperCase() !== 'CANCELLED') {
     throw new HttpError(502, 'Could not confirm payment cancellation, please retry');
   }
 }

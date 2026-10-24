@@ -90,7 +90,7 @@ describe('toolkit calls', () => {
     expect(execute).toHaveBeenCalledWith('cancelOrder', { order_id: 'old-order' });
   });
 
-  it.each(['PENDING', 'PROCESSED', undefined])('does not treat %s as confirmed cancellation', async (status) => {
+  it.each(['PENDING', 'PROCESSED', undefined, 123])('does not treat %s as confirmed cancellation', async (status) => {
     execute.mockResolvedValue(JSON.stringify({ data: { status } }));
     await expect(pl.cancelOrder('old-order')).rejects.toMatchObject({ status: 502 });
   });
