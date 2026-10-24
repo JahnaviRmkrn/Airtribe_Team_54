@@ -79,7 +79,26 @@ To test several guests from one browser, send `X-Guest-Secret: <guest_secret>`
 instead of relying on the cookie.
 
 Errors are `{ "error": "message" }` with 400 (validation), 401 (not signed in /
-not joined), 403, 404 (unknown or expired room), 409, 410 (room closed).
+not joined), 403, 404 (unknown or expired room), 409, 410 (room closed),
+429 (rate limited, or room full).
+
+### Rate limits
+
+Every room route is limited per client IP (first `x-forwarded-for` entry) and
+room token, in fixed windows counted in Postgres (`rate_limits` table,
+`hit_rate_limit()` RPC, service role only), so limits hold across Vercel
+instances. Over the limit returns 429 `Too many requests, slow down`.
+
+| Route | Limit |
+|---|---|
+| GET `/api/rooms/:token`, GET `/me` | 120/min each (enough for a 3 s poll) |
+| POST `/join` | 10/min per room, and 60/hour across all rooms |
+| POST / DELETE `/vote`, PATCH `/me` | 30/min (shared) |
+| POST `/confirm`, `/close` | 30/min (shared) |
+
+Presets live in `lib/ratelimit.ts`; a new room route adds one line, e.g.
+`await limitRoom(req, 'pay', token)`. If the limiter RPC fails the request is
+allowed (fail open) and the error is logged.
 
 ## Privacy and access rules
 
