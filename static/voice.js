@@ -93,16 +93,36 @@
           : { agentId: cfg.agent_id };
         convo = await Conversation.startSession({
           ...session,
-          onConnect: () => { status('Listening - tell me about the people who matter.'); setMode('live'); $('vx-end').classList.remove('hidden'); },
+          onConnect: () => {
+            status('Connected! Speak your command or say hello…');
+            setMode('live');
+            $('vx-end').classList.remove('hidden');
+          },
           onDisconnect: () => {
             convo = null;
             $('vx-end').classList.add('hidden');
             if (lines.some((l) => l.who === 'user')) extract(transcriptText());
             else { status('Call ended. Tap the mic to try again.'); setMode('idle'); }
           },
-          onMessage: (m) => addLine((m.source || m.role) === 'user' ? 'user' : 'agent', m.message),
-          onModeChange: ({ mode }) => { if (convo) { setMode(mode === 'speaking' ? 'speaking' : 'live'); } },
-          onError: (e) => { $('vx-err').textContent = 'Voice error: ' + (e?.message || e); },
+          onMessage: (m) => {
+            const role = (m.source === 'user' || m.role === 'user') ? 'user' : 'agent';
+            addLine(role, m.message);
+          },
+          onModeChange: ({ mode }) => {
+            if (convo) {
+              if (mode === 'speaking') {
+                setMode('speaking');
+                status('Moup is speaking…');
+              } else {
+                setMode('live');
+                status('Listening… speak to Moup now.');
+              }
+            }
+          },
+          onError: (e) => {
+            console.error('ElevenLabs voice error:', e);
+            $('vx-err').textContent = 'Voice error: ' + (e?.message || e);
+          },
         });
       } catch (e) {
         convo = null;
