@@ -1,6 +1,6 @@
 /* Voice onboarding widget - scoped under .vx so it can't leak into styles.css. */
-.vx { --vx-a: #3b5998; --vx-b: hsl(192 70% 42%); --vx-hot: hsl(330 75% 52%);
-      border-radius: 10px; padding: 14px; margin: 4px 0 16px; background: #f7f8fa; border: 1px solid #e4e6eb; }
+.vx { --vx-a: #04c1e1; --vx-b: #75e4de; --vx-hot: #f6ac0d;
+      border-radius: 14px; padding: 14px; margin: 4px 0 16px; background: rgba(255,255,255,0.7); border: 1px solid #efe6d4; }
 .vx-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .vx-text { flex: 1; min-width: 160px; }
 .vx-title { font-weight: 700; font-size: 15px; }
@@ -18,16 +18,16 @@
 .vx[data-mode="connecting"] .vx-orb, .vx[data-mode="thinking"] .vx-orb { animation: vx-breathe 1.2s ease-in-out infinite; }
 @keyframes vx-ripple { 0% { transform: scale(1); opacity: .7; } 100% { transform: scale(1.7); opacity: 0; } }
 @keyframes vx-breathe { 50% { transform: scale(.92); opacity: .75; } }
-.vx-end { border-color: hsl(330 75% 52% / .5); color: hsl(330 70% 40%); font-weight: 600; }
+.vx-end { border-color: rgba(246,172,13,.55); color: #7a4d05; font-weight: 600; }
 .vx-log { margin-top: 12px; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px; }
 .vx-msg { display: flex; }
 .vx-msg span { max-width: 82%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
-.vx-msg.agent span { background: #fff; border: 1px solid #e4e6eb; border-bottom-left-radius: 4px; }
+.vx-msg.agent span { background: #fff; border: 1px solid #efe6d4; border-bottom-left-radius: 4px; }
 .vx-msg.user { justify-content: flex-end; }
 .vx-msg.user span { background: var(--vx-a); color: #fff; border-bottom-right-radius: 4px; }
 .vx-fallback { margin-top: 12px; }
-.vx-fallback summary { cursor: pointer; font-size: 14px; color: #3b5998; }
+.vx-fallback summary { cursor: pointer; font-size: 14px; color: #0787a1; }
 .vx-fallback textarea { margin: 8px 0; font: inherit; }
-.vx-err { color: #c00; font-size: 13px; margin: 6px 0 0; }
+.vx-err { color: #b3382e; font-size: 13px; margin: 6px 0 0; }
 .vx-err:empty { display: none; }
 @media (prefers-reduced-motion: reduce) { .vx * { animation: none !important; transition: none !important; } }

@@ -1,13 +1,19 @@
+/* MUOP brand foundation
+   Palette: sunshine #F6AC0D, lemon #F3E803, aqua #04C1E1,
+   turquoise #75E4DE, lime #D6EBB3 - on warm white with dark espresso text. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --muop-sunshine: #f6ac0d;
+  --muop-lemon: #f3e803;
+  --muop-aqua: #04c1e1;
+  --muop-aqua-deep: #0787a1;
+  --muop-turquoise: #75e4de;
+  --muop-lime: #d6ebb3;
+  --muop-lime-deep: #7a9a4d;
+  --background: #fffdf4;
+  --foreground: #2e1f14;
+  --muop-espresso-soft: #6b5a48;
+  --muop-card: #ffffff;
+  --muop-line: #efe6d4;
 }
 
 html,
@@ -19,7 +25,7 @@ body {
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -31,12 +37,10 @@ body {
 }
 
 a {
-  color: inherit;
+  color: var(--muop-aqua-deep);
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
+h1, h2, h3 {
+  font-family: var(--font-newsreader), Georgia, serif;
 }
