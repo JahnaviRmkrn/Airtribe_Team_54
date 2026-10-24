@@ -12,6 +12,8 @@ export const LIMITS = {
   write: { max: 30, windowSeconds: 60 }, // vote, unvote, PATCH me
   organizer: { max: 30, windowSeconds: 60 }, // confirm, close
   pay: { max: 10, windowSeconds: 60 },
+  extract: { max: 10, windowSeconds: 60 }, // per signed-in user (LLM spend)
+  voice: { max: 5, windowSeconds: 600 }, // per signed-in user (ElevenLabs sessions)
 } satisfies Record<string, Limit>;
 export type Preset = keyof typeof LIMITS;
 
@@ -45,3 +47,18 @@ export async function rateLimit(req: Request, bucket: string, { max, windowSecon
 
 // One-liner for room routes, e.g. `await limitRoom(req, 'pay', token);`
 export const limitRoom = (req: Request, preset: Preset, token: string) => rateLimit(req, preset, LIMITS[preset], token);
+
+// Per signed-in user (any IP), for routes that spend paid API credit.
+export async function limitUser(preset: Preset, userId: string) {
+  const { max, windowSeconds } = LIMITS[preset];
+  const { data, error } = await adminClient().rpc('hit_rate_limit', {
+    p_key: `${preset}:user:${userId}`,
+    p_window_seconds: windowSeconds,
+    p_max: max,
+  });
+  if (error) {
+    console.error('rate limit check failed', error);
+    return;
+  }
+  if (data === false) throw new HttpError(429, 'Too many requests, slow down');
+}

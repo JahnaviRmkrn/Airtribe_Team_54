@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meetup room</title>
+  <meta name="description" content="Join the meetup room: share your budget, area and availability, then vote on where to go.">
+  <meta name="robots" content="noindex">
+  <meta name="referrer" content="no-referrer">
+  <link rel="stylesheet" href="/room/room.css">
+</head>
+<body>
+  <header class="r-top">
+    <span class="r-brand"><span class="r-logo">◆</span> Meetup room</span>
+    <span id="status-pill" class="pill">Loading…</span>
+  </header>
+
+  <main class="r-wrap" id="main">
+    <section class="hero card" id="hero">
+      <p class="eyebrow">You're invited</p>
+      <h1 id="room-title">Loading…</h1>
+      <p id="room-meta" class="sub"></p>
+      <div class="hero-row">
+        <div id="avatar-stack" class="avatar-stack"></div>
+        <button id="share-btn" class="btn ghost" type="button">Copy guest link</button>
+      </div>
+    </section>
+
+    <div id="banner"></div>
+    <p id="conn" class="conn hidden" role="status"></p>
+
+    <section id="org-panel" class="card org hidden" aria-label="Organiser controls"></section>
+
+    <section id="join-card" class="card hidden">
+      <h2>Join with your name</h2>
+      <p class="muted">No account needed. Your name and preferences are only shown to people with this link.</p>
+      <form id="join-form" class="join-form">
+        <label class="sr-only" for="join-name">Your name</label>
+        <input id="join-name" maxlength="60" autocomplete="given-name" placeholder="e.g. Priya" required>
+        <button id="join-btn" class="btn primary" type="submit">Join room</button>
+      </form>
+      <p id="join-error" class="error" role="alert"></p>
+    </section>
+
+    <div class="grid">
+      <section id="prefs-card" class="card hidden">
+        <div class="card-head">
+          <h2>Your preferences</h2>
+          <span id="prefs-saved" class="saved-chip hidden">Saved ✓</span>
+        </div>
+        <form id="prefs-form"></form>
+        <p id="prefs-error" class="error" role="alert"></p>
+      </section>
+
+      <div class="stack">
+        <section class="card">
+          <div class="card-head">
+            <h2>Who's in</h2>
+            <span id="people-count" class="count">0</span>
+          </div>
+          <ul id="people" class="people"></ul>
+        </section>
+        <section class="card">
+          <h2>Best time</h2>
+          <div id="slots" class="slots"></div>
+        </section>
+      </div>
+    </div>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Shortlist</h2>
+        <span class="muted" id="vote-hint">One vote each. Tap your vote again to withdraw it.</span>
+      </div>
+      <p id="shortlist-note" class="note"></p>
+      <div id="shortlist" class="shortlist"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/room/room.js"></script>
+</body>
+</html>

@@ -39,6 +39,29 @@ Deploying (Vercel + hosted Supabase): see [DEPLOY.md](DEPLOY.md).
 | POST | `/api/me/interactions` | `{ contact_id, type?, notes?, occurred_at?, next_followup_at? }` | completes a follow-up; updates last_interaction_at and next_followup_at |
 | GET / POST | `/api/me/meetups` | `{ title, activity?, area?, starts_at?, budget? }` | POST returns `meetup.room_url` + `invite_text`. Nothing is sent automatically. |
 | GET / PATCH / DELETE | `/api/me/meetups/:id` | partial + `status`, `final_venue_id` | edit / close |
+| POST | `/api/extract` | `{ transcript }` (max 20,000 chars) | onboarding pre-fill; see below. Stateless, never writes to the DB |
+| GET | `/api/voice/signed-url` | | `{ signed_url }` for the ElevenLabs onboarding agent; 503 if not configured |
+
+### Voice onboarding and extraction
+
+Ported from Arindom Chetia's PR #3 (FastAPI `routers/voice.py`, `static/voice.*`).
+
+- `POST /api/extract` returns
+  `{ contacts: [<=5 { name, category, interests[], preferred_frequency_days? }], goals: { personal, professional, community }, source: "gemini"|"openai"|"rules", saved: false }`.
+  Goals are integers that always total 100. It calls Gemini if `GEMINI_API_KEY`
+  is set, else OpenAI if `OPENAI_API_KEY` is set, and otherwise (or if the
+  call fails or returns invalid JSON) uses a rule-based parser
+  (`lib/extract.ts`). Every result is validated with zod and clamped before it
+  is returned. It requires sign-in so it can't be used as a free LLM proxy.
+- `GET /api/voice/signed-url` mints a short-lived ElevenLabs conversation URL
+  from `ELEVENLABS_API_KEY` + `ELEVENLABS_AGENT_ID`. Both are server-only;
+  the browser only gets the signed URL. Create the agent once with
+  `python3 scripts/setup_elevenlabs_agent.py`.
+- In the organizer onboarding (`/organizer/#/onboarding`), "Talk instead"
+  starts the voice agent (ElevenLabs browser SDK, loaded only on tap from a
+  pinned jsDelivr URL with SRI). "Type instead" posts typed text to
+  `/api/extract`, and it still works when voice isn't configured. Either one
+  pre-fills the editable confirm screen. Nothing is saved until Confirm.
 
 Contact fields: `name, category, interests[], notes, preferred_frequency_days,
 last_interaction_at, next_followup_at` (ISO timestamps with offset).
@@ -57,6 +80,27 @@ last_interaction_at, next_followup_at` (ISO timestamps with offset).
 | GET | `/api/rooms/:token/pay` | | guest; own payment (or `null`), status refreshed from Pine Labs while pending |
 
 Room page route for the frontend: `/m/:token`.
+
+### Guest room page (`/m/:token`)
+
+A static page in `public/room/` (`index.html`, `room.js`, `room.css`). A Next.js
+rewrite in `next.config.ts` serves it at `/m/:token`. The UI is ported from
+Arindom Chetia's PR #3 (`static/room.*`) and runs on the room API above.
+
+- Guests join with a name. The guest cookie is httpOnly, so the page never
+  stores the guest secret. Each guest then sets their name, budget min/max,
+  area, food, activities and availability (`PATCH /me`).
+- The page polls `GET /api/rooms/:token` every 4 s and pauses while the tab is
+  hidden. It shows the participant list, a best-time tally built from
+  availability, and the shortlist with its "Sample suggestion" labels and
+  `shortlist_note`.
+- Each guest has one vote. Voting for another venue moves the vote, and
+  tapping your current vote withdraws it (`DELETE /vote`).
+- When `is_organizer` is true, the signed-in organiser can confirm a venue or
+  close the room. Rooms can't be reopened.
+- The page shows the confirmed venue and the closed state. API errors
+  (401/404/409/410/429) show the API's `{ error }` message. All
+  guest-provided text is escaped.
 
 `preferences`: `{ budget_min?, budget_max?, area?, food?: string[], activities?: string[] }`
 `availability`: `string[]`, e.g. `["Sat evening", "Sun lunch"]`
@@ -100,6 +144,8 @@ instances. Over the limit returns 429 `Too many requests, slow down`.
 | POST / DELETE `/vote`, PATCH `/me` | 30/min (shared) |
 | POST `/confirm`, `/close` | 30/min (shared) |
 | GET / POST `/pay` | 10/min |
+| POST `/api/extract` | 10/min per signed-in user |
+| GET `/api/voice/signed-url` | 5 per 10 min per signed-in user |
 
 Presets live in `lib/ratelimit.ts`; a new room route adds one line, e.g.
 `await limitRoom(req, 'pay', token)`. If the limiter RPC fails the request is
@@ -157,9 +203,10 @@ http://localhost:3000/organizer/ . Any 401 from `/api/me/*` redirects to
   Personal / Professional / Community with a live total that must equal 100.
   Nothing is saved before Confirm, which calls `POST /api/me/contacts` with
   `{ contacts: [...] }` and `PUT /api/me/goals`. Skip is allowed at any point.
-  Person C's voice extraction can pre-fill the screen by setting
-  `window.ORGANIZER_PREFILL` or sessionStorage `org_prefill` to
-  `{ contacts: [...], goals: {...} }` before the page loads.
+  "Talk instead" (voice) and "Type instead" (text) call `/api/extract` and
+  pre-fill this screen (see Voice onboarding above). Other code can still
+  pre-fill it by setting `window.ORGANIZER_PREFILL` or sessionStorage
+  `org_prefill` to `{ contacts: [...], goals: {...} }` before the page loads.
 - **Dashboard** - one `GET /api/me/dashboard`. Contact counts and recorded
   activity are shown as separately labelled numbers (the activity caption is
   `recorded_activity.label`); a goals-vs-activity comparison appears only when
@@ -173,8 +220,8 @@ http://localhost:3000/organizer/ . Any 401 from `/api/me/*` redirects to
   the server roll it forward by the contact's check-in frequency.
 - **Meetups** - create (title, activity, area, optional date/time and budget
   in INR - no contact picker; guests join via the link), then Copy link / Copy
-  invite text. The room page `/m/<token>` is Person C's; the app only links to
-  it. Meetups can be closed via PATCH `{ status: "closed" }`.
+  invite text. The room page `/m/<token>` is Person C's (see Guest room page);
+  the app only links to it. Meetups can be closed via PATCH `{ status: "closed" }`.
 - Errors render the API's `{ "error": "message" }`; every list has loading,
   empty and error states; everything survives a refresh and works at phone and
   desktop widths.
