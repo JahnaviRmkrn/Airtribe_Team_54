@@ -1,6 +1,6 @@
 import { guestUpdate } from '@/lib/schemas';
-import { handle, HttpError, ok, parseBody } from '@/lib/http';
-import { getRoom, requireGuest, requireOpen, roomView } from '@/lib/room';
+import { handle, ok, parseBody } from '@/lib/http';
+import { getRoom, requireGuest, requireOpen, roomView, roomWriteError } from '@/lib/room';
 import { adminClient } from '@/lib/supabase/admin';
 
 type Ctx = { params: Promise<{ token: string }> };
@@ -26,6 +26,6 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
   const me = await requireGuest(req, room);
   const body = await parseBody(req, guestUpdate);
   const { error } = await adminClient().from('meetup_attendees').update(body).eq('id', me.id).eq('meetup_id', room.id);
-  if (error) throw new HttpError(400, 'Could not update');
+  roomWriteError(error, 'Could not update');
   return ok(await roomView(req, room));
 });

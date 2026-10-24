@@ -4,13 +4,15 @@
 // keep the two calls (signInWithOtp / signInWithPassword) and the callback URL.
 import { useState } from 'react';
 import { browserClient } from '@/lib/supabase/browser';
+import { safeNext } from '@/lib/urls';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [msg, setMsg] = useState('');
   const supabase = browserClient();
-  const next = typeof window === 'undefined' ? '/' : new URLSearchParams(location.search).get('next') ?? '/';
+  // Untrusted query value: only same-origin paths survive.
+  const next = typeof window === 'undefined' ? '/' : safeNext(new URLSearchParams(location.search).get('next'), location.origin);
 
   async function magicLink(e: React.FormEvent) {
     e.preventDefault();

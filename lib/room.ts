@@ -37,6 +37,15 @@ export async function getRoom(token: string): Promise<MeetupRow> {
   return data as MeetupRow;
 }
 
+// Maps errors raised by the room-state triggers (see review_fixes migration).
+export function roomWriteError(error: { message: string } | null, fallback: string) {
+  if (!error) return;
+  if (error.message.includes('room_closed')) throw new HttpError(410, 'This meetup room is closed');
+  if (error.message.includes('room_full')) throw new HttpError(429, 'Room is full');
+  if (error.message.includes('venue_confirmed')) throw new HttpError(409, 'The organiser has already confirmed a venue');
+  throw new HttpError(400, fallback);
+}
+
 export function requireOpen(room: MeetupRow) {
   if (room.status !== 'open') throw new HttpError(410, 'This meetup room is closed');
 }
@@ -78,12 +87,14 @@ export async function requireGuest(req: Request, room: MeetupRow) {
 // Never organizer identity, contacts, notes, or guest secrets.
 export async function roomView(req: Request, room: MeetupRow, isOrganizer = false) {
   const db = adminClient();
-  const [{ data: attendees }, { data: votes }, { data: venues }, me] = await Promise.all([
+  const [{ data: attendees, error: aErr }, { data: votes, error: vErr }, { data: venues, error: venErr }, me] = await Promise.all([
     db.from('meetup_attendees').select('id, guest_name, preferences, availability, joined_at').eq('meetup_id', room.id).order('joined_at'),
     db.from('venue_votes').select('venue_id, attendee_id').eq('meetup_id', room.id),
     db.from('venues').select('id, name, area, city, activity_types, tags, price_per_person, details, source_type'),
     currentGuest(req, room),
   ]);
+  // Never build a room (and shortlist) from partial data.
+  if (aErr || vErr || venErr) throw new HttpError(503, 'Could not load room, please retry');
 
   const list = shortlist(
     { activity: room.activity, area: room.area, budget: room.budget },
