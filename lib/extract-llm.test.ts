@@ -6,7 +6,7 @@ vi.mock('server-only', () => ({}));
 
 import { extract } from './extract-llm';
 
-const ENV_KEYS = ['DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL', 'DEEPSEEK_MODEL', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'EXTRACT_MODEL'];
+const ENV_KEYS = ['DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL', 'DEEPSEEK_MODEL', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'EXTRACT_MODEL'];
 const saved: Record<string, string | undefined> = {};
 
 const LLM_JSON = JSON.stringify({
@@ -91,6 +91,18 @@ describe('extract provider chain', () => {
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
       'https://api.openai.com/v1/chat/completions',
     ]);
+  });
+
+  it('points the OpenAI provider at OPENAI_BASE_URL when set', async () => {
+    process.env.OPENAI_API_KEY = 'o-key';
+    process.env.OPENAI_BASE_URL = 'https://api.groq.com/openai/v1/';
+    process.env.EXTRACT_MODEL = 'llama-3.3-70b';
+    const calls = mockFetch(() => openAiShape(LLM_JSON));
+
+    const r = await extract('hi');
+    expect(r.source).toBe('openai');
+    expect(calls[0].url).toBe('https://api.groq.com/openai/v1/chat/completions');
+    expect(JSON.parse(String(calls[0].init.body)).model).toBe('llama-3.3-70b');
   });
 
   it('skips providers without keys', async () => {
