@@ -1,5 +1,6 @@
+// NEXT_PUBLIC_SITE_URL (prod URL) wins over the request origin; trailing slash tolerated.
 export const roomUrl = (req: Request, token: string) =>
-  `${process.env.NEXT_PUBLIC_SITE_URL ?? new URL(req.url).origin}/m/${token}`;
+  `${(process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin).replace(/\/+$/, '')}/m/${token}`;
 
 // Turns an untrusted ?next= value into a same-origin path, or '/'.
 // Resolving first catches javascript:, //host, /\host and similar tricks.

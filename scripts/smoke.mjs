@@ -1,16 +1,35 @@
-// End-to-end API smoke test. Run with the dev server up:
-//   node scripts/smoke.mjs
-// Reads NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY from .env.local.
-import { readFileSync } from 'node:fs';
+// End-to-end API smoke test.
+//   node scripts/smoke.mjs                          # local dev server, keys from .env.local
+//   NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_ANON_KEY=... \
+//     node scripts/smoke.mjs https://<app>.vercel.app   # or BASE_URL=...
+// Keys come from the process env, plus ENV_FILE (default: .env.local, read only
+// for a localhost base URL so local keys never mix with a prod run).
+// Without SUPABASE_SERVICE_ROLE_KEY the DB-trigger checks are skipped; leave it
+// unset against prod (those checks write junk rows with the service role).
+// Signs up throwaway users at SMOKE_EMAIL_DOMAIN (default example.com).
+import { existsSync, readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
 
-const env = Object.fromEntries(
-  readFileSync(new URL('../.env.local', import.meta.url), 'utf8')
-    .split('\n')
-    .filter((l) => l.includes('=') && !l.startsWith('#'))
-    .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]),
-);
-const BASE = process.env.BASE_URL ?? 'http://localhost:3000';
+const BASE = (process.argv[2] ?? process.env.BASE_URL ?? 'http://localhost:3000').replace(/\/+$/, '');
+const local = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(BASE);
+const file = process.env.ENV_FILE ?? (local ? new URL('../.env.local', import.meta.url) : null);
+const env = {
+  ...(file && existsSync(file)
+    ? Object.fromEntries(
+        readFileSync(file, 'utf8')
+          .split('\n')
+          .filter((l) => l.includes('=') && !l.startsWith('#'))
+          .map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).trim()]),
+      )
+    : {}),
+  ...Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /SUPABASE/.test(k) && v)),
+};
+if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  console.error('Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY (env, ENV_FILE, or .env.local for localhost).');
+  process.exit(1);
+}
+const EMAIL_DOMAIN = process.env.SMOKE_EMAIL_DOMAIN ?? 'example.com';
+console.log(`smoke: ${BASE}`);
 const sb = () => createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, { auth: { persistSession: false } });
 
 let failures = 0;
@@ -20,9 +39,10 @@ const check = (name, cond, extra = '') => {
 };
 
 async function signUp(tag) {
-  const email = `${tag}-${Date.now()}@example.com`;
+  const email = `${tag}-${Date.now()}@${EMAIL_DOMAIN}`;
   const { data, error } = await sb().auth.signUp({ email, password: 'password-123456' });
   if (error) throw error;
+  if (!data.session) throw new Error('Sign-up returned no session: turn off "Confirm email" in Supabase Auth settings.');
   return data.session.access_token;
 }
 
@@ -150,31 +170,36 @@ const mine = r.json.attendees.find((a) => a.guest_name === 'Pref Guest 2');
 check('guest name edit keeps preferences', mine?.preferences?.food?.[0] === 'veg' && mine?.availability?.[0] === 'Sun', JSON.stringify(mine));
 
 // Room-state rules hold even if the API's own check is bypassed (DB trigger).
-const admin = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-await call('POST', `/api/rooms/${brunch}/close`, { token: alice });
-const { data: m } = await admin.from('meetups').select('id').eq('room_token', brunch).single();
-const { error: dbErr } = await admin.from('meetup_attendees').insert({ meetup_id: m.id, guest_name: 'sneaky', secret_hash: 'x' });
-check('DB rejects join into closed room', dbErr?.message.includes('room_closed'), JSON.stringify(dbErr));
+// Needs the service role, so only runs when SUPABASE_SERVICE_ROLE_KEY is set.
+if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.log('SKIP  service-role DB checks (SUPABASE_SERVICE_ROLE_KEY not set)');
+} else {
+  const admin = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+  await call('POST', `/api/rooms/${brunch}/close`, { token: alice });
+  const { data: m } = await admin.from('meetups').select('id').eq('room_token', brunch).single();
+  const { error: dbErr } = await admin.from('meetup_attendees').insert({ meetup_id: m.id, guest_name: 'sneaky', secret_hash: 'x' });
+  check('DB rejects join into closed room', dbErr?.message.includes('room_closed'), JSON.stringify(dbErr));
 
-r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Full room', activity: 'dinner' } });
-const full = r.json.meetup;
-await admin.from('meetup_attendees').insert(Array.from({ length: 50 }, (_, i) => ({ meetup_id: full.id, guest_name: `g${i}`, secret_hash: `h${i}` })));
-check('51st guest is rejected', (await call('POST', `/api/rooms/${full.room_token}/join`, { body: { guest_name: 'one too many' } })).status === 429);
+  r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Full room', activity: 'dinner' } });
+  const full = r.json.meetup;
+  await admin.from('meetup_attendees').insert(Array.from({ length: 50 }, (_, i) => ({ meetup_id: full.id, guest_name: `g${i}`, secret_hash: `h${i}` })));
+  check('51st guest is rejected', (await call('POST', `/api/rooms/${full.room_token}/join`, { body: { guest_name: 'one too many' } })).status === 429);
 
-r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Last week', starts_at: new Date(Date.now() - 7 * 86400000).toISOString() } });
-const pastId = r.json.meetup.id;
-r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Expired room' } });
-const expiredId = r.json.meetup.id;
-await admin.from('meetups').update({ expires_at: new Date(Date.now() - 60000).toISOString() }).eq('id', expiredId);
-r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Unscheduled' } });
-const unscheduledId = r.json.meetup.id;
-r = await call('GET', '/api/me/dashboard', { token: alice });
-const upIds = r.json.upcoming_meetups.map((m) => m.id);
-check(
-  'dashboard hides past and expired meetups, keeps unscheduled',
-  !upIds.includes(pastId) && !upIds.includes(expiredId) && upIds.includes(unscheduledId),
-  JSON.stringify(r.json.upcoming_meetups.map((m) => m.title)),
-);
+  r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Last week', starts_at: new Date(Date.now() - 7 * 86400000).toISOString() } });
+  const pastId = r.json.meetup.id;
+  r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Expired room' } });
+  const expiredId = r.json.meetup.id;
+  await admin.from('meetups').update({ expires_at: new Date(Date.now() - 60000).toISOString() }).eq('id', expiredId);
+  r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Unscheduled' } });
+  const unscheduledId = r.json.meetup.id;
+  r = await call('GET', '/api/me/dashboard', { token: alice });
+  const upIds = r.json.upcoming_meetups.map((m) => m.id);
+  check(
+    'dashboard hides past and expired meetups, keeps unscheduled',
+    !upIds.includes(pastId) && !upIds.includes(expiredId) && upIds.includes(unscheduledId),
+    JSON.stringify(r.json.upcoming_meetups.map((m) => m.title)),
+  );
+}
 
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
 process.exit(failures ? 1 : 0);

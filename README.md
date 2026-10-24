@@ -15,9 +15,8 @@ pnpm test                      # shortlist unit tests
 node scripts/smoke.mjs         # end-to-end API check (needs dev server running)
 ```
 
-Hosted Supabase: create a project, run `supabase link` then `supabase db push`,
-run `supabase/seed.sql` in the SQL editor, and turn off "Confirm email" in
-Auth settings for the demo. Put the project URL/keys in the deployment env.
+Deploying (Vercel + hosted Supabase): see [DEPLOY.md](DEPLOY.md).
+`pnpm check-env` validates the env (`--prod` for production values).
 
 ## Auth
 
