@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { shortlist, type Venue } from './shortlist';
+import { AREAS } from './geo';
 
 const v = (o: Partial<Venue> & { name: string }): Venue => ({
   id: o.name,
@@ -48,5 +49,32 @@ describe('shortlist', () => {
 
   it('returns [] when no venue matches the activity', () => {
     expect(shortlist({ activity: 'bowling' }, [], venues)).toEqual([]);
+  });
+});
+
+describe('meet in the middle', () => {
+  const venues: Venue[] = [
+    v({ name: 'Whitefield Diner', area: 'Whitefield' }),
+    v({ name: 'Domlur Diner', area: 'Domlur' }),
+    v({ name: 'Jayanagar Diner', area: 'Jayanagar' }),
+  ];
+  const people = [AREAS.whitefield, AREAS.jayanagar];
+
+  it('ranks the place in the middle first and reports travel', () => {
+    const list = shortlist({ activity: 'dinner' }, [{}, {}], venues, 5, { people });
+    expect(list[0].venue.name).toBe('Domlur Diner');
+    expect(list[0].travel!.max_km).toBeLessThan(list[1].travel!.max_km);
+    expect(list[0].reasons.some((r) => r.startsWith('Max '))).toBe(true);
+  });
+
+  it('suggests by distance alone when there is no other signal', () => {
+    const list = shortlist({}, [{}, {}], venues, 5, { people });
+    expect(list.length).toBe(3);
+    expect(list[0].venue.name).toBe('Domlur Diner');
+  });
+
+  it('ignores distance with fewer than two people', () => {
+    const list = shortlist({ activity: 'dinner' }, [{}], venues, 5, { people: [AREAS.whitefield] });
+    expect(list.every((i) => !i.travel)).toBe(true);
   });
 });

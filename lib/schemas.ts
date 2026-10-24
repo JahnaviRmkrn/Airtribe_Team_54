@@ -46,6 +46,7 @@ const meetupBase = z.object({
   area: z.string().trim().max(80).nullable(),
   starts_at: isoDate,
   budget: z.number().int().min(0).max(1_000_000).nullable(),
+  notes: z.string().trim().max(2000).nullable(),
 });
 export const meetupCreate = meetupBase.partial().required({ title: true }).extend({
   activity: meetupBase.shape.activity.default('dinner'),
@@ -60,6 +61,14 @@ export const guestPreferences = z
     budget_min: z.number().int().min(0).max(1_000_000).optional(),
     budget_max: z.number().int().min(0).max(1_000_000).optional(),
     area: z.string().trim().max(80).optional(),
+    // "Meet in the middle": where this guest is coming from. Rounded to 3
+    // decimals (~110 m) before storage; other guests only ever see ~1 km.
+    location: z
+      .object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180), label: z.string().trim().max(80).optional() })
+      .strict()
+      .transform((l) => ({ ...l, lat: Math.round(l.lat * 1000) / 1000, lng: Math.round(l.lng * 1000) / 1000 }))
+      .nullable() // null = stop sharing; omitted on PATCH = keep what's stored
+      .optional(),
     food: tags.optional(),
     activities: tags.optional(),
   })
