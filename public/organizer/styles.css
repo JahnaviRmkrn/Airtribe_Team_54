@@ -411,3 +411,8 @@ a.button:hover { border-color: #75e4de; }
 }
 .nav-back:hover:not(:disabled) { border-color: #f6ac0d; background: rgba(246, 172, 13, 0.18); }
 .topbar-left { display: inline-flex; align-items: center; }
+
+/* --- room QR code ------------------------------------------------------------ */
+.qr-slot { padding: 4px 0 14px; }
+.qr-box { width: 200px; max-width: 70vw; background: #fff; border: 1px solid #f3ecdc; border-radius: 12px; padding: 8px; }
+.qr-box svg { display: block; width: 100%; height: auto; }

@@ -144,6 +144,42 @@ function renderError(err, retry) {
   el('retry-btn').onclick = retry;
 }
 
+// Room QR code: scan from a phone and join with no account. The generator is
+// loaded only when someone taps "QR code", pinned with SRI like Leaflet/ElevenLabs.
+const QR_JS = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+const QR_SRI = 'sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k';
+let qrLoading = null;
+function loadQr() {
+  if (window.qrcode) return Promise.resolve(window.qrcode);
+  qrLoading ??= new Promise((resolve, reject) => {
+    const s = Object.assign(document.createElement('script'), { src: QR_JS, integrity: QR_SRI, crossOrigin: 'anonymous', async: true });
+    s.onload = () => (window.qrcode ? resolve(window.qrcode) : reject(new Error('QR library missing')));
+    s.onerror = () => { qrLoading = null; reject(new Error('Could not load the QR code generator')); };
+    document.head.appendChild(s);
+  });
+  return qrLoading;
+}
+async function toggleQr(btn) {
+  const row = btn.closest('.row');
+  const open = row.nextElementSibling;
+  if (open && open.classList.contains('qr-slot')) { open.remove(); btn.textContent = 'QR code'; return; }
+  const slot = document.createElement('div');
+  slot.className = 'qr-slot';
+  slot.innerHTML = '<p class="muted">Loading QR code...</p>';
+  row.after(slot);
+  btn.textContent = 'Hide QR';
+  try {
+    const qrcode = await loadQr();
+    const qr = qrcode(0, 'M');
+    qr.addData(btn.dataset.qr);
+    qr.make();
+    slot.innerHTML = `<div class="qr-box">${qr.createSvgTag({ cellSize: 6, margin: 2, scalable: true, alt: 'QR code for the meetup room', title: 'Meetup room' })}</div>
+      <p class="muted">Guests scan this to open the room on their phone. No account or app needed.</p>`;
+  } catch (e) {
+    slot.innerHTML = `<p class="error">${esc(e.message || 'Could not make the QR code')}. Use Copy link instead.</p>`;
+  }
+}
+
 function copyText(text, btn, label) {
   const done = () => {
     btn.textContent = 'Copied!';
@@ -352,7 +388,7 @@ async function dashboardView() {
             ${m.activity ? `<span class="tag">${esc(m.activity)}</span>` : ''}
             <div class="muted">${[m.area, fmtDate(m.starts_at)].filter(Boolean).join(' · ')}</div>
           </div>
-          ${m.room_token ? `<div class="actions"><a class="button" href="${esc(roomUrl(m.room_token))}" target="_blank" rel="noopener">Open room</a><button data-copy="${esc(roomUrl(m.room_token))}">Copy link</button></div>` : ''}
+          ${m.room_token ? `<div class="actions"><a class="button" href="${esc(roomUrl(m.room_token))}" target="_blank" rel="noopener">Open room</a><button data-copy="${esc(roomUrl(m.room_token))}">Copy link</button><button data-qr="${esc(roomUrl(m.room_token))}">QR code</button></div>` : ''}
         </div>`).join('') : '<p class="muted">No meetups planned yet. Plan one to get people together.</p>'}
     </section>
     </div>
@@ -365,6 +401,7 @@ async function dashboardView() {
   wireCalendar();
   wireGuideCard();
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
+  document.querySelectorAll('[data-qr]').forEach((b) => { b.onclick = () => toggleQr(b); });
   document.querySelectorAll('[data-done]').forEach((b) => { b.onclick = () => markDoneForm(b); });
   document.querySelectorAll('[data-draft]').forEach((b) => {
     b.onclick = () => draftPanel(b.closest('.row').parentElement.insertBefore(rowSlot(b), b.closest('.row').nextSibling), b.dataset.draft, b.dataset.name);
@@ -916,6 +953,7 @@ function meetupRow(m) {
       </div>
       <div class="actions">
         ${url ? `<button data-copy="${esc(url)}">Copy link</button>` : ''}
+        ${url && !closed ? `<button data-qr="${esc(url)}">QR code</button>` : ''}
         ${url && !closed ? `<a class="button" href="${esc(meetupInviteEmail(m, url))}">Email invite</a>` : ''}
         ${!closed ? `<button class="danger" data-close="${esc(m.id)}">Close</button>` : ''}
       </div>
@@ -924,6 +962,7 @@ function meetupRow(m) {
 
 function wireMeetupRows() {
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
+  document.querySelectorAll('[data-qr]').forEach((b) => { b.onclick = () => toggleQr(b); });
   document.querySelectorAll('[data-close]').forEach((b) => {
     b.onclick = async () => {
       if (!confirm('Close this meetup? Guests will no longer be able to vote.')) return;
