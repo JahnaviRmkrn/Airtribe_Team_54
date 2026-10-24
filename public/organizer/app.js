@@ -22,6 +22,16 @@ const fmtDay = (iso) => {
   const d = new Date(iso);
   return isNaN(d) ? String(iso) : d.toLocaleDateString(undefined, { dateStyle: 'medium' });
 };
+// Whole days from today to a check-in date: < 0 overdue, 0 due today, null
+// unscheduled. Every screen uses this one rule (the API's lib/due.ts matches),
+// so a check-in due today never shows as overdue.
+const dueIn = (iso) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0); d.setHours(0, 0, 0, 0);
+  return Math.round((d - today) / 864e5);
+};
 const toISO = (local) => (local ? new Date(local).toISOString() : undefined);
 const parseInterests = (text) => String(text || '').split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -206,14 +216,7 @@ function draftPanel(container, contactId, name) {
 
 // "Your people": every contact, soonest check-in first, with a due badge.
 function peopleCard(contacts) {
-  const DAY = 86400000;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const due = (c) => {
-    if (!c.next_followup_at) return null;
-    const d = new Date(c.next_followup_at); d.setHours(0, 0, 0, 0);
-    const n = Math.round((d - today) / DAY);
-    return Number.isFinite(n) ? n : null;
-  };
+  const due = (c) => dueIn(c.next_followup_at);
   const badge = (n) => n === null ? '' : n < 0 ? '<span class="due due-late">overdue</span>'
     : n === 0 ? '<span class="due due-today">today</span>'
     : n <= 7 ? '<span class="due">soon</span>' : `<span class="due">in ${n} days</span>`;
@@ -270,21 +273,27 @@ async function dashboardView() {
     return;
   }
 
-  const followupRow = (f, overdue) => `
-    <div class="row" data-fu-name="${esc(f.name || '')}">
-      <div><strong>${esc(f.name || 'Someone')}</strong>
-        ${f.category ? `<span class="tag">${esc(catLabel(f.category))}</span>` : ''}${overdue ? ' <span class="tag overdue">Overdue</span>' : ''}
-        <div class="muted">${overdue ? 'Was due' : 'Due'} ${esc(fmtDay(f.next_followup_at))}</div>
-      </div>
+  const followupActions = (f) => `
       <div class="actions">
         <button data-draft="${esc(f.id || f.contact_id || '')}" data-name="${esc(f.name || '')}">Draft message</button>
         <button data-done="${esc(f.id || f.contact_id || '')}" data-name="${esc(f.name || '')}">Mark done</button>
-      </div>
+      </div>`;
+  const followupRow = (f) => {
+    const n = dueIn(f.next_followup_at);
+    return `
+    <div class="row" data-fu-name="${esc(f.name || '')}">
+      <div><strong>${esc(f.name || 'Someone')}</strong>
+        ${f.category ? `<span class="tag">${esc(catLabel(f.category))}</span>` : ''}${n < 0 ? ' <span class="tag overdue">Overdue</span>' : ''}
+        <div class="muted">${n < 0 ? `Was due ${esc(fmtDay(f.next_followup_at))}` : n === 0 ? 'Due today' : `Due ${esc(fmtDay(f.next_followup_at))}`}</div>
+      </div>${followupActions(f)}
     </div>`;
+  };
 
   if (stale(nav)) return;
-  const nOver = (followups.overdue || []).length;
-  const nWeek = (followups.upcoming || []).filter((f) => new Date(f.next_followup_at).getTime() < Date.now() + 7 * 864e5).length;
+  const allFollowups = [...(followups.overdue || []), ...(followups.upcoming || [])]
+    .sort((a, b) => (dueIn(a.next_followup_at) ?? 1e9) - (dueIn(b.next_followup_at) ?? 1e9));
+  const nOver = allFollowups.filter((f) => dueIn(f.next_followup_at) < 0).length;
+  const nWeek = allFollowups.filter((f) => { const n = dueIn(f.next_followup_at); return n !== null && n >= 0 && n <= 7; }).length;
   const nMeet = meetups.length;
   const chip = (n, label, cls, target) => `<button class="sum-chip ${cls}" data-jump="${target}"><span class="sum-num">${n}</span><span>${label}</span></button>`;
   const summary = `<div class="summary" role="group" aria-label="At a glance">
@@ -332,9 +341,8 @@ async function dashboardView() {
     <div class="dash-grid">
     <section class="card" id="sec-followups">
       <h2>Follow-ups</h2>
-      ${(followups.overdue || []).map((f) => followupRow(f, true)).join('')}
-      ${(followups.upcoming || []).map((f) => followupRow(f, false)).join('')}
-      ${!(followups.overdue || []).length && !(followups.upcoming || []).length ? '<p class="muted">No follow-ups due.</p>' : ''}
+      ${allFollowups.map(followupRow).join('')}
+      ${!allFollowups.length ? '<p class="muted">No follow-ups due.</p>' : ''}
     </section>
     <section class="card" id="sec-meetups">
       <h2>Upcoming meetups</h2>
@@ -343,9 +351,8 @@ async function dashboardView() {
           <div><strong>${esc(m.title)}</strong>
             ${m.activity ? `<span class="tag">${esc(m.activity)}</span>` : ''}
             <div class="muted">${[m.area, fmtDate(m.starts_at)].filter(Boolean).join(' · ')}</div>
-            ${m.room_token ? `<div class="muted mono">${esc(roomUrl(m.room_token))}</div>` : ''}
           </div>
-          ${m.room_token ? `<div class="actions"><button data-copy="${esc(roomUrl(m.room_token))}">Copy link</button></div>` : ''}
+          ${m.room_token ? `<div class="actions"><a class="button" href="${esc(roomUrl(m.room_token))}" target="_blank" rel="noopener">Open room</a><button data-copy="${esc(roomUrl(m.room_token))}">Copy link</button></div>` : ''}
         </div>`).join('') : '<p class="muted">No meetups planned yet. Plan one to get people together.</p>'}
     </section>
     </div>
@@ -386,14 +393,11 @@ function networkGraphSVG(contacts) {
   const BANDS = [[36, 86], [100, 152], [166, 214]];
   const RING_LABELS = ['Overdue', 'This week', 'Later'];
   const DOT_FILL = { personal: '#E89B00', professional: '#04C1E1', community: '#3FAE9C' };
-  const now = Date.now();
-  const WEEK = 7 * 24 * 3600 * 1000;
   const urgency = (c) => {
-    if (!c.next_followup_at) return 2;
-    const t = new Date(c.next_followup_at).getTime();
-    if (isNaN(t)) return 2;
-    if (t < now - 24 * 3600 * 1000) return 0;
-    if (t < now + WEEK) return 1;
+    const n = dueIn(c.next_followup_at);
+    if (n === null) return 2;
+    if (n < 0) return 0;
+    if (n <= 7) return 1;
     return 2;
   };
   // Deterministic layout: dots in the same category + timing slot are spread
@@ -454,7 +458,6 @@ function networkGraphSVG(contacts) {
 // yellow: due soon, turns red if you don't reach out). Icon = network:
 // professional 💼, personal ❤️, community ● dot; meetups 📅.
 const CAT_ICON = { professional: '💼', personal: '❤️', community: '●' };
-const dayStart = (d) => { const t = new Date(d); t.setHours(0, 0, 0, 0); return t; };
 const lateText = (n) => `${n} day${n === 1 ? '' : 's'} overdue`;
 function calMarker(e) {
   if (e.kind === 'meetup') return `<i class="cal-mark meetup" title="${esc(e.label)}">📅</i>`;
@@ -470,7 +473,6 @@ function calLine(e) {
 
 function calendarHTML(contacts, meetups) {
   const now = new Date();
-  const today0 = dayStart(now);
   const year = now.getFullYear(), month = now.getMonth();
   const monthName = now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const first = new Date(year, month, 1);
@@ -483,10 +485,11 @@ function calendarHTML(contacts, meetups) {
   };
   const overdue = [];
   (contacts || []).forEach((c) => {
-    const t = c.next_followup_at && new Date(c.next_followup_at);
-    if (!t || isNaN(t)) return;
-    const late = Math.round((today0 - dayStart(t)) / 864e5);
-    const ev = { kind: 'followup', status: late > 0 ? 'overdue' : 'soon', cat: c.category, label: c.name || 'Someone', late };
+    const n = dueIn(c.next_followup_at);
+    if (n === null) return;
+    const t = new Date(c.next_followup_at);
+    const late = -n;
+    const ev = { kind: 'followup', status: late > 0 ? 'overdue' : 'soon', id: c.id, cat: c.category, label: c.name || 'Someone', late };
     if (late > 0) overdue.push(ev);
     add(t, ev);
   });
@@ -510,7 +513,13 @@ function calendarHTML(contacts, meetups) {
   }
   const names = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => `<div class="cal-head">${d}</div>`).join('');
   const todayLabel = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const lines = overdue.map((e) => `<li class="late">${calMarker(e)}<span>${calLine(e)}</span></li>`);
+  // Overdue people get the same Draft message / Mark done actions as the
+  // Follow-ups card, so you can act straight from "Today".
+  const lines = overdue.map((e) => `<li class="late row"><span class="cal-line">${calMarker(e)}<span>${calLine(e)}</span></span>${e.id ? `
+      <div class="actions">
+        <button data-draft="${esc(e.id)}" data-name="${esc(e.label)}">Draft message</button>
+        <button data-done="${esc(e.id)}" data-name="${esc(e.label)}">Mark done</button>
+      </div>` : ''}</li>`);
   return `<div class="calendar">
     <div class="cal-todaybar"><strong>Today</strong> ${esc(todayLabel)}
       ${overdue.length ? `<span class="cal-overdue-count">${overdue.length} overdue</span>` : '<span class="cal-ok">All caught up</span>'}</div>
@@ -680,13 +689,15 @@ async function contactsView() {
 }
 
 function contactRow(c) {
-  const t = c.next_followup_at ? new Date(c.next_followup_at).getTime() : NaN;
-  const overdue = !isNaN(t) && t < Date.now() - 24 * 3600 * 1000;
+  const n = dueIn(c.next_followup_at);
+  const overdue = n !== null && n < 0;
+  const when = n === null ? 'No check-in scheduled' : overdue ? 'Was due ' + esc(fmtDay(c.next_followup_at))
+    : n === 0 ? 'Check-in due today' : 'Next check-in ' + esc(fmtDay(c.next_followup_at));
   return `
     <div class="row contact-row">
       <div><strong>${esc(c.name)}</strong> <span class="tag">${esc(catLabel(c.category))}</span>${overdue ? ' <span class="tag overdue">Overdue</span>' : ''}
         ${(c.interests || []).length ? `<div class="interest-pills">${c.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}</div>` : ''}
-        <div class="muted">${c.next_followup_at ? (overdue ? 'Was due ' : 'Next check-in ') + esc(fmtDay(c.next_followup_at)) : 'No check-in scheduled'}</div>
+        <div class="muted">${when}</div>
       </div>
       <div class="actions"><button data-view="${esc(c.id)}">Open</button></div>
     </div>`;
@@ -705,10 +716,9 @@ async function contactDetailView(id) {
   } catch (e) { if (stale(nav)) return; return renderError(e, () => contactDetailView(id)); }
 
   if (stale(nav)) return;
-  const tt = contact.next_followup_at ? new Date(contact.next_followup_at).getTime() : NaN;
-  const dueDays = isNaN(tt) ? null : Math.round((tt - Date.now()) / 864e5);
-  const dueText = dueDays === null ? 'No check-in scheduled' : dueDays < -1 ? `Check-in overdue by ${-dueDays} days` : dueDays <= 0 ? 'Check-in due today' : `Next check-in in ${dueDays} day${dueDays === 1 ? '' : 's'}`;
-  const dueCls = dueDays !== null && dueDays < -1 ? 'warn' : dueDays !== null && dueDays <= 7 ? 'soon' : 'ok';
+  const dueDays = dueIn(contact.next_followup_at);
+  const dueText = dueDays === null ? 'No check-in scheduled' : dueDays < 0 ? `Check-in overdue by ${-dueDays} day${dueDays === -1 ? '' : 's'}` : dueDays === 0 ? 'Check-in due today' : `Next check-in in ${dueDays} day${dueDays === 1 ? '' : 's'}`;
+  const dueCls = dueDays !== null && dueDays < 0 ? 'warn' : dueDays !== null && dueDays <= 7 ? 'soon' : 'ok';
   el('app').innerHTML = `
     <p><button class="link-btn" id="back">← All contacts</button></p>
     <section class="card profile" id="profile-card">
@@ -980,10 +990,12 @@ const MUOP_CHAR = `
     </g>
   </svg>`;
 
-// Pretty, collapsible guide card on the first page. The collapse choice is remembered.
+// Pretty, collapsible guide card on the first page. Open on the first visit,
+// collapsed after that so returning users see their people first; an explicit
+// open/close choice is remembered.
 function guideCardHTML() {
   return `
-    <details class="card guide-card" id="guide-card" open>
+    <details class="card guide-card" id="guide-card">
       <summary>
         <span class="guide-char" aria-hidden="true">${MUOP_CHAR}</span>
         <span class="guide-title">
@@ -1001,8 +1013,15 @@ function guideCardHTML() {
 function wireGuideCard() {
   const gc = el('guide-card');
   if (!gc) return;
-  try { gc.open = localStorage.getItem('org_guide_open') !== '0'; } catch { /* stays open */ }
+  try {
+    const pref = localStorage.getItem('org_guide_open');
+    gc.open = pref === null ? localStorage.getItem('org_guide_seen') !== '1' : pref === '1';
+    localStorage.setItem('org_guide_seen', '1');
+  } catch { gc.open = true; }
+  // Opening it here fires one 'toggle' too; only the user's own clicks are saved.
+  let skip = gc.open;
   gc.addEventListener('toggle', () => {
+    if (skip) { skip = false; return; }
     try { localStorage.setItem('org_guide_open', gc.open ? '1' : '0'); } catch { /* ignore */ }
   });
 }

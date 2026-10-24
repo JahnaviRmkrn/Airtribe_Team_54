@@ -199,7 +199,7 @@ export default function ResetPasswordPage() {
         {done && <p className="login-msg info">Password updated - taking you back into the app...</p>}
 
         <p className="login-footer">
-          <ShieldIcon /> Protected by standard SSL & end-to-end encryption
+          <ShieldIcon /> Secured with HTTPS
         </p>
 
         {msg && <p className={`login-msg ${isError ? 'error' : 'info'}`}>{msg}</p>}

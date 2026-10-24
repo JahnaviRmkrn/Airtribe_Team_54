@@ -12,6 +12,15 @@ const nextConfig: NextConfig = {
       { source: "/organizer", destination: "/organizer/index.html" },
     ];
   },
+  // The organizer and room apps are unversioned static files. With the default
+  // 4h max-age, a deploy could pair new app.js with a stale styles.css (seen on
+  // the dashboard guide card). no-cache keeps them cached but revalidated by ETag.
+  async headers() {
+    return ["/organizer", "/organizer/:path*", "/room/:path*", "/m/:token"].map((source) => ({
+      source,
+      headers: [{ key: "Cache-Control", value: "no-cache" }],
+    }));
+  },
 };
 
 export default nextConfig;

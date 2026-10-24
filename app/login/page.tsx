@@ -4,11 +4,12 @@
 // Social providers (Google, Facebook, LinkedIn, Instagram) run through Supabase
 // Auth's signInWithOAuth; the email magic link and password calls are unchanged.
 // Provider setup (developer apps, client IDs, callback URLs) is documented in
-// docs/social-auth-setup.md - a button shows the API's error until its provider
-// is enabled in the Supabase project.
+// docs/social-auth-setup.md. Only providers the Supabase project reports as
+// enabled (GET /auth/v1/settings) get a button, so unconfigured ones never show.
 import { useEffect, useState } from 'react';
 import type { Provider } from '@supabase/supabase-js';
 import { browserClient } from '@/lib/supabase/browser';
+import { supabaseAnonKey, supabaseUrl } from '@/lib/env';
 import { safeNext } from '@/lib/urls';
 import { track } from '@vercel/analytics';
 import './login.css';
@@ -144,6 +145,22 @@ export default function LoginPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const supabase = browserClient();
   const [initialError, setInitialError] = useState('');
+  // Google is the configured default; the rest appear once the project says
+  // they're enabled. If the settings call fails, Google stays the only one.
+  const [enabledProviders, setEnabledProviders] = useState<string[]>(['google']);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${supabaseUrl()}/auth/v1/settings`, { headers: { apikey: supabaseAnonKey() } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s: { external?: Record<string, boolean> } | null) => {
+        if (cancelled || !s?.external) return;
+        setEnabledProviders(SOCIAL_PROVIDERS.map((p) => p.id).filter((id) => s.external![id] === true));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const socialProviders = SOCIAL_PROVIDERS.filter((p) => enabledProviders.includes(p.id));
 
   // Untrusted query values: only same-origin paths survive safeNext. Computed
   // after mount so server and client first renders match.
@@ -379,10 +396,11 @@ export default function LoginPage() {
           </button>
         </form>
 
+        {socialProviders.length > 0 && (<>
         <div className="login-divider">or continue with</div>
 
         <div className="social-row">
-          {SOCIAL_PROVIDERS.map((p) => (
+          {socialProviders.map((p) => (
             <button
               key={p.id}
               type="button"
@@ -397,9 +415,10 @@ export default function LoginPage() {
             </button>
           ))}
         </div>
+        </>)}
 
         <p className="login-footer">
-          <ShieldIcon /> Protected by standard SSL & end-to-end encryption
+          <ShieldIcon /> Secured with HTTPS
         </p>
 
         {(msg || initialError) && (
