@@ -32,3 +32,7 @@ The three UI fixes have been incorporated from #10 and inspected. C's product ac
 ## Acceptance owner
 
 The coordinating Team 54 agent identified C as Arindom Chetia (`arindomchetia12`), author of #3, and confirmed it cannot accept on his behalf. There is no known C agent session. C's acceptance must be recorded by him on the port PR; the current review is not that sign-off.
+
+## User acceptance recorded
+
+Arvind explicitly waived C's sign-off on 24 October 2026 at 17:13 IST: “i accept no sign off needed”. Verified in the user-authored message of session `833cdead-2597-405d-bc5c-5795e698f639`, message `d9a0b6a4-de9e-4f95-80fd-3f3e5eeee10c`. This supersedes the requirement above for C to accept the dropped behaviors. It is Arvind's acceptance, not C's. Runtime rehearsal remains outstanding.

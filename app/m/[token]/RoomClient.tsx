@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import './room.css';
+import PaymentPanel from './PaymentPanel';
 import { track } from '@vercel/analytics';
 
 // Shapes mirror the public room API (see README "Public room API").
@@ -404,6 +405,8 @@ export default function RoomClient() {
             {confirmed.details && <p className="room-muted">{confirmed.details}</p>}
           </div>
         )}
+
+        {confirmed && view.me && <PaymentPanel key={view.me.attendee_id} callApi={callApi} closed={closed} price={confirmed.price_per_person} />}
 
         {notice && (
           <div className="room-card room-notice" role="status">
