@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { browserClient } from '@/lib/supabase/browser';
 import { safeNext } from '@/lib/urls';
+import { track } from '@vercel/analytics';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -29,8 +30,13 @@ export default function LoginPage() {
       : { error: { message: 'Enter a password' } };
     if (error) {
       // First time: create the account (email confirmation is off for the prototype).
-      const { error: e2 } = await supabase.auth.signUp({ email, password });
+      const { data, error: e2 } = await supabase.auth.signUp({ email, password });
       if (e2) return setMsg(e2.message);
+      // Supabase returns an empty identities list for an existing account.
+      if (data.user?.identities?.length && Date.now() - Date.parse(data.user.created_at) < 60_000) {
+        track('sign_up', { method: 'password' });
+      }
+      if (!data.session) return setMsg('Check your email to confirm your account.');
     }
     location.href = next;
   }

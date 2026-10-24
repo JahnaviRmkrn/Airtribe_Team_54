@@ -2,6 +2,7 @@ import { meetupCreate } from '@/lib/schemas';
 import { dbError, handle, ok, parseBody, requireUser } from '@/lib/http';
 import { roomUrl } from '@/lib/urls';
 import { roomExpiry } from '@/lib/expiry';
+import { trackProductEvent } from '@/lib/product-analytics';
 
 // GET /api/me/meetups -> the organizer's meetups
 export const GET = handle(async (req: Request) => {
@@ -24,6 +25,7 @@ export const POST = handle(async (req: Request) => {
     .single();
   dbError(error);
   const room_url = roomUrl(req, data.room_token);
+  await trackProductEvent('meetup_created');
   const when = data.starts_at ? ` on ${new Date(data.starts_at).toDateString()}` : '';
   return ok(
     {

@@ -2,6 +2,7 @@ import { guestJoin } from '@/lib/schemas';
 import { handle, HttpError, ok, parseBody } from '@/lib/http';
 import { currentGuest, getRoom, hashSecret, newSecret, requireOpen, roomView, roomWriteError, setGuestCookie } from '@/lib/room';
 import { adminClient } from '@/lib/supabase/admin';
+import { trackProductEvent } from '@/lib/product-analytics';
 
 type Ctx = { params: Promise<{ token: string }> };
 
@@ -24,5 +25,6 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
     .single();
   roomWriteError(error, 'Could not join');
   await setGuestCookie(room, secret);
+  await trackProductEvent('guest_joined');
   return ok({ attendee_id: data!.id, guest_secret: secret, room: await roomView(new Request(req.url, { headers: { 'x-guest-secret': secret } }), room) }, 201);
 });
