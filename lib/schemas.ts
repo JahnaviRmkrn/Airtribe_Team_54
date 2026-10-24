@@ -62,7 +62,11 @@ export const guestPreferences = z
     food: tags.optional(),
     activities: tags.optional(),
   })
-  .strict();
+  .strict()
+  .refine((p) => p.budget_min == null || p.budget_max == null || p.budget_min <= p.budget_max, {
+    message: 'Minimum budget must not exceed maximum budget',
+    path: ['budget_min'],
+  });
 const availability = z.array(z.string().trim().min(1).max(80)).max(20);
 
 const guestBase = z.object({

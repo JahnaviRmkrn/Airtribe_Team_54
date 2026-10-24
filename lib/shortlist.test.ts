@@ -50,3 +50,19 @@ describe('shortlist', () => {
     expect(shortlist({ activity: 'bowling' }, [], venues)).toEqual([]);
   });
 });
+
+describe('budget-only preferences', () => {
+  it('uses an organizer budget as enough signal to suggest affordable venues', () => {
+    const result = shortlist({ budget: 500 }, [], venues);
+    expect(result.map((item) => item.venue.name).sort()).toEqual(['Cafe', 'Cheap Veg']);
+  });
+
+  it('uses a guest budget even without activity, food, or area', () => {
+    const result = shortlist({}, [{ budget_max: 350 }], venues);
+    expect(result.map((item) => item.venue.name)).toEqual(['Cheap Veg']);
+  });
+
+  it('does not infer affordability when a venue has no price', () => {
+    expect(shortlist({ budget: 500 }, [], [v({ name: 'Unknown', price_per_person: null })])).toEqual([]);
+  });
+});

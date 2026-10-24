@@ -97,6 +97,7 @@ export function shortlist(
       if (meetup.budget != null) {
         if (price > meetup.budget) continue; // over the organiser's budget
         score += 1;
+        relevant = true;
         reasons.push(`Within organiser budget (~₹${price}/person)`);
       }
       if (budgets.length) {
@@ -104,6 +105,7 @@ export function shortlist(
           (p) => (p.budget_min == null || price >= p.budget_min * 0.5) && (p.budget_max == null || price <= p.budget_max),
         ).length;
         if (fits === 0) continue; // too expensive for everyone who set a budget
+        relevant = true;
         score += 2 * (fits / budgets.length) - 1;
         reasons.push(`Fits budget for ${fits}/${budgets.length}`);
       }
