@@ -1,11 +1,12 @@
-export default function Home() {
-  return (
-    <main style={{ fontFamily: 'system-ui', maxWidth: 640, margin: '10vh auto', padding: 16 }}>
-      <h1>Airtribe Team 54</h1>
-      <p>
-        Backend is up. API reference: see README. <a href="/login">Sign in</a>, then open the{' '}
-        <a href="/organizer/">Organizer app</a>.
-      </p>
-    </main>
-  );
+import { redirect } from 'next/navigation';
+import { userClient } from '@/lib/supabase/server';
+
+// Reads the session cookie, so this must render per request (not prerendered).
+export const dynamic = 'force-dynamic';
+
+// The home page is a router: signed-in users go to the organizer app,
+// everyone else to login (which returns them to the organizer app).
+export default async function Home() {
+  const { data } = await (await userClient()).auth.getUser();
+  redirect(data.user ? '/organizer' : '/login?next=%2Forganizer');
 }
