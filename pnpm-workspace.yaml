@@ -1,0 +1,3 @@
+allowBuilds:
+  # eslint-config-next's native resolver; its install script fetches the platform binary
+  unrs-resolver: true
