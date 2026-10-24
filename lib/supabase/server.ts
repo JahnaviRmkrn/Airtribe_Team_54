@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { supabaseAnonKey, supabaseUrl } from '../env';
 
 // Per-request client acting as the signed-in user (RLS applies).
 // Also accepts `Authorization: Bearer <access_token>` for API clients / curl.
@@ -7,8 +8,8 @@ export async function userClient(req?: Request) {
   const bearer = req?.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
   const cookieStore = await cookies();
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl(),
+    supabaseAnonKey(),
     {
       cookies: {
         getAll: () => cookieStore.getAll(),

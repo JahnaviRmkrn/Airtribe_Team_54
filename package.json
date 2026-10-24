@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "check-env": "node scripts/check-env.mjs",
     "tla": "cd spec && java -cp ${TLA2TOOLS:-$HOME/.local/share/tla/tla2tools.jar} tlc2.TLC -workers auto -deadlock -cleanup MeetupRoom"
   },
   "dependencies": {
