@@ -75,7 +75,6 @@ export default function LoginPage() {
   const [msg, setMsg] = useState('');
   const [isError, setIsError] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const supabase = browserClient();
   const [initialError, setInitialError] = useState('');
 
   // Untrusted query values: only same-origin paths survive safeNext. Computed
@@ -100,7 +99,7 @@ export default function LoginPage() {
     setBusy(provider.id);
     setMsg('');
     setIsError(false);
-    const { error } = await supabase.auth.signInWithOAuth({
+    const { error } = await browserClient().auth.signInWithOAuth({
       provider: provider.id as Provider,
       options: { redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
     });
@@ -117,7 +116,7 @@ export default function LoginPage() {
     setBusy('email');
     setMsg('');
     setIsError(false);
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await browserClient().auth.signInWithOtp({
       email,
       options: { emailRedirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
     });
@@ -131,11 +130,11 @@ export default function LoginPage() {
     setMsg('');
     setIsError(false);
     const { error } = password
-      ? await supabase.auth.signInWithPassword({ email, password })
+      ? await browserClient().auth.signInWithPassword({ email, password })
       : { error: { message: 'Enter a password' } };
     if (error) {
       // First time: create the account (email confirmation is off for the prototype).
-      const { error: e2 } = await supabase.auth.signUp({ email, password });
+      const { error: e2 } = await browserClient().auth.signUp({ email, password });
       if (e2) {
         setBusy(null);
         setIsError(true);
