@@ -1,7 +1,8 @@
 import 'server-only';
 import { clean, EXTRACT_PROMPT, llmOutput, ruleExtract, type ExtractResult } from './extract';
 
-// Calls Gemini (if GEMINI_API_KEY is set) or OpenAI (if OPENAI_API_KEY is set)
+// Calls Gemini (if GEMINI_API_KEY is set) or OpenAI (if OPENAI_API_KEY is set;
+// OPENAI_BASE_URL points it at any OpenAI-compatible API, e.g. DeepSeek)
 // and falls back to the rule-based parser on any failure, so onboarding never
 // dead-ends. Keys are server-only and never reach the browser.
 
@@ -35,7 +36,7 @@ async function gemini(text: string, key: string): Promise<string> {
 
 async function openai(text: string, key: string): Promise<string> {
   const data = await postJson(
-    'https://api.openai.com/v1/chat/completions',
+    `${(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '')}/chat/completions`,
     {
       model: process.env.EXTRACT_MODEL || 'gpt-4o-mini',
       temperature: 0,
