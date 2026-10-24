@@ -1,6 +1,7 @@
 import { meetupUpdate } from '@/lib/schemas';
 import { dbError, handle, ok, parseBody, requireUser } from '@/lib/http';
 import { roomUrl } from '@/lib/urls';
+import { roomExpiry } from '@/lib/expiry';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -22,7 +23,9 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
   const { id } = await params;
   const { supabase } = await requireUser(req);
   const body = await parseBody(req, meetupUpdate);
-  const { data, error } = await supabase.from('meetups').update(body).eq('id', id).select('*').single();
+  // Rescheduling recomputes room expiry with the same rule as creation.
+  const patch = body.starts_at !== undefined ? { ...body, expires_at: roomExpiry(body.starts_at) } : body;
+  const { data, error } = await supabase.from('meetups').update(patch).eq('id', id).select('*').single();
   dbError(error);
   return ok({ meetup: { ...data, room_url: roomUrl(req, data.room_token) } });
 });

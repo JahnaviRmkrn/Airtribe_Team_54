@@ -19,10 +19,14 @@ export const GET = handle(async (req: Request) => {
       .select('id, occurred_at, type, notes, contact:contacts(id, name, category)')
       .gte('occurred_at', since)
       .order('occurred_at', { ascending: false }),
+    // Upcoming = open, room not expired, and not already in the past
+    // (unscheduled meetups with no starts_at stay visible).
     supabase
       .from('meetups')
       .select('id, title, activity, area, starts_at, status, room_token, final_venue_id')
       .eq('status', 'open')
+      .gt('expires_at', now.toISOString())
+      .or(`starts_at.is.null,starts_at.gte.${now.toISOString()}`)
       .order('starts_at', { ascending: true, nullsFirst: false }),
   ]);
   [contacts, goals, interactions, meetups].forEach((r) => dbError(r.error));

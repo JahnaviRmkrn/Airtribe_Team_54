@@ -1,6 +1,7 @@
 import { meetupCreate } from '@/lib/schemas';
 import { dbError, handle, ok, parseBody, requireUser } from '@/lib/http';
 import { roomUrl } from '@/lib/urls';
+import { roomExpiry } from '@/lib/expiry';
 
 // GET /api/me/meetups -> the organizer's meetups
 export const GET = handle(async (req: Request) => {
@@ -15,9 +16,7 @@ export const GET = handle(async (req: Request) => {
 export const POST = handle(async (req: Request) => {
   const { supabase, user } = await requireUser(req);
   const body = await parseBody(req, meetupCreate);
-  const expires_at = new Date(
-    Math.max(Date.now() + 14 * 86_400_000, body.starts_at ? Date.parse(body.starts_at) + 2 * 86_400_000 : 0),
-  ).toISOString();
+  const expires_at = roomExpiry(body.starts_at);
   const { data, error } = await supabase
     .from('meetups')
     .insert({ ...body, organizer_id: user.id, expires_at })

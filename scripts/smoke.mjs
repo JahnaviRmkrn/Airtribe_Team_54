@@ -116,5 +116,65 @@ check('organiser closes room', (await call('POST', `/api/rooms/${token}/close`, 
 check('closed room is read-only', (await call('POST', `/api/rooms/${token}/join`, { body: { guest_name: 'Late' } })).status === 410);
 check('closed room still readable', (await call('GET', `/api/rooms/${token}`)).json.meetup.status === 'closed');
 
+// --- regression checks for review fixes ---------------------------------
+r = await call('PATCH', `/api/me/contacts/${sister.id}`, { token: alice, body: { name: 'Sister (renamed)' } });
+check('partial contact edit keeps interests', r.json.contact.interests?.includes('food'), JSON.stringify(r.json));
+
+const today = new Date().toISOString();
+r = await call('POST', '/api/me/interactions', { token: alice, body: { contact_id: sister.id, occurred_at: today } });
+const latest = r.json.contact;
+r = await call('POST', '/api/me/interactions', {
+  token: alice,
+  body: { contact_id: sister.id, occurred_at: new Date(Date.now() - 30 * 86400000).toISOString().replace('Z', '+05:30') },
+});
+check(
+  'older interaction does not move dates back',
+  r.status === 201 && r.json.contact.last_interaction_at === latest.last_interaction_at && r.json.contact.next_followup_at === latest.next_followup_at,
+  JSON.stringify({ before: latest, after: r.json.contact }),
+);
+
+r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Coffee', activity: 'coffee', area: 'Indiranagar' } });
+const coffee = r.json.meetup;
+const later = new Date(Date.now() + 40 * 86400000).toISOString();
+r = await call('PATCH', `/api/me/meetups/${coffee.id}`, { token: alice, body: { starts_at: later } });
+check('reschedule extends room expiry', Date.parse(r.json.meetup.expires_at) > Date.parse(later), JSON.stringify(r.json.meetup));
+r = await call('PATCH', `/api/me/meetups/${coffee.id}`, { token: alice, body: { status: 'closed' } });
+check('closing keeps activity', r.json.meetup.activity === 'coffee' && r.json.meetup.status === 'closed', JSON.stringify(r.json.meetup));
+
+r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Brunch', activity: 'brunch', area: 'Jayanagar' } });
+const brunch = r.json.meetup.room_token;
+r = await call('POST', `/api/rooms/${brunch}/join`, { body: { guest_name: 'Pref Guest', preferences: { food: ['veg'] }, availability: ['Sun'] } });
+const pg = r.json.guest_secret;
+r = await call('PATCH', `/api/rooms/${brunch}/me`, { guest: pg, body: { guest_name: 'Pref Guest 2' } });
+const mine = r.json.attendees.find((a) => a.guest_name === 'Pref Guest 2');
+check('guest name edit keeps preferences', mine?.preferences?.food?.[0] === 'veg' && mine?.availability?.[0] === 'Sun', JSON.stringify(mine));
+
+// Room-state rules hold even if the API's own check is bypassed (DB trigger).
+const admin = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+await call('POST', `/api/rooms/${brunch}/close`, { token: alice });
+const { data: m } = await admin.from('meetups').select('id').eq('room_token', brunch).single();
+const { error: dbErr } = await admin.from('meetup_attendees').insert({ meetup_id: m.id, guest_name: 'sneaky', secret_hash: 'x' });
+check('DB rejects join into closed room', dbErr?.message.includes('room_closed'), JSON.stringify(dbErr));
+
+r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Full room', activity: 'dinner' } });
+const full = r.json.meetup;
+await admin.from('meetup_attendees').insert(Array.from({ length: 50 }, (_, i) => ({ meetup_id: full.id, guest_name: `g${i}`, secret_hash: `h${i}` })));
+check('51st guest is rejected', (await call('POST', `/api/rooms/${full.room_token}/join`, { body: { guest_name: 'one too many' } })).status === 429);
+
+r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Last week', starts_at: new Date(Date.now() - 7 * 86400000).toISOString() } });
+const pastId = r.json.meetup.id;
+r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Expired room' } });
+const expiredId = r.json.meetup.id;
+await admin.from('meetups').update({ expires_at: new Date(Date.now() - 60000).toISOString() }).eq('id', expiredId);
+r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Unscheduled' } });
+const unscheduledId = r.json.meetup.id;
+r = await call('GET', '/api/me/dashboard', { token: alice });
+const upIds = r.json.upcoming_meetups.map((m) => m.id);
+check(
+  'dashboard hides past and expired meetups, keeps unscheduled',
+  !upIds.includes(pastId) && !upIds.includes(expiredId) && upIds.includes(unscheduledId),
+  JSON.stringify(r.json.upcoming_meetups.map((m) => m.title)),
+);
+
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
 process.exit(failures ? 1 : 0);

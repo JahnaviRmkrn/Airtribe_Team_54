@@ -4,16 +4,21 @@ export const category = z.enum(['personal', 'professional', 'community']);
 const isoDate = z.iso.datetime({ offset: true }).nullable();
 const tags = z.array(z.string().trim().min(1).max(40)).max(20);
 
-export const contactCreate = z.object({
+// Base shapes have no defaults: Zod 4 keeps defaults through .partial(), which
+// would make a PATCH overwrite omitted fields. Defaults live on create only.
+const contactBase = z.object({
   name: z.string().trim().min(1).max(120),
   category,
-  interests: tags.default([]),
-  notes: z.string().max(5000).nullable().optional(),
-  preferred_frequency_days: z.number().int().min(1).max(365).nullable().optional(),
-  last_interaction_at: isoDate.optional(),
-  next_followup_at: isoDate.optional(),
+  interests: tags,
+  notes: z.string().max(5000).nullable(),
+  preferred_frequency_days: z.number().int().min(1).max(365).nullable(),
+  last_interaction_at: isoDate,
+  next_followup_at: isoDate,
 });
-export const contactUpdate = contactCreate.partial();
+export const contactCreate = contactBase.partial().required({ name: true, category: true }).extend({
+  interests: tags.default([]),
+});
+export const contactUpdate = contactBase.partial();
 // Onboarding confirm step saves up to five contacts at once.
 export const contactBulk = z.object({ contacts: z.array(contactCreate).min(1).max(5) });
 
@@ -34,14 +39,17 @@ export const interactionCreate = z.object({
   next_followup_at: isoDate.optional(),
 });
 
-export const meetupCreate = z.object({
+const meetupBase = z.object({
   title: z.string().trim().min(1).max(120),
-  activity: z.string().trim().min(1).max(40).default('dinner'),
-  area: z.string().trim().max(80).nullable().optional(),
-  starts_at: isoDate.optional(),
-  budget: z.number().int().min(0).max(1_000_000).nullable().optional(),
+  activity: z.string().trim().min(1).max(40),
+  area: z.string().trim().max(80).nullable(),
+  starts_at: isoDate,
+  budget: z.number().int().min(0).max(1_000_000).nullable(),
 });
-export const meetupUpdate = meetupCreate.partial().extend({
+export const meetupCreate = meetupBase.partial().required({ title: true }).extend({
+  activity: meetupBase.shape.activity.default('dinner'),
+});
+export const meetupUpdate = meetupBase.partial().extend({
   status: z.enum(['open', 'closed']).optional(),
   final_venue_id: z.uuid().nullable().optional(),
 });
@@ -57,12 +65,16 @@ export const guestPreferences = z
   .strict();
 const availability = z.array(z.string().trim().min(1).max(80)).max(20);
 
-export const guestJoin = z.object({
+const guestBase = z.object({
   guest_name: z.string().trim().min(1).max(60),
+  preferences: guestPreferences,
+  availability,
+});
+export const guestJoin = guestBase.extend({
   preferences: guestPreferences.default({}),
   availability: availability.default([]),
 });
-export const guestUpdate = guestJoin.partial();
+export const guestUpdate = guestBase.partial();
 
 export const voteBody = z.object({ venue_id: z.uuid() });
 export const confirmBody = z.object({ venue_id: z.uuid() });
