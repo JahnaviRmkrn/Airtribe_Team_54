@@ -35,6 +35,6 @@ export const DELETE = handle(async (req: Request, { params }: Ctx) => {
   requireOpen(room);
   const me = await requireGuest(req, room);
   const { error } = await adminClient().from('venue_votes').delete().eq('meetup_id', room.id).eq('attendee_id', me.id);
-  if (error) throw new HttpError(400, 'Could not withdraw vote');
+  roomWriteError(error, 'Could not withdraw vote');
   return ok(await roomView(req, room));
 });
