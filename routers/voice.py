@@ -71,18 +71,20 @@ between a user and a voice assistant for Moup, a relationship management app.
 
 Return ONLY JSON of this exact shape:
 {"name": str | null,
+ "email": str | null,
  "contacts": [{"name": str, "category": "Family"|"Friends"|"Work"|"Mentors", "notes": str}],
  "goals": {"Family": int, "Friends": int, "Work": int, "Mentors": int},
  "action": "confirm" | null}
 
 Rules:
-- name: the user's name if they said "my name is ...", "I'm ...", "call me ...", otherwise null.
+- name: the user's name if they said "my name is ...", "I'm ...", "call me ...", "name is ...", "set name to ...", otherwise null.
+- email: the user's email address if they said "my email is ...", "...@...", or spoken "user at domain dot com", otherwise null. Normalize to lowercase user@domain.com format.
 - contacts: at most 5 real people the USER mentioned (not the assistant). Use first
-  names as said. notes = one short phrase of context (relationship, role, or notes).
+  names as said. notes = one short phrase of context (relationship, role, or notes). Do NOT include the user themselves in contacts.
 - goals: how the user wants to split attention across Family, Friends, Work, Mentors, integers
   summing to 100. If they gave numbers, use them. Otherwise infer from emphasis.
 - action: set to "confirm" ONLY if the user explicitly commanded to save, confirm, submit, or finish.
-- Never invent people. If none were mentioned, return an empty list.
+- Never invent people or fake details. If none were mentioned, return an empty list or null.
 
 Transcript:
 """

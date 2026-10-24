@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -29,6 +30,14 @@ _load_dotenv()
 from routers import api, rooms, voice  # noqa: E402  (env must be loaded first)
 
 app = FastAPI(title="Moup API (mock)", version="0.2.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(api.router, prefix="/api")
 app.include_router(voice.router, prefix="/api", tags=["voice"])
