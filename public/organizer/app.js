@@ -8,8 +8,8 @@ const ACTIVITIES = ['dinner', 'coffee', 'drinks', 'brunch', 'activity'];
 
 const catLabel = (c) => (c ? c.charAt(0).toUpperCase() + c.slice(1) : '');
 const el = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => (
-  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
 
 const fmtDate = (iso) => {
@@ -629,6 +629,7 @@ function onboardingView() {
     voice = window.Voice ? window.Voice.mount(el('voice-mount'), applyExtraction) : null;
     el('ob-add').onclick = () => {
       if (rows.length >= 5) { el('ob-error').textContent = 'Up to 5 people for now - you can add more from Contacts later.'; return; }
+      collectRows();
       rows.push(emptyRow());
       renderRows();
     };
@@ -647,7 +648,7 @@ function onboardingView() {
         <label>Name <input data-f="name" value="${esc(r.name)}" placeholder="Name"></label>
         <label>Category <select data-f="category">${CATEGORIES.map((c) => `<option value="${c}" ${c === r.category ? 'selected' : ''}>${catLabel(c)}</option>`).join('')}</select></label>
         <label>Interests <input data-f="interests" value="${esc(r.interests)}" placeholder="hiking, chai"></label>
-        <label>Every (days) <input data-f="freq" type="number" min="1" value="${r.freq}"></label>
+        <label>Every (days) <input data-f="freq" type="number" min="1" value="${Number(r.freq) || 14}"></label>
         ${rows.length > 1 ? '<button class="danger remove-row" data-rm="' + i + '">×</button>' : '<span></span>'}
       </div>`).join('');
     document.querySelectorAll('[data-rm]').forEach((b) => {
@@ -733,10 +734,10 @@ async function boot() {
   }
   const onboarded = localStorage.getItem('org_onboarded') === '1';
   const hash = location.hash || '#/dashboard';
-  if (d.is_empty && !onboarded && hash !== '#/onboarding') {
-    return go('#/onboarding');
-  }
   window.onhashchange = route;
+  if (d.is_empty && !onboarded && hash !== '#/onboarding') {
+    go('#/onboarding');
+  }
   route();
 }
 

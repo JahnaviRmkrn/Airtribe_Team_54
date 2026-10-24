@@ -157,6 +157,8 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
+# Local only. Hosted Auth URLs are set in the dashboard (DEPLOY.md); do not run
+# `supabase config push` with these values or prod links will point at localhost.
 site_url = "http://localhost:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
