@@ -1,0 +1,61 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f5f7; color: #1c1e21; }
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: #fff; border-bottom: 1px solid #e4e6eb; position: sticky; top: 0; z-index: 10; }
+.brand { font-weight: 700; font-size: 18px; }
+.nav a { margin-left: 14px; color: #3b5998; text-decoration: none; font-size: 15px; }
+.nav a.active { font-weight: 700; text-decoration: underline; }
+.container { max-width: 760px; margin: 24px auto; padding: 0 16px 40px; }
+.card { background: #fff; border: 1px solid #e4e6eb; border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+h1 { font-size: 22px; }
+h2 { font-size: 17px; margin-top: 0; }
+label { display: block; margin: 10px 0; font-size: 14px; }
+input, select, textarea { width: 100%; padding: 9px 10px; border: 1px solid #ccd0d5; border-radius: 6px; font-size: 15px; margin-top: 4px; background: #fff; }
+button { padding: 9px 14px; border: 1px solid #ccd0d5; border-radius: 6px; background: #fff; font-size: 14px; cursor: pointer; }
+button.primary { background: #3b5998; border-color: #3b5998; color: #fff; font-weight: 600; }
+button.danger { color: #c00; border-color: #e3b9b9; }
+button.link-btn { background: none; border: none; color: #3b5998; padding: 0; font-size: 14px; }
+button:disabled { opacity: 0.6; cursor: default; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat-num { font-size: 30px; font-weight: 700; }
+.stat-label { font-weight: 600; }
+.quick-actions { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid #f0f1f3; }
+.row.spread { border-top: none; }
+.row .actions { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+.inline-form { display: grid; grid-template-columns: 2fr 1fr 2fr auto; gap: 8px; align-items: end; }
+.goals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.muted { color: #71767d; font-size: 13px; }
+.mono { font-family: ui-monospace, monospace; word-break: break-all; }
+.error { color: #c00; font-size: 14px; }
+.error-card { border-color: #e3b9b9; }
+.tag { background: #eef1f6; border-radius: 10px; padding: 2px 8px; font-size: 12px; color: #4a4f57; }
+.tag.overdue { background: #fde8e8; color: #b00; }
+.tag.status-closed { background: #eee; color: #777; }
+.tag.status-open { background: #e6f6e6; color: #175d17; }
+.hidden { display: none; }
+fieldset { border: 1px solid #e4e6eb; border-radius: 8px; margin: 10px 0; }
+.goal-bar { margin: 8px 0; }
+.goal-bar .bar-track { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: #eef1f6; margin-top: 4px; }
+.goal-bar .bar-goal { background: #c3cde6; }
+.goal-bar .bar-actual { background: #3b5998; }
+.ob-row { display: grid; grid-template-columns: 2fr 1.2fr 1.6fr 1fr auto; gap: 8px; align-items: end; margin-bottom: 8px; }
+.ob-row .remove-row { margin-bottom: 4px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.form-grid .full { grid-column: 1 / -1; }
+.state-box { padding: 24px; text-align: center; }
+.state-box p { margin: 6px 0; }
+.spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid #ccd0d5; border-top-color: #3b5998; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.step-dots { font-size: 13px; color: #71767d; margin-bottom: 8px; }
+.interest-pills { margin-top: 4px; }
+.interest-pills .tag { margin-right: 4px; display: inline-block; margin-bottom: 2px; }
+.invite-box { background: #f7f8fa; border: 1px solid #e4e6eb; border-radius: 8px; padding: 12px; margin-top: 10px; white-space: pre-wrap; font-size: 13px; }
+@media (max-width: 640px) {
+  .inline-form { grid-template-columns: 1fr; }
+  .ob-row { grid-template-columns: 1fr; }
+  .ob-row .remove-row { margin-bottom: 0; }
+  .form-grid { grid-template-columns: 1fr; }
+  .row { flex-direction: column; align-items: flex-start; }
+  .container { margin: 12px auto; }
+  button { padding: 11px 16px; }
+}
