@@ -1,10 +1,12 @@
+import { boundedInteger } from '@/lib/query';
 import { interactionCreate } from '@/lib/schemas';
 import { dbError, handle, HttpError, ok, parseBody, requireUser } from '@/lib/http';
 
 // GET /api/me/interactions?limit=20 -> recent activity (with contact name/category)
 export const GET = handle(async (req: Request) => {
   const { supabase } = await requireUser(req);
-  const limit = Math.min(Number(new URL(req.url).searchParams.get('limit')) || 20, 100);
+  const limit = boundedInteger(new URL(req.url).searchParams.get('limit'), 20, 100);
+  if (limit === null) throw new HttpError(400, 'limit must be a positive integer');
   const { data, error } = await supabase
     .from('interactions')
     .select('*, contact:contacts(id, name, category)')
