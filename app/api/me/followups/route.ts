@@ -1,0 +1,21 @@
+import { dbError, handle, ok, requireUser } from '@/lib/http';
+
+// GET /api/me/followups?days=14 -> { overdue: [...], upcoming: [...] }
+export const GET = handle(async (req: Request) => {
+  const { supabase } = await requireUser(req);
+  const days = Math.min(Number(new URL(req.url).searchParams.get('days')) || 14, 365);
+  const now = new Date();
+  const horizon = new Date(now.getTime() + days * 86_400_000).toISOString();
+  const { data, error } = await supabase
+    .from('contacts')
+    .select('id, name, category, next_followup_at, last_interaction_at')
+    .not('next_followup_at', 'is', null)
+    .lte('next_followup_at', horizon)
+    .order('next_followup_at');
+  dbError(error);
+  const iso = now.toISOString();
+  return ok({
+    overdue: (data ?? []).filter((c) => c.next_followup_at! < iso),
+    upcoming: (data ?? []).filter((c) => c.next_followup_at! >= iso),
+  });
+});
