@@ -48,3 +48,51 @@ describe('organizer meetup rendering', () => {
     expect(document.getElementById('app').innerHTML).not.toContain(attack);
   });
 });
+
+function followupRows() {
+  const rows = ['alice', 'bob'].map((name) => {
+    const fields = Object.fromEntries(['note', 'next', 'save', 'cancel', 'error'].map((key) => [key, { value: '', textContent: '', disabled: false }]));
+    const row = { innerHTML: '', fields, querySelector: (selector) => fields[selector.match(/data-fu="([^"]+)"/)[1]] };
+    return { row, button: { dataset: { done: name, name }, closest: () => row } };
+  });
+  const { context } = organizer({
+    document: { getElementById: (id) => rows[0].row.fields[id.replace('fu-', '')] },
+  });
+  vm.runInContext('dashboardView = async () => {}', context);
+  for (const { button } of rows) {
+    context.button = button;
+    vm.runInContext('markDoneForm(button)', context);
+  }
+  return { context, rows };
+}
+
+describe('independent follow-up forms', () => {
+  it('saves the correct contact and values with two forms open', async () => {
+    const { context, rows } = followupRows();
+    const saved = [];
+    context.fetch = async (_url, opts) => {
+      saved.push(JSON.parse(opts.body));
+      return { ok: true, status: 201, json: async () => ({}) };
+    };
+    rows[0].row.fields.note.value = 'Alice note';
+    rows[1].row.fields.note.value = 'Bob note';
+    expect(rows[0].row.fields.save.onclick).toBeTypeOf('function');
+    expect(rows[1].row.fields.save.onclick).toBeTypeOf('function');
+    await rows[0].row.fields.save.onclick();
+    await rows[1].row.fields.save.onclick();
+    expect(saved).toEqual([
+      { contact_id: 'alice', type: 'check_in', notes: 'Alice note' },
+      { contact_id: 'bob', type: 'check_in', notes: 'Bob note' },
+    ]);
+  });
+
+  it('shows a save error only in the corresponding form', async () => {
+    const { context, rows } = followupRows();
+    context.fetch = async () => { throw new Error('Offline'); };
+    expect(rows[1].row.fields.save.onclick).toBeTypeOf('function');
+    await rows[1].row.fields.save.onclick();
+    expect(rows[1].row.fields.error.textContent).toBe('Offline');
+    expect(rows[1].row.fields.save.disabled).toBe(false);
+    expect(rows[0].row.fields.error.textContent).toBe('');
+  });
+});

@@ -222,30 +222,31 @@ function goalsComparison(goals, act) {
 function markDoneForm(btn) {
   const row = btn.closest('.row');
   const contactId = btn.dataset.done;
+  const field = (name) => row.querySelector('[data-fu="' + name + '"]');
   row.innerHTML = `
     <div style="flex:1">
       <strong>${esc(btn.dataset.name || 'Follow-up')}</strong>
-      <label>Note <input id="fu-note" placeholder="How was the check-in?"></label>
-      <label>Next follow-up (optional) <input id="fu-next" type="date"></label>
+      <label>Note <input data-fu="note" placeholder="How was the check-in?"></label>
+      <label>Next follow-up (optional) <input data-fu="next" type="date"></label>
       <p class="muted">Leave the date blank to schedule by this person's check-in frequency.</p>
-      <p class="error" id="fu-error"></p>
+      <p class="error" data-fu="error"></p>
       <div class="actions">
-        <button class="primary" id="fu-save">Save</button>
-        <button id="fu-cancel">Cancel</button>
+        <button class="primary" data-fu="save">Save</button>
+        <button data-fu="cancel">Cancel</button>
       </div>
     </div>`;
-  el('fu-cancel').onclick = () => dashboardView();
-  el('fu-save').onclick = async () => {
-    el('fu-save').disabled = true;
-    const body = { contact_id: contactId, type: 'check_in', notes: el('fu-note').value.trim() };
-    const next = el('fu-next').value;
+  field('cancel').onclick = () => dashboardView();
+  field('save').onclick = async () => {
+    field('save').disabled = true;
+    const body = { contact_id: contactId, type: 'check_in', notes: field('note').value.trim() };
+    const next = field('next').value;
     if (next) body.next_followup_at = new Date(next + 'T12:00:00').toISOString();
     try {
       await api('/api/me/interactions', { method: 'POST', body: JSON.stringify(body) });
       dashboardView();
     } catch (e) {
-      el('fu-save').disabled = false;
-      el('fu-error').textContent = e.message;
+      field('save').disabled = false;
+      field('error').textContent = e.message;
     }
   };
 }
