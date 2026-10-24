@@ -19,7 +19,7 @@
 - Record a complete 3-minute take after the deployed build passes the same extraction and room smoke checks. Use fictional contacts, a test account, and two browser profiles. Hide notifications, password managers, credentials and unrelated tabs.
 - Record at 1080p with microphone and system audio. Verify the exported MP4 plays offline with audible speech. Save a second copy on the presenter's phone. Include the build commit and recording timestamp in a sidecar note.
 - Capture three short recovery clips too: voice → extraction, editable confirm → dashboard, guest vote → organizer confirm/close. Keep screenshots of the editable draft and closed room.
-- If microphone or ElevenLabs fails, say “I'll use the text input” and paste the exact spoken script. If extraction provider fails, identify the rule-based fallback honestly and review fields. If the backend or network fails, switch to the clearly labelled prerecorded demo; do not present it as live.
+- If microphone or ElevenLabs fails, say “I'll use the text input” and paste the exact spoken script. With the direct provider path, identify any rule-based fallback honestly and review fields. With AgenticOrg enabled, a pending approval or invalid output stops extraction: enter a manual draft or use the labelled backup recording; do not claim a fallback bypassed the review. If the backend or network fails, switch to the clearly labelled prerecorded demo; do not present it as live.
 - Before stage time: fresh demo account/room, charged phone, hotspot, permissions tested, volume checked, backup video open, and no production customer data visible.
 - Never claim speech quality from text fixtures. A real phone conversation and manual transcript review are still required.
 
