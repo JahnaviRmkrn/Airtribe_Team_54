@@ -7,3 +7,4 @@ venv/
 .mypy_cache/
 data/store.json
 .DS_Store
+cloudflared.exe
