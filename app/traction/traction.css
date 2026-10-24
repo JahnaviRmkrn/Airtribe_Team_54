@@ -1,0 +1,30 @@
+.traction {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 16px 64px;
+  font-family: var(--app-font-sans);
+  color: var(--ink);
+  background: var(--cream);
+  min-height: 100vh;
+}
+.tr-eyebrow { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); font-weight: 600; margin: 0 0 8px; }
+.traction h1 { font-family: var(--app-font-serif); font-size: clamp(30px, 6vw, 44px); line-height: 1.08; letter-spacing: -0.03em; margin: 0 0 12px; font-weight: 600; }
+.tr-lede { color: var(--soft-ink); font-size: 16px; line-height: 1.5; margin: 0 0 24px; }
+.tr-funnel { list-style: none; padding: 0; margin: 0 0 20px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.tr-funnel li { background: var(--sand); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+.tr-funnel li.done { background: rgba(246, 172, 13, 0.18); border-color: var(--sun-edge); }
+.tr-funnel strong { font-family: var(--app-font-serif); font-size: 32px; line-height: 1; }
+.tr-funnel span { font-size: 13px; color: var(--soft-ink); }
+.tr-card { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; margin-bottom: 16px; }
+.tr-card h2 { font-family: var(--app-font-serif); font-size: 21px; font-weight: 500; margin: 0 0 10px; }
+.tr-card ul { margin: 0; padding-left: 18px; line-height: 1.6; font-size: 14px; }
+.tr-log { list-style: none; padding: 0 !important; }
+.tr-log li { display: flex; gap: 14px; padding: 6px 0; border-top: 1px solid var(--muted); }
+.tr-log li:first-child { border-top: none; }
+.tr-log time { color: var(--soft-ink); min-width: 110px; font-variant-numeric: tabular-nums; }
+.tr-log li.voted span { font-weight: 600; }
+.tr-note { color: var(--soft-ink); }
+@media (max-width: 560px) {
+  .tr-funnel { grid-template-columns: 1fr 1fr; }
+  .tr-log li { flex-direction: column; gap: 0; }
+}

@@ -161,6 +161,7 @@ export default async function Home() {
         <div className="container-wide footer-inner">
           <BrandMark />
           <span>Make time for the people who matter.</span>
+          <a href="/traction" className="back-top">Live traction <ArrowUpRight size={14} /></a>
           <a href="#top" className="back-top">Back to the beginning <ArrowUpRight size={14} /></a>
         </div>
       </footer>
