@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import type { Provider } from '@supabase/supabase-js';
 import { browserClient } from '@/lib/supabase/browser';
 import { safeNext } from '@/lib/urls';
+import { passwordAuth, type PasswordMode } from '@/lib/password-auth';
 import './login.css';
 
 type SocialProvider = {
@@ -125,23 +126,33 @@ export default function LoginPage() {
     setMsg(error ? error.message : 'Check your email for a sign-in link.');
   }
 
-  async function withPassword() {
-    setBusy('password');
+  async function withPassword(mode: PasswordMode = 'sign_in') {
     setMsg('');
     setIsError(false);
-    const { error } = password
-      ? await browserClient().auth.signInWithPassword({ email, password })
-      : { error: { message: 'Enter a password' } };
-    if (error) {
-      // First time: create the account (email confirmation is off for the prototype).
-      const { error: e2 } = await browserClient().auth.signUp({ email, password });
-      if (e2) {
-        setBusy(null);
-        setIsError(true);
-        return setMsg(e2.message);
-      }
+    if (!email.trim() || !password) {
+      setIsError(true);
+      setMsg('Enter your email and password.');
+      return;
     }
-    location.href = next;
+    setBusy('password');
+    try {
+      const { signedIn } = await passwordAuth(
+        browserClient().auth, mode, email.trim(), password,
+        `${location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      );
+      if (signedIn) {
+        location.href = next;
+      } else {
+        setMsg(mode === 'sign_up'
+          ? 'Check your email to confirm your account before signing in.'
+          : 'Sign-in did not complete. Please try again.');
+      }
+    } catch (error) {
+      setIsError(true);
+      setMsg(error instanceof Error ? error.message : 'Sign-in did not complete. Please try again.');
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
@@ -195,7 +206,10 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
           <button type="submit" className="btn-secondary" disabled={busy !== null}>
-            {busy === 'password' ? 'Signing in...' : 'Sign in / sign up with password'}
+            {busy === 'password' ? 'Please wait...' : 'Sign in with password'}
+          </button>
+          <button type="button" className="btn-secondary" disabled={busy !== null} onClick={() => withPassword('sign_up')}>
+            Create account with password
           </button>
         </form>
 
