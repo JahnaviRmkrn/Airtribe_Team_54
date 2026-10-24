@@ -1,6 +1,6 @@
 // Gemini Live voice for the organizer: real spoken back-and-forth.
 //
-//   const s = await LiveVoice.start({ instructions, tools, onToolCall, onUser, onModel, onState });
+//   const s = await LiveVoice.start({ instructions, tools, onToolCall, onUser, onModel, onState, tokenUrl? });
 //   s.stop();
 //
 // The browser gets a single-use ephemeral token from /api/voice/live-token (the
@@ -45,8 +45,10 @@
   };
   const unb64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
 
-  async function getToken() {
-    const res = await fetch('/api/voice/live-token', { credentials: 'include' });
+  async function getToken(url) {
+    const u = new URL(url || '/api/voice/live-token', location.origin);
+    if (u.origin !== location.origin) throw new Error('Voice token URL must be same-origin');
+    const res = await fetch(u.href, { credentials: 'include' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(data.error || 'Voice is unavailable'), { status: res.status });
     return data;
@@ -55,7 +57,7 @@
   async function start(opts) {
     const { instructions = '', tools = [], onToolCall, onUser, onModel, onState = () => {} } = opts;
     onState('connecting');
-    const { token, model, voice } = await getToken();
+    const { token, model, voice } = await getToken(opts.tokenUrl);
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
