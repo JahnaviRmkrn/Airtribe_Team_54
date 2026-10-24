@@ -10,7 +10,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "check-env": "node scripts/check-env.mjs",
-    "tla": "cd spec && java -cp ${TLA2TOOLS:-$HOME/.local/share/tla/tla2tools.jar} tlc2.TLC -workers auto -deadlock -cleanup MeetupRoom"
+    "tla": "cd spec && java -cp ${TLA2TOOLS:-$HOME/.local/share/tla/tla2tools.jar} tlc2.TLC -workers auto -deadlock -cleanup MeetupRoom",
+    "prebuild": "node scripts/check-repo.mjs",
+    "check:repo": "node scripts/check-repo.mjs"
   },
   "dependencies": {
     "@plural_pinelabs/agent-toolkit": "0.1.5",
