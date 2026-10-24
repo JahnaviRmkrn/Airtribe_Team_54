@@ -63,6 +63,75 @@ function InstagramIcon() {
   );
 }
 
+// Brand mark: three connected dots (blue / orange / green) above the wordmark.
+function LogoMark() {
+  return (
+    <svg className="login-logo-icon" width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+      <path d="M22 13.5 14.5 28.5M22 13.5l7.5 15M14.5 29h15" stroke="#d9cfb6" strokeWidth="2" strokeLinecap="round"/>
+      <circle cx="22" cy="11" r="6.5" fill="#4a90d9"/>
+      <circle cx="12.5" cy="31" r="6.5" fill="#f2a93b"/>
+      <circle cx="31.5" cy="31" r="6.5" fill="#4caf7d"/>
+      <circle cx="22" cy="11" r="2.2" fill="#ffffff" opacity="0.85"/>
+      <circle cx="12.5" cy="31" r="2.2" fill="#ffffff" opacity="0.85"/>
+      <circle cx="31.5" cy="31" r="2.2" fill="#ffffff" opacity="0.85"/>
+    </svg>
+  );
+}
+
+function MailIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="14" rx="2.5"/>
+      <path d="m3.5 7 8.5 6 8.5-6"/>
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="5" y="11" width="14" height="9.5" rx="2.5"/>
+      <path d="M8 11V8a4 4 0 0 1 8 0v3"/>
+    </svg>
+  );
+}
+
+function EyeIcon({ off = false }: { off?: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>
+      <circle cx="12" cy="12" r="3"/>
+      {off && <line x1="3.5" y1="20.5" x2="20.5" y2="3.5"/>}
+    </svg>
+  );
+}
+
+function SparkleIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/>
+    </svg>
+  );
+}
+
+function ArrowIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 12h15"/>
+      <path d="m13 6 6 6-6 6"/>
+    </svg>
+  );
+}
+
+function ShieldIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/>
+      <path d="m9 12 2 2 4-4"/>
+    </svg>
+  );
+}
+
 const SOCIAL_PROVIDERS: SocialProvider[] = [
   { id: 'google', label: 'Continue with Google', icon: <GoogleIcon /> },
   { id: 'facebook', label: 'Continue with Facebook', icon: <FacebookIcon /> },
@@ -70,7 +139,12 @@ const SOCIAL_PROVIDERS: SocialProvider[] = [
   { id: 'custom:instagram', label: 'Continue with Instagram', icon: <InstagramIcon /> },
 ];
 
+type Mode = 'signin' | 'signup';
+
 export default function LoginPage() {
+  const [mode, setMode] = useState<Mode>('signin');
+  const [useMagic, setUseMagic] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [msg, setMsg] = useState('');
@@ -100,15 +174,18 @@ export default function LoginPage() {
     setBusy(provider.id);
     setMsg('');
     setIsError(false);
-    const { error } = await browserClient().auth.signInWithOAuth({
-      provider: provider.id as Provider,
-      options: { redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
-    });
-    // On success the browser is already leaving for the provider; only failures come back here.
-    if (error) {
+    try {
+      const { error } = await browserClient().auth.signInWithOAuth({
+        provider: provider.id as Provider,
+        options: { redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
+      });
+      if (error) throw error;
+      // Keep the form disabled while the browser leaves for the provider.
+    } catch (error) {
       setBusy(null);
       setIsError(true);
-      setMsg(`${provider.label.replace('Continue with ', '')} sign-in is not available yet: ${error.message}`);
+      const message = error instanceof Error ? error.message : 'Please try again.';
+      setMsg(`${provider.label.replace('Continue with ', '')} sign-in is not available yet: ${message}`);
     }
   }
 
@@ -117,16 +194,23 @@ export default function LoginPage() {
     setBusy('email');
     setMsg('');
     setIsError(false);
-    const { error } = await browserClient().auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
-    });
-    setBusy(null);
-    setIsError(!!error);
-    setMsg(error ? error.message : 'Check your email for a sign-in link.');
+    try {
+      const { error } = await browserClient().auth.signInWithOtp({
+        email: email.trim(),
+        options: { emailRedirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
+      });
+      if (error) throw error;
+      setMsg('Check your email for a sign-in link.');
+    } catch (error) {
+      setIsError(true);
+      setMsg(error instanceof Error ? error.message : 'Could not send a sign-in link. Please try again.');
+    } finally {
+      setBusy(null);
+    }
   }
 
-  async function withPassword(mode: PasswordMode = 'sign_in') {
+  async function withPassword() {
+    const authMode: PasswordMode = mode === 'signup' ? 'sign_up' : 'sign_in';
     setMsg('');
     setIsError(false);
     if (!email.trim() || !password) {
@@ -137,13 +221,13 @@ export default function LoginPage() {
     setBusy('password');
     try {
       const { signedIn } = await passwordAuth(
-        browserClient().auth, mode, email.trim(), password,
+        browserClient().auth, authMode, email.trim(), password,
         `${location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
       );
       if (signedIn) {
         location.href = next;
       } else {
-        setMsg(mode === 'sign_up'
+        setMsg(authMode === 'sign_up'
           ? 'Check your email to confirm your account before signing in.'
           : 'Sign-in did not complete. Please try again.');
       }
@@ -155,63 +239,181 @@ export default function LoginPage() {
     }
   }
 
+  // Recovery link lands on /reset-password (via the auth callback's code
+  // exchange) so the user sets a new password instead of being signed in directly.
+  async function forgotPassword() {
+    if (!email.trim()) {
+      setIsError(true);
+      return setMsg('Enter your email address first.');
+    }
+    setBusy('forgot');
+    setMsg('');
+    setIsError(false);
+    try {
+      const { error } = await browserClient().auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent('/reset-password')}`,
+      });
+      if (error) throw error;
+      setMsg('Check your email for a password reset link.');
+    } catch (error) {
+      setIsError(true);
+      setMsg(error instanceof Error ? error.message : 'Could not send a reset link. Please try again.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    if (useMagic) return magicLink(e);
+    e.preventDefault();
+    return withPassword();
+  }
+
+  const submitLabel =
+    busy === 'email'
+      ? 'Sending...'
+      : busy === 'password'
+        ? mode === 'signup'
+          ? 'Creating account...'
+          : 'Signing in...'
+        : useMagic
+          ? 'Send Magic Link'
+          : mode === 'signup'
+            ? 'Create Account'
+            : 'Sign In';
+
   return (
     <main className="login-page">
       <div className="login-card">
-        <h1>Organizer</h1>
-        <p className="login-sub">Sign in or create your account</p>
+        <div className="login-brand">
+          <LogoMark />
+          <h1>muop</h1>
+          <p className="login-sub">
+            {mode === 'signup' ? 'Create your account to get started' : 'Welcome back. Sign in to continue'}
+          </p>
+        </div>
 
-        <div className="social-stack">
+        <div className="login-tabs" role="tablist" aria-label="Sign in or create account">
+          <button
+            type="button"
+            role="tab"
+            disabled={busy !== null}
+            aria-selected={mode === 'signin'}
+            className={mode === 'signin' ? 'active' : ''}
+            onClick={() => {
+              setMode('signin');
+              setMsg('');
+              setIsError(false);
+            }}
+          >
+            Sign In
+          </button>
+          <button
+            type="button"
+            role="tab"
+            disabled={busy !== null}
+            aria-selected={mode === 'signup'}
+            className={mode === 'signup' ? 'active' : ''}
+            onClick={() => {
+              setMode('signup');
+              setMsg('');
+              setIsError(false);
+            }}
+          >
+            Create Account
+          </button>
+        </div>
+
+        <div className="login-labelrow">
+          <span className="login-label">{useMagic ? 'MAGIC LINK' : 'EMAIL & PASSWORD'}</span>
+          <button
+            type="button"
+            className="magic-toggle"
+            disabled={busy !== null}
+            onClick={() => {
+              setUseMagic(!useMagic);
+              setMsg('');
+              setIsError(false);
+            }}
+          >
+            <SparkleIcon /> {useMagic ? 'Use Password' : 'Use Magic Link'}
+          </button>
+        </div>
+
+        <form onSubmit={onSubmit} className="login-form">
+          <label className="field-label" htmlFor="login-email">
+            Email address
+          </label>
+          <div className="field">
+            <MailIcon />
+            <input
+              id="login-email"
+              type="email"
+              required
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+
+          {!useMagic && (
+            <>
+              <div className="field-labelrow">
+                <label className="field-label" htmlFor="login-password">
+                  Password
+                </label>
+                <button type="button" className="forgot-link" disabled={busy !== null} onClick={forgotPassword}>
+                  {busy === 'forgot' ? 'Sending...' : 'Forgot?'}
+                </button>
+              </div>
+              <div className="field">
+                <LockIcon />
+                <input
+                  id="login-password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="eye-btn"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  <EyeIcon off={showPassword} />
+                </button>
+              </div>
+            </>
+          )}
+
+          <button type="submit" className="btn-primary" disabled={busy !== null}>
+            {submitLabel} <ArrowIcon />
+          </button>
+        </form>
+
+        <div className="login-divider">or continue with</div>
+
+        <div className="social-row">
           {SOCIAL_PROVIDERS.map((p) => (
             <button
               key={p.id}
               type="button"
               className="social-btn"
               data-provider={p.id}
+              aria-label={p.label}
+              title={p.label}
               disabled={busy !== null}
               onClick={() => oauthSignIn(p)}
             >
-              {p.icon}
-              {busy === p.id ? 'Redirecting...' : p.label}
+              {busy === p.id ? <span className="social-spinner" aria-hidden="true" /> : p.icon}
             </button>
           ))}
         </div>
 
-        <div className="login-divider">or with email</div>
-
-        <form onSubmit={magicLink} className="login-form">
-          <input
-            type="email"
-            required
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-          <button type="submit" className="btn-primary" disabled={busy !== null}>
-            {busy === 'email' ? 'Sending...' : 'Email me a sign-in link'}
-          </button>
-        </form>
-        <form
-          className="login-form"
-          style={{ marginTop: 8 }}
-          onSubmit={(e) => {
-            e.preventDefault();
-            withPassword();
-          }}
-        >
-          <input
-            type="password"
-            placeholder="or password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <button type="submit" className="btn-secondary" disabled={busy !== null}>
-            {busy === 'password' ? 'Please wait...' : 'Sign in with password'}
-          </button>
-          <button type="button" className="btn-secondary" disabled={busy !== null} onClick={() => withPassword('sign_up')}>
-            Create account with password
-          </button>
-        </form>
+        <p className="login-footer">
+          <ShieldIcon /> Protected by standard SSL & end-to-end encryption
+        </p>
 
         {(msg || initialError) && (
           <p className={`login-msg ${isError || initialError ? 'error' : 'info'}`}>{msg || initialError}</p>
