@@ -174,17 +174,21 @@
       const m = v.meetup || {};
       const venue = leadingVenue(v);
       let when = null, basis;
-      if (m.starts_at) {
-        when = new Date(m.starts_at);
+      const set = m.starts_at ? new Date(m.starts_at) : null;
+      // Never announce a time that has passed or is under 2 hours away.
+      const earliest = new Date(Date.now() + 2 * 3600_000);
+      if (set && set > new Date()) {
+        when = set;
         basis = 'set by the organiser';
       } else {
+        if (set) basis = 'the organiser\'s time has passed';
         const slots = canonicalSlots();
         for (const s of slots) {
-          const d = slotToDate(s.slot);
+          const d = slotToDate(s.slot, earliest);
           if (d) { when = d; basis = `${s.slot} suits the most people (${s.count} of ${(v.attendees || []).length})`; break; }
         }
         if (!when) {
-          when = slotToDate('Sat evening');
+          when = slotToDate('Sat evening', earliest);
           basis = 'no availability shared yet, so the next Saturday evening';
         }
       }
