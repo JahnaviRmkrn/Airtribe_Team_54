@@ -26,6 +26,51 @@ let view = null;
 let busy = false;
 let poll = null;
 let prefsFor = null; // attendee id whose preferences form is on screen
+let paymentBusy = false;
+let paymentLoadedFor = null;
+let payment = null;
+let paymentMessage = '';
+
+function renderPayment() {
+  const panel = $('payment-card');
+  if (!panel || !view) return;
+  const eligible = !!view.me && !!view.meetup.final_venue;
+  panel.classList.toggle('hidden', !eligible);
+  if (!eligible) return;
+  const price = view.meetup.final_venue.price_per_person;
+  const closed = view.meetup.status !== 'open';
+  $('payment-status').textContent = paymentMessage || (payment
+    ? `Payment ${payment.status} · ${rupees(payment.amount_paise / 100)}`
+    : 'Check your payment status before checkout.');
+  $('pay-btn').textContent = payment?.status === 'pending' ? 'Continue checkout' : `Pay ${rupees(price)} with Pine Labs`;
+  $('pay-btn').disabled = paymentBusy || closed || !(price > 0) || payment?.status === 'paid';
+  $('payment-check').disabled = paymentBusy;
+  if (paymentLoadedFor !== view.me.attendee_id) {
+    paymentLoadedFor = view.me.attendee_id;
+    updatePayment(false);
+  }
+}
+
+async function updatePayment(start) {
+  if (paymentBusy) return;
+  paymentBusy = true;
+  renderPayment();
+  try {
+    const data = await api('/pay', { method: start ? 'POST' : 'GET' });
+    payment = data.payment;
+    paymentMessage = payment ? '' : 'No payment yet.';
+    if (start && payment?.status === 'pending' && payment.redirect_url) {
+      const url = new URL(payment.redirect_url);
+      if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Invalid checkout link');
+      location.assign(url.href);
+    }
+  } catch (e) {
+    paymentMessage = e.message;
+  } finally {
+    paymentBusy = false;
+    renderPayment();
+  }
+}
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
@@ -52,6 +97,7 @@ async function api(path = '', opts = {}) {
   if (!res.ok) {
     throw Object.assign(new Error(data.error || STATUS_MESSAGES[res.status] || 'Request failed (' + res.status + ')'), { status: res.status });
   }
+  if (res.status === 201 && opts.method === 'POST' && path === '/join') window.team54Track?.('guest_joined');
   return data;
 }
 const send = (method, path, body) => api(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -133,6 +179,7 @@ function render() {
   $('vote-hint').classList.toggle('hidden', !(view.me && open && !confirmed));
 
   renderBanner();
+  renderPayment();
   renderOrganizer();
   renderPeople();
   renderSlots();
@@ -416,6 +463,9 @@ async function savePrefs(e) {
 }
 
 // --- boot --------------------------------------------------------------------
+
+$('pay-btn').onclick = () => updatePayment(true);
+$('payment-check').onclick = () => updatePayment(false);
 
 $('join-form').onsubmit = async (e) => {
   e.preventDefault();

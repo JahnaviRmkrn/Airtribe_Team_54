@@ -44,6 +44,9 @@ async function api(path, opts = {}) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || ('Request failed (' + res.status + ')'));
   }
+  if (res.status === 201 && opts.method === 'POST' && path === '/api/me/meetups') {
+    window.team54Track?.('meetup_created');
+  }
   if (res.status === 204) return null;
   return res.json();
 }

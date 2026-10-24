@@ -1,6 +1,8 @@
 import 'server-only';
 import { clean, EXTRACT_PROMPT, llmOutput, ruleExtract, type ExtractResult } from './extract';
+import { extractWithAgenticOrg } from './agenticorg';
 
+// AgenticOrg is an explicit opt-in and its failures never fall through.
 // Calls the first configured LLM provider - DeepSeek (DEEPSEEK_API_KEY), then
 // Gemini (GEMINI_API_KEY), then OpenAI (OPENAI_API_KEY; OPENAI_BASE_URL points
 // it at any OpenAI-compatible API) - and on any failure tries the next one,
@@ -76,11 +78,13 @@ const PROVIDERS: { name: ProviderName; env: string; call: (text: string, key: st
   { name: 'openai', env: 'OPENAI_API_KEY', call: openai },
 ];
 
-export async function extract(transcript: string): Promise<ExtractResult & { source: ProviderName | 'rules' }> {
+export async function extract(transcript: string): Promise<ExtractResult & { source: ProviderName | 'rules' | 'agenticorg' }> {
   // WARNING: the transcript is user-controlled and goes into the prompt, so a
   // user can steer the model (prompt injection). The output is only shown back
   // to that same user for editing, is never saved here, and is schema-checked
   // and clamped below, so the blast radius is limited to their own pre-fill.
+  const platformResult = await extractWithAgenticOrg(transcript);
+  if (platformResult) return { ...platformResult, source: 'agenticorg' };
   for (const p of PROVIDERS) {
     const key = process.env[p.env];
     if (!key) continue;
