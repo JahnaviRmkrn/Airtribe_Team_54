@@ -122,12 +122,13 @@ function peopleCard(contacts) {
   const due = (c) => {
     if (!c.next_followup_at) return null;
     const d = new Date(c.next_followup_at); d.setHours(0, 0, 0, 0);
-    return Math.round((d - today) / DAY);
+    const n = Math.round((d - today) / DAY);
+    return Number.isFinite(n) ? n : null;
   };
   const badge = (n) => n === null ? '' : n < 0 ? '<span class="due due-late">overdue</span>'
     : n === 0 ? '<span class="due due-today">today</span>'
     : n <= 7 ? '<span class="due">soon</span>' : `<span class="due">in ${n} days</span>`;
-  const initials = (name) => (name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   const people = contacts.slice().sort((a, b) => (due(a) ?? 1e9) - (due(b) ?? 1e9) || (a.name || '').localeCompare(b.name || ''));
   return `
     <section class="card people-card">
