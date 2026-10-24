@@ -18,6 +18,9 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      // FastAPI runner's own frontend (compiled into static/), not part of the Next app.
+      "src/**",
+      "static/**",
     ],
   },
 ];
