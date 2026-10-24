@@ -49,7 +49,8 @@ Ported from Arindom Chetia's PR #3 (FastAPI `routers/voice.py`, `static/voice.*`
 - `POST /api/extract` returns
   `{ contacts: [<=5 { name, category, interests[], preferred_frequency_days? }], goals: { personal, professional, community }, source: "gemini"|"openai"|"rules", saved: false }`.
   Goals are integers that always total 100. It calls Gemini if `GEMINI_API_KEY`
-  is set, else OpenAI if `OPENAI_API_KEY` is set, and otherwise (or if the
+  is set, else OpenAI if `OPENAI_API_KEY` is set (or any OpenAI-compatible API,
+  e.g. DeepSeek, via `OPENAI_BASE_URL` + `EXTRACT_MODEL`), and otherwise (or if the
   call fails or returns invalid JSON) uses a rule-based parser
   (`lib/extract.ts`). Every result is validated with zod and clamped before it
   is returned. It requires sign-in so it can't be used as a free LLM proxy.
