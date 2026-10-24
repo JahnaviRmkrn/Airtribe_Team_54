@@ -301,7 +301,7 @@
 
     async create_meetup({ title, activity, area, starts_at, budget, notes }) {
       const body = { title };
-      if (notes) body.notes = clip(notes, 2000);
+      if (notes) body.notes = String(notes).slice(0, 2000);
       if (activity) body.activity = clip(activity, 40);
       if (area) body.area = area;
       if (starts_at && !Number.isNaN(Date.parse(starts_at))) body.starts_at = new Date(starts_at).toISOString();
