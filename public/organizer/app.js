@@ -551,6 +551,9 @@ function wireMeetupRows() {
 // --- onboarding: editable confirm screen ---------------------------------------
 // C's voice extraction can pre-fill by setting window.ORGANIZER_PREFILL or
 // sessionStorage 'org_prefill' to { contacts: [...], goals: {...} } before load.
+// On this screen, voice.js ("Talk instead" / "Type instead") calls /api/extract
+// and pre-fills the rows + goals directly; it also stores org_prefill so a
+// refresh keeps the result. Nothing is saved until Confirm.
 
 function prefill() {
   try {
@@ -562,29 +565,58 @@ function prefill() {
 
 function emptyRow() { return { name: '', category: 'personal', interests: '', freq: 14 }; }
 
+const toRow = (c) => ({
+  name: c.name || '',
+  category: CATEGORIES.includes(c.category) ? c.category : 'personal',
+  interests: Array.isArray(c.interests) ? c.interests.join(', ') : (c.interests || ''),
+  freq: c.preferred_frequency_days || 14,
+});
+
 function onboardingView() {
   const p = prefill();
-  const rows = (p.contacts && p.contacts.length ? p.contacts.slice(0, 5) : [emptyRow()]).map((c) => ({
-    name: c.name || '',
-    category: CATEGORIES.includes(c.category) ? c.category : 'personal',
-    interests: Array.isArray(c.interests) ? c.interests.join(', ') : (c.interests || ''),
-    freq: c.preferred_frequency_days || 14,
-  }));
+  const rows = (p.contacts && p.contacts.length ? p.contacts.slice(0, 5) : [emptyRow()]).map(toRow);
   const goals = { personal: 50, professional: 30, community: 20, ...(p.goals || {}) };
   let step = 1;
+  let voice = null;
 
   const finish = () => {
+    if (voice) voice.stop();
     localStorage.setItem('org_onboarded', '1');
     sessionStorage.removeItem('org_prefill');
     go('#/dashboard');
   };
 
+  // Voice / typed extraction -> pre-fill only. Rows the user already typed are
+  // kept; extracted people fill the remaining slots (max 5).
+  function applyExtraction(res) {
+    collectRows();
+    el('ob-error').textContent = '';
+    const kept = rows.filter((r) => r.name);
+    const names = new Set(kept.map((r) => r.name.toLowerCase()));
+    const added = (res.contacts || []).map(toRow).filter((r) => r.name && !names.has(r.name.toLowerCase()));
+    const merged = [...kept, ...added].slice(0, 5);
+    rows.splice(0, rows.length, ...(merged.length ? merged : [emptyRow()]));
+    if (res.goals) Object.assign(goals, res.goals);
+    try {
+      sessionStorage.setItem('org_prefill', JSON.stringify({
+        contacts: merged.map((r) => ({ name: r.name, category: r.category, interests: r.interests, preferred_frequency_days: r.freq })),
+        goals,
+      }));
+    } catch { /* storage unavailable: pre-fill still applies on screen */ }
+    renderRows();
+    if (merged.length >= 5 && kept.length + added.length > 5) {
+      el('ob-error').textContent = 'Only the first 5 people were kept - you can add more from Contacts later.';
+    }
+  }
+
   function renderStep1() {
+    if (voice) voice.stop();
     el('app').innerHTML = `
       <section class="card">
         <div class="step-dots">Step 1 of 2 · People</div>
         <h1>Who do you want to stay in touch with?</h1>
         <p class="muted">Add up to 5 people. You can edit everything before confirming - nothing is saved yet.</p>
+        <div id="voice-mount"></div>
         <div id="ob-rows"></div>
         <p><button class="link-btn" id="ob-add">+ Add another</button></p>
         <p class="error" id="ob-error"></p>
@@ -594,6 +626,7 @@ function onboardingView() {
         </div>
       </section>`;
     renderRows();
+    voice = window.Voice ? window.Voice.mount(el('voice-mount'), applyExtraction) : null;
     el('ob-add').onclick = () => {
       if (rows.length >= 5) { el('ob-error').textContent = 'Up to 5 people for now - you can add more from Contacts later.'; return; }
       rows.push(emptyRow());
@@ -601,6 +634,7 @@ function onboardingView() {
     };
     el('ob-next').onclick = () => {
       collectRows();
+      if (voice) voice.stop();
       step = 2;
       renderStep2();
     };
