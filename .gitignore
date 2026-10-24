@@ -8,3 +8,4 @@ venv/
 data/store.json
 .DS_Store
 cloudflared.exe
+node_modules/

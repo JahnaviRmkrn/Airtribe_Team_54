@@ -9,11 +9,13 @@ mocks Person A's API until the real one is ready.
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+npm install                 # Installs TypeScript compiler
+npm run build               # Compiles src/*.ts to static/*.js
 uvicorn main:app --reload
 ```
 
 Open http://127.0.0.1:8000 - API docs at http://127.0.0.1:8000/docs
-Requires Python 3.10+.
+Requires Python 3.10+ and Node.js.
 
 ## What it does
 
