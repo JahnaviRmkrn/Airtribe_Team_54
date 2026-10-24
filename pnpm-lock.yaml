@@ -9,7 +9,7 @@ importers:
   .:
     dependencies:
       '@plural_pinelabs/agent-toolkit':
-        specifier: ^0.1.5
+        specifier: 0.1.5
         version: 0.1.5
       '@supabase/ssr':
         specifier: ^0.12.7
