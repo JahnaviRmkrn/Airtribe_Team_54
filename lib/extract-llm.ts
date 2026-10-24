@@ -1,9 +1,9 @@
 import 'server-only';
 import { clean, EXTRACT_PROMPT, llmOutput, ruleExtract, type ExtractResult } from './extract';
 
-// Calls Gemini (if GEMINI_API_KEY is set) or OpenAI (if OPENAI_API_KEY is set;
-// OPENAI_BASE_URL points it at any OpenAI-compatible API, e.g. DeepSeek)
-// and falls back to the rule-based parser on any failure, so onboarding never
+// Calls the first configured LLM provider - DeepSeek (DEEPSEEK_API_KEY), then
+// Gemini (GEMINI_API_KEY), then OpenAI (OPENAI_API_KEY) - and on any failure
+// tries the next one, ending with the rule-based parser, so onboarding never
 // dead-ends. Keys are server-only and never reach the browser.
 
 const TIMEOUT_MS = 20_000;
@@ -18,6 +18,22 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
   });
   if (!res.ok) throw new Error(`LLM provider returned ${res.status}`);
   return res.json();
+}
+
+// DeepSeek's OpenAI-compatible chat API (https://api-docs.deepseek.com).
+async function deepseek(text: string, key: string): Promise<string> {
+  const base = (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '');
+  const data = await postJson(
+    `${base}/chat/completions`,
+    {
+      model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'user', content: EXTRACT_PROMPT + text }],
+    },
+    { Authorization: `Bearer ${key}` },
+  );
+  return data?.choices?.[0]?.message?.content;
 }
 
 async function gemini(text: string, key: string): Promise<string> {
@@ -36,7 +52,7 @@ async function gemini(text: string, key: string): Promise<string> {
 
 async function openai(text: string, key: string): Promise<string> {
   const data = await postJson(
-    `${(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '')}/chat/completions`,
+    'https://api.openai.com/v1/chat/completions',
     {
       model: process.env.EXTRACT_MODEL || 'gpt-4o-mini',
       temperature: 0,
@@ -48,23 +64,33 @@ async function openai(text: string, key: string): Promise<string> {
   return data?.choices?.[0]?.message?.content;
 }
 
-export async function extract(transcript: string): Promise<ExtractResult & { source: 'gemini' | 'openai' | 'rules' }> {
-  const gKey = process.env.GEMINI_API_KEY;
-  const oKey = process.env.OPENAI_API_KEY;
+type ProviderName = 'deepseek' | 'gemini' | 'openai';
+
+// Order matters: the user's DeepSeek key is the primary extractor; the others
+// stay as drop-in alternates for environments that only have those keys.
+const PROVIDERS: { name: ProviderName; env: string; call: (text: string, key: string) => Promise<string> }[] = [
+  { name: 'deepseek', env: 'DEEPSEEK_API_KEY', call: deepseek },
+  { name: 'gemini', env: 'GEMINI_API_KEY', call: gemini },
+  { name: 'openai', env: 'OPENAI_API_KEY', call: openai },
+];
+
+export async function extract(transcript: string): Promise<ExtractResult & { source: ProviderName | 'rules' }> {
   // WARNING: the transcript is user-controlled and goes into the prompt, so a
   // user can steer the model (prompt injection). The output is only shown back
   // to that same user for editing, is never saved here, and is schema-checked
   // and clamped below, so the blast radius is limited to their own pre-fill.
-  try {
-    if (gKey || oKey) {
-      const raw = gKey ? await gemini(transcript, gKey) : await openai(transcript, oKey!);
+  for (const p of PROVIDERS) {
+    const key = process.env[p.env];
+    if (!key) continue;
+    try {
+      const raw = await p.call(transcript, key);
       const parsed = llmOutput.safeParse(JSON.parse(String(raw)));
-      if (parsed.success) return { ...clean(parsed.data), source: gKey ? 'gemini' : 'openai' };
-      console.warn('extract: LLM output failed validation, using rules');
+      if (parsed.success) return { ...clean(parsed.data), source: p.name };
+      console.warn(`extract: ${p.name} output failed validation, trying next provider`);
+    } catch (e) {
+      // LLM down / bad key / bad JSON -> next provider, then rules. Never log the transcript.
+      console.warn(`extract: ${p.name} call failed, trying next provider:`, e instanceof Error ? e.message : e);
     }
-  } catch (e) {
-    // LLM down / bad key / bad JSON -> rules. Never log the transcript.
-    console.warn('extract: LLM call failed, using rules:', e instanceof Error ? e.message : e);
   }
   return { ...ruleExtract(transcript), source: 'rules' };
 }

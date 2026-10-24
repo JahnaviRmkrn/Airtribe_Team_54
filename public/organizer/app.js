@@ -592,6 +592,7 @@ function onboardingView() {
   // Voice / typed extraction -> pre-fill only. Rows the user already typed are
   // kept; extracted people fill the remaining slots (max 5).
   function applyExtraction(res) {
+    if (step !== 1 || !el('ob-rows')) return; // late result after leaving the people step
     collectRows();
     el('ob-error').textContent = '';
     const kept = rows.filter((r) => r.name);
@@ -614,6 +615,7 @@ function onboardingView() {
 
   function renderStep1() {
     if (voice) voice.stop();
+    step = 1;
     el('app').innerHTML = `
       <section class="card">
         <div class="step-dots">Step 1 of 2 · People</div>
