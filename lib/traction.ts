@@ -64,7 +64,9 @@ export function buildLedger(
   const since = opts.since ? Date.parse(opts.since) : NaN;
   const isTestRoom = new Map(
     meetups.map((m) => {
-      const domain = norm(m.organizer_email ?? '').split('@')[1] ?? '';
+      // No known organiser email = can't tell it's real, so don't count it.
+      if (!m.organizer_email) return [m.id, true];
+      const domain = norm(m.organizer_email).split('@')[1] ?? '';
       return [m.id, testDomains.includes(domain)];
     }),
   );

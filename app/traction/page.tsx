@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { unstable_cache } from 'next/cache';
 import { adminClient } from '@/lib/supabase/admin';
 import { buildLedger, type LedgerAttendee, type LedgerStep } from '@/lib/traction';
 import './traction.css';
@@ -7,7 +8,8 @@ export const metadata: Metadata = {
   title: 'Traction',
   description: 'Real people completing a muop meetup room: joined, shared what they like, voted.',
 };
-// Live numbers on every load; the queries are small.
+// Rendered per request, but the service-role reads below are cached for 15s
+// (cachedLoad), so a public page can't fan out into DB load under traffic.
 export const dynamic = 'force-dynamic';
 
 const list = (v: string | undefined) => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -61,6 +63,8 @@ async function load() {
   );
 }
 
+const cachedLoad = unstable_cache(load, ['traction-ledger'], { revalidate: 15 });
+
 const STEP: Record<LedgerStep, string> = { joined: 'joined', shared: 'shared what they like', voted: 'voted on a place' };
 const time = (iso: string) =>
   new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
@@ -68,7 +72,7 @@ const time = (iso: string) =>
 export default async function TractionPage() {
   let ledger;
   try {
-    ledger = await load();
+    ledger = await cachedLoad();
   } catch {
     return (
       <main className="traction">

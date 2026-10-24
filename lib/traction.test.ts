@@ -4,6 +4,7 @@ import { buildLedger, type LedgerAttendee } from './traction';
 const meetups = [
   { id: 'real', organizer_email: 'demo@muop.win' },
   { id: 'smoke', organizer_email: 'smoke-123@example.com' },
+  { id: 'nobody', organizer_email: null },
 ];
 const at = (min: number) => new Date(Date.UTC(2026, 9, 24, 6, min)).toISOString();
 // Real joins never share an exact instant (identical joined_at = seeded), so
@@ -41,12 +42,13 @@ describe('buildLedger', () => {
       [
         guest('t', { meetup_id: 'smoke', preferences: { area: 'x' } }),
         guest('u', { meetup_id: 'gone', preferences: { area: 'x' } }),
+        guest('n', { meetup_id: 'nobody', preferences: { area: 'x' } }),
         guest('j', { guest_name: 'jahnavi R', preferences: { area: 'x' } }),
       ],
       [{ attendee_id: 't', created_at: at(2) }, { attendee_id: 'j', created_at: at(2) }],
       opts,
     );
-    expect(l).toMatchObject({ joined: 0, completed: 0, excluded: { test: 2, team: 1, seeded: 0 } });
+    expect(l).toMatchObject({ joined: 0, completed: 0, excluded: { test: 3, team: 1, seeded: 0 } });
   });
 
   it('excludes bulk-inserted (seeded) guests and listed internal test ids', () => {
