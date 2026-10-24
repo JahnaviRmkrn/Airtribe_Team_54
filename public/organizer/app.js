@@ -64,6 +64,7 @@ const stale = (token) => token !== navGen;
 function route() {
   navGen++;
   window.OrganizerOnboarding = null;
+  el('app').className = 'container';
   el('nav').classList.remove('hidden');
   const hash = location.hash || '#/dashboard';
   document.querySelectorAll('[data-nav]').forEach((a) => {
@@ -75,7 +76,8 @@ function route() {
     '#/dashboard': dashboardView,
     '#/contacts': contactsView,
     '#/meetups': meetupsView,
-    '#/onboarding': onboardingView,
+    '#/onboarding': () => onboardingView(),
+    '#/welcome': welcomeView,
   };
   (views[hash] || dashboardView)();
 }
@@ -175,7 +177,9 @@ async function dashboardView() {
           <button class="primary" id="qa-add">Add person</button>
           <button class="primary" id="qa-meetup">Plan a meetup</button>
         </div>
+        <p><button class="link-btn" id="qa-guide">What can muop do?</button></p>
       </div>`;
+    el('qa-guide').onclick = () => go('#/welcome');
     el('qa-add').onclick = () => { sessionStorage.setItem('org_new_contact', '1'); go('#/contacts'); };
     el('qa-meetup').onclick = () => go('#/meetups');
     return;
@@ -184,26 +188,46 @@ async function dashboardView() {
   const followupRow = (f, overdue) => `
     <div class="row" data-fu-name="${esc(f.name || '')}">
       <div><strong>${esc(f.name || 'Someone')}</strong>
-        ${f.category ? `<span class="tag">${esc(catLabel(f.category))}</span>` : ''}
-        <div class="muted">${overdue ? 'Was due' : 'Due'} ${esc(fmtDate(f.next_followup_at))}</div>
+        ${f.category ? `<span class="tag">${esc(catLabel(f.category))}</span>` : ''}${overdue ? ' <span class="tag overdue">Overdue</span>' : ''}
+        <div class="muted">${overdue ? 'Was due' : 'Due'} ${esc(fmtDay(f.next_followup_at))}</div>
       </div>
       <div class="actions"><button data-done="${esc(f.id || f.contact_id || '')}" data-name="${esc(f.name || '')}">Mark done</button></div>
     </div>`;
 
   if (stale(nav)) return;
+  const nOver = (followups.overdue || []).length;
+  const nWeek = (followups.upcoming || []).filter((f) => new Date(f.next_followup_at).getTime() < Date.now() + 7 * 864e5).length;
+  const nMeet = meetups.length;
+  const chip = (n, label, cls, target) => `<button class="sum-chip ${cls}" data-jump="${target}"><span class="sum-num">${n}</span><span>${label}</span></button>`;
+  const summary = `<div class="summary" role="group" aria-label="At a glance">
+      ${chip(nOver, nOver === 1 ? 'check-in overdue' : 'check-ins overdue', nOver ? 'warn' : 'ok', 'sec-followups')}
+      ${chip(nWeek, 'due this week', 'soon', 'sec-followups')}
+      ${chip(nMeet, nMeet === 1 ? 'meetup planned' : 'meetups planned', 'meet', 'sec-meetups')}
+    </div>`;
+
+  el('app').className = 'container wide';
   el('app').innerHTML = `
-    <h1>Dashboard</h1>
+    <div class="page-head">
+      <div><h1>Dashboard</h1><p class="muted lede">${nOver ? 'A few people are waiting to hear from you.' : 'You are up to date. Nice.'}</p></div>
+      <div class="quick-actions">
+        <button class="primary" id="qa-add">Add person</button>
+        <button class="primary" id="qa-meetup">Plan a meetup</button>
+      </div>
+    </div>
+    ${summary}
     ${peopleCard(graphContacts)}
+    <div class="dash-grid">
     <section class="card">
       <h2>Your network</h2>
-      <p class="muted">Each dot is a person. The section is their category; the closer to the centre, the sooner they are due a check-in.</p>
+      <p class="muted">Each dot is a person, grouped by category. The closer to the centre, the sooner a check-in is due.</p>
       ${networkGraphSVG(graphContacts)}
     </section>
     <section class="card">
       <h2>Calendar</h2>
-      <p class="muted">This month: follow-ups and meetups on their dates.</p>
+      <p class="muted">This month. Tap a day to see what is on it.</p>
       ${calendarHTML(graphContacts, meetups)}
     </section>
+    </div>
     <div class="stats">
       <div class="stat card">
         <div class="stat-num">${totalContacts}</div>
@@ -217,17 +241,14 @@ async function dashboardView() {
       </div>
     </div>
     ${act.sufficient_data && d.goals ? goalsComparison(d.goals, act) : ''}
-    <div class="quick-actions">
-      <button class="primary" id="qa-add">Add person</button>
-      <button class="primary" id="qa-meetup">Plan a meetup</button>
-    </div>
-    <section class="card">
+    <div class="dash-grid">
+    <section class="card" id="sec-followups">
       <h2>Follow-ups</h2>
       ${(followups.overdue || []).map((f) => followupRow(f, true)).join('')}
       ${(followups.upcoming || []).map((f) => followupRow(f, false)).join('')}
       ${!(followups.overdue || []).length && !(followups.upcoming || []).length ? '<p class="muted">No follow-ups due.</p>' : ''}
     </section>
-    <section class="card">
+    <section class="card" id="sec-meetups">
       <h2>Upcoming meetups</h2>
       ${meetups.length ? meetups.map((m) => `
         <div class="row">
@@ -237,8 +258,9 @@ async function dashboardView() {
             ${m.room_token ? `<div class="muted mono">${esc(roomUrl(m.room_token))}</div>` : ''}
           </div>
           ${m.room_token ? `<div class="actions"><button data-copy="${esc(roomUrl(m.room_token))}">Copy link</button></div>` : ''}
-        </div>`).join('') : '<p class="muted">No meetups planned.</p>'}
+        </div>`).join('') : '<p class="muted">No meetups planned yet. Plan one to get people together.</p>'}
     </section>
+    </div>
     <section class="card">
       <h2>Recent activity</h2>
       ${recent.length ? recent.map((r) => `
@@ -254,11 +276,21 @@ async function dashboardView() {
   document.querySelectorAll('[data-person]').forEach((b) => { b.onclick = () => go('#/contacts/' + encodeURIComponent(b.dataset.person)); });
   el('qa-add').onclick = () => { sessionStorage.setItem('org_new_contact', '1'); go('#/contacts'); };
   el('qa-meetup').onclick = () => go('#/meetups');
+  document.querySelectorAll('[data-jump]').forEach((b) => { b.onclick = () => el(b.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  wireCalendar();
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
   document.querySelectorAll('[data-done]').forEach((b) => { b.onclick = () => markDoneForm(b); });
   document.querySelectorAll('[data-gcontact]').forEach((n) => {
-    n.style.cursor = 'pointer';
-    n.onclick = () => go('#/contacts/' + encodeURIComponent(n.dataset.gcontact));
+    const pick = () => {
+      document.querySelectorAll('.g-dot.sel').forEach((x) => x.classList.remove('sel'));
+      n.classList.add('sel');
+      const box = el('graph-pick');
+      if (!box) return;
+      box.innerHTML = `<div><strong>${esc(n.dataset.gname)}</strong><div class="muted">${esc(n.dataset.gsub)}</div></div><button class="primary" id="graph-open">Open</button>`;
+      el('graph-open').onclick = () => go('#/contacts/' + encodeURIComponent(n.dataset.gcontact));
+    };
+    n.onclick = pick;
+    n.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
   });
 }
 
@@ -268,13 +300,12 @@ async function dashboardView() {
 
 function networkGraphSVG(contacts) {
   const SIZE = 520, C = SIZE / 2;
-  const RINGS = [85, 150, 215];
-  const BANDS = [[26, 78], [92, 143], [157, 208]];
+  const RINGS = [92, 158, 220];
+  const BANDS = [[36, 86], [100, 152], [166, 214]];
   const RING_LABELS = ['Overdue', 'This week', 'Later'];
   const DOT_FILL = { personal: '#E89B00', professional: '#04C1E1', community: '#3FAE9C' };
   const now = Date.now();
   const WEEK = 7 * 24 * 3600 * 1000;
-  const hash = (t) => { let h = 0; for (const ch of String(t)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
   const urgency = (c) => {
     if (!c.next_followup_at) return 2;
     const t = new Date(c.next_followup_at).getTime();
@@ -283,25 +314,38 @@ function networkGraphSVG(contacts) {
     if (t < now + WEEK) return 1;
     return 2;
   };
-  const perSlot = {};
-  const dots = (contacts || []).map((c) => {
+  // Deterministic layout: dots in the same category + timing slot are spread
+  // evenly across the sector (+-36deg) and over staggered radii, so they never
+  // overlap. Ring labels sit on the gap between sectors (straight down).
+  const slots = {};
+  (contacts || []).forEach((c) => {
     const ci = Math.max(0, CATEGORIES.indexOf(c.category));
-    const u = urgency(c);
-    const key = ci + '-' + u;
-    const n = (perSlot[key] = (perSlot[key] || 0) + 1) - 1;
-    const h = hash((c.id || '') + (c.name || ''));
-    const spread = 42;
-    const angleDeg = ci * 120 - 90 + (((h + n * 53) % 100) / 100 - 0.5) * 2 * spread + (n % 2 ? 9 : -9);
-    const r = BANDS[u][0] + (((h >> 8) + n * 37) % 100) / 100 * (BANDS[u][1] - BANDS[u][0]);
-    const a = angleDeg * Math.PI / 180;
-    const x = C + r * Math.cos(a), y = C + r * Math.sin(a);
-    const sub = c.next_followup_at ? ' · next check-in ' + fmtDay(c.next_followup_at) : ' · no check-in date';
-    return `<circle data-gcontact="${esc(c.id || '')}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7" fill="${DOT_FILL[c.category] || '#9a9a9a'}" stroke="#fff" stroke-width="2"><title>${esc((c.name || 'Someone') + sub)}</title></circle>`;
+    (slots[ci + '-' + urgency(c)] = slots[ci + '-' + urgency(c)] || []).push(c);
+  });
+  const LABEL_W = 46, ROW_GAP = 25, HALF = 30;
+  const dots = Object.entries(slots).map(([key, list]) => {
+    const [ci, u] = key.split('-').map(Number);
+    list.sort((x, y) => String(x.name || '').localeCompare(String(y.name || '')));
+    const [r0, r1] = BANDS[u];
+    const rows = Math.max(1, Math.min(Math.floor((r1 - r0) / ROW_GAP) + 1, Math.ceil(list.length / 2)));
+    const showLabels = list.length <= rows * Math.max(1, Math.floor((2 * HALF * Math.PI / 180 * ((r0 + r1) / 2)) / LABEL_W));
+    return list.map((c, i) => {
+      const row = i % rows, k = Math.floor(i / rows);
+      const inRow = Math.ceil((list.length - row) / rows);
+      const r = rows === 1 ? (r0 + r1) / 2 : r0 + (r1 - r0) * row / (rows - 1);
+      const step = 2 * HALF / inRow;
+      const angleDeg = ci * 120 - 90 - HALF + step * (k + 0.5) + (rows > 1 ? (row % 2 ? 1 : -1) * step / 4 : 0);
+      const a = angleDeg * Math.PI / 180;
+      const x = C + r * Math.cos(a), y = C + r * Math.sin(a);
+      const sub = c.next_followup_at ? ' · next check-in ' + fmtDay(c.next_followup_at) : ' · no check-in date';
+      const first = String(c.name || '').split(/\s+/)[0].slice(0, 9);
+      return `<g class="g-dot" data-gcontact="${esc(c.id || '')}" data-gname="${esc(c.name || 'Someone')}" data-gsub="${esc(catLabel(c.category) + sub)}" tabindex="0" role="link" aria-label="${esc((c.name || 'Someone') + sub)}"><circle class="g-hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="20" fill="transparent"/><circle class="g-vis" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="${DOT_FILL[c.category] || '#9a9a9a'}" stroke="#fff" stroke-width="2"><title>${esc((c.name || 'Someone') + sub)}</title></circle>${showLabels ? `<text x="${x.toFixed(1)}" y="${(y + 20).toFixed(1)}" text-anchor="middle" class="graph-dot-label">${esc(first)}</text>` : ''}</g>`;
+    }).join('');
   }).join('');
   const rings = RINGS.map((r) => `<circle cx="${C}" cy="${C}" r="${r}" fill="none" stroke="rgba(60,42,20,0.18)" stroke-width="1" stroke-dasharray="4 5"/>`).join('');
   const ringLabels = RING_LABELS.map((t, i) => {
     const r = (BANDS[i][0] + BANDS[i][1]) / 2;
-    return `<text x="${C}" y="${(C - r + 4).toFixed(1)}" text-anchor="middle" class="graph-ring-label">${t}</text>`;
+    return `<text x="${C}" y="${(C + r + 4).toFixed(1)}" text-anchor="middle" class="graph-ring-label">${t}</text>`;
   }).join('');
   const spokes = CATEGORIES.map((cname, i) => {
     const a = (i * 120 - 90) * Math.PI / 180;
@@ -318,7 +362,7 @@ function networkGraphSVG(contacts) {
     ${rings}${spokes}${ringLabels}
     <circle cx="${C}" cy="${C}" r="12" fill="#3d2b1f"/><text x="${C}" y="${(C + 4)}" text-anchor="middle" class="graph-you">You</text>
     ${dots}
-  </svg><div class="graph-legend">${legend}<span class="muted">Closer to centre = check-in due sooner. Tap a dot to open the person.</span></div></div>`;
+  </svg><div class="graph-pick" id="graph-pick" aria-live="polite"><span class="muted">Tap a person to see who they are.</span></div><div class="graph-legend">${legend}</div></div>`;
 }
 
 // --- calendar (dashboard) --------------------------------------------------
@@ -336,7 +380,7 @@ function calendarHTML(contacts, meetups) {
     const t = new Date(iso);
     if (isNaN(t) || t.getFullYear() !== year || t.getMonth() !== month) return;
     const day = t.getDate();
-    (events[day] = events[day] || []).push({ kind, label });
+    (events[day] = events[day] || []).push({ kind, label, at: t });
   };
   (contacts || []).forEach((c) => c.next_followup_at && add(c.next_followup_at, 'followup', (c.name || 'Follow-up')));
   (meetups || []).forEach((m) => m.starts_at && add(m.starts_at, 'meetup', (m.title || 'Meetup')));
@@ -346,11 +390,31 @@ function calendarHTML(contacts, meetups) {
     const evs = events[day] || [];
     const today = day === now.getDate() ? ' cal-today' : '';
     const dots = evs.slice(0, 4).map((e) => `<i class="cal-dot ${e.kind}" title="${esc(e.label)}"></i>`).join('');
-    cells.push(`<div class="cal-cell${today}"><span class="cal-day">${day}</span><span class="cal-dots">${dots}</span></div>`);
+    const has = evs.length ? ' has-ev' : '';
+    const tip = evs.map((e) => (e.kind === 'meetup' ? 'Meetup: ' : 'Check-in: ') + e.label).join('; ');
+    cells.push(`<button type="button" class="cal-cell${today}${has}" data-day="${day}" aria-label="${esc(monthName.split(' ')[0] + ' ' + day + (tip ? ': ' + tip : ': nothing planned'))}"><span class="cal-day">${day}</span><span class="cal-dots">${dots}</span></button>`);
   }
   const names = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => `<div class="cal-head">${d}</div>`).join('');
   return `<div class="calendar"><div class="cal-month">${esc(monthName)}</div><div class="cal-grid">${names}${cells.join('')}</div>
-    <div class="graph-legend"><span class="graph-legend-item"><i class="cal-dot followup"></i>Follow-up</span><span class="graph-legend-item"><i class="cal-dot meetup"></i>Meetup</span></div></div>`;
+    <div class="cal-detail" id="cal-detail" aria-live="polite"></div>
+    <div class="graph-legend"><span class="graph-legend-item"><i class="cal-dot followup"></i>Check-in</span><span class="graph-legend-item"><i class="cal-dot meetup"></i>Meetup</span></div></div>`;
+  window.__calEvents = events;
+}
+
+function wireCalendar() {
+  const ev = window.__calEvents || {};
+  const box = el('cal-detail');
+  if (!box) return;
+  const show = (day) => {
+    const list = ev[day] || [];
+    document.querySelectorAll('.cal-cell[data-day]').forEach((b) => b.classList.toggle('selected', Number(b.dataset.day) === Number(day)));
+    const when = new Date(new Date().getFullYear(), new Date().getMonth(), Number(day)).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+    box.innerHTML = `<strong>${esc(when)}</strong>` + (list.length
+      ? list.map((e) => `<div class="cal-item"><i class="cal-dot ${e.kind}"></i>${e.kind === 'meetup' ? 'Meetup' : 'Check-in'}: ${esc(e.label)}</div>`).join('')
+      : '<div class="muted">Nothing planned.</div>');
+  };
+  document.querySelectorAll('.cal-cell[data-day]').forEach((b) => { b.onclick = () => show(b.dataset.day); });
+  show(new Date().getDate());
 }
 
 function goalsComparison(goals, act) {
@@ -417,10 +481,20 @@ async function contactsView() {
   } catch (e) { if (stale(nav)) return; return renderError(e, contactsView); }
 
   if (stale(nav)) return;
+  const openForm = !!sessionStorage.getItem('org_new_contact') || !contacts.length;
   el('app').innerHTML = `
-    <h1>Contacts</h1>
+    <div class="page-head"><div><h1>Contacts</h1><p class="muted lede">${contacts.length} ${contacts.length === 1 ? 'person' : 'people'}${filter ? ' in ' + esc(filter) : ''}</p></div></div>
     <section class="card">
-      <h2>Add person</h2>
+      <div class="toolbar">
+        <input id="c-search" type="search" placeholder="Search by name or interest" aria-label="Search contacts">
+        <div class="chips" role="group" aria-label="Filter by category">
+          ${['', ...CATEGORIES].map((c) => `<button type="button" class="chip${c === filter ? ' on' : ''}" data-filter="${c}">${c ? catLabel(c) : 'All'}</button>`).join('')}
+        </div>
+      </div>
+      <div id="contact-list"></div>
+    </section>
+    <details class="card add-card" id="add-details" ${openForm ? 'open' : ''}>
+      <summary>Add a person</summary>
       <form id="add-form">
         <div class="form-grid">
           <label>Name <input id="c-name" placeholder="Name" required></label>
@@ -435,21 +509,23 @@ async function contactsView() {
         <p class="error" id="add-error"></p>
         <button class="primary" type="submit">Add</button>
       </form>
-    </section>
-    <section class="card">
-      <div class="row spread">
-        <h2>Your people</h2>
-        <select id="filter" style="width:auto">
-          <option value="">All categories</option>
-          ${CATEGORIES.map((c) => `<option value="${c}" ${c === filter ? 'selected' : ''}>${catLabel(c)}</option>`).join('')}
-        </select>
-      </div>
-      <div id="contact-list">
-        ${contacts.length ? contacts.map(contactRow).join('') : '<p class="muted">' + (filter ? 'No ' + filter + ' contacts yet.' : 'No contacts yet.') + '</p>'}
-      </div>
-    </section>`;
+    </details>`;
 
-  el('filter').onchange = () => { sessionStorage.setItem('org_filter', el('filter').value); contactsView(); };
+  const sorted = contacts.slice().sort((x, y) => {
+    const tx = x.next_followup_at ? new Date(x.next_followup_at).getTime() : Infinity;
+    const ty = y.next_followup_at ? new Date(y.next_followup_at).getTime() : Infinity;
+    return tx - ty || String(x.name).localeCompare(String(y.name));
+  });
+  const paint = () => {
+    const q = el('c-search').value.trim().toLowerCase();
+    const list = sorted.filter((c) => !q || (c.name || '').toLowerCase().includes(q) || (c.interests || []).some((i) => String(i).toLowerCase().includes(q)));
+    el('contact-list').innerHTML = list.length ? list.map(contactRow).join('')
+      : `<p class="muted empty">${q ? 'No one matches "' + esc(q) + '".' : (filter ? 'No ' + filter + ' contacts yet.' : 'No contacts yet. Add your first person below.')}</p>`;
+    document.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => go('#/contacts/' + encodeURIComponent(b.dataset.view)); });
+  };
+  el('c-search').oninput = paint;
+  paint();
+  document.querySelectorAll('[data-filter]').forEach((b) => { b.onclick = () => { sessionStorage.setItem('org_filter', b.dataset.filter); contactsView(); }; });
   el('add-form').onsubmit = async (e) => {
     e.preventDefault();
     el('add-error').textContent = '';
@@ -465,22 +541,25 @@ async function contactsView() {
     if (next) body.next_followup_at = new Date(next + 'T12:00:00').toISOString();
     try {
       await api('/api/me/contacts', { method: 'POST', body: JSON.stringify(body) });
+      flash(body.name + ' added. Open them to log a check-in or plan a meetup.');
       contactsView();
     } catch (err) { el('add-error').textContent = err.message; }
   };
-  document.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => go('#/contacts/' + encodeURIComponent(b.dataset.view)); });
   if (sessionStorage.getItem('org_new_contact')) {
     sessionStorage.removeItem('org_new_contact');
+    el('add-details').scrollIntoView({ block: 'center' });
     el('c-name').focus();
   }
 }
 
 function contactRow(c) {
+  const t = c.next_followup_at ? new Date(c.next_followup_at).getTime() : NaN;
+  const overdue = !isNaN(t) && t < Date.now() - 24 * 3600 * 1000;
   return `
-    <div class="row">
-      <div><strong>${esc(c.name)}</strong> <span class="tag">${esc(catLabel(c.category))}</span>
+    <div class="row contact-row">
+      <div><strong>${esc(c.name)}</strong> <span class="tag">${esc(catLabel(c.category))}</span>${overdue ? ' <span class="tag overdue">Overdue</span>' : ''}
         ${(c.interests || []).length ? `<div class="interest-pills">${c.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}</div>` : ''}
-        ${c.next_followup_at ? `<div class="muted">Next check-in: ${esc(fmtDay(c.next_followup_at))}</div>` : ''}
+        <div class="muted">${c.next_followup_at ? (overdue ? 'Was due ' : 'Next check-in ') + esc(fmtDay(c.next_followup_at)) : 'No check-in scheduled'}</div>
       </div>
       <div class="actions"><button data-view="${esc(c.id)}">Open</button></div>
     </div>`;
@@ -499,44 +578,46 @@ async function contactDetailView(id) {
   } catch (e) { if (stale(nav)) return; return renderError(e, () => contactDetailView(id)); }
 
   if (stale(nav)) return;
+  const tt = contact.next_followup_at ? new Date(contact.next_followup_at).getTime() : NaN;
+  const dueDays = isNaN(tt) ? null : Math.round((tt - Date.now()) / 864e5);
+  const dueText = dueDays === null ? 'No check-in scheduled' : dueDays < -1 ? `Check-in overdue by ${-dueDays} days` : dueDays <= 0 ? 'Check-in due today' : `Next check-in in ${dueDays} day${dueDays === 1 ? '' : 's'}`;
+  const dueCls = dueDays !== null && dueDays < -1 ? 'warn' : dueDays !== null && dueDays <= 7 ? 'soon' : 'ok';
   el('app').innerHTML = `
     <p><button class="link-btn" id="back">← All contacts</button></p>
-    <section class="card" id="profile-card">
-      <div class="row spread">
-        <h2>${esc(contact.name)}</h2>
-        <div class="actions">
-          <button id="c-edit">Edit</button>
-          <button class="danger" id="c-del">Delete</button>
+    <section class="card profile" id="profile-card">
+      <div class="profile-head">
+        <div class="avatar" aria-hidden="true">${esc(String(contact.name || '?').trim().charAt(0).toUpperCase())}</div>
+        <div>
+          <h1 class="profile-name">${esc(contact.name)}</h1>
+          <span class="tag">${esc(catLabel(contact.category))}</span>
         </div>
       </div>
-      <p><span class="tag">${esc(catLabel(contact.category))}</span></p>
+      <div class="due-banner ${dueCls}"><strong>${esc(dueText)}</strong>
+        <span class="muted">${contact.next_followup_at ? esc(fmtDay(contact.next_followup_at)) + ' · ' : ''}every ${contact.preferred_frequency_days || 14} days${contact.last_interaction_at ? ' · last spoke ' + esc(fmtDay(contact.last_interaction_at)) : ''}</span></div>
       ${(contact.interests || []).length ? `<p class="interest-pills">${contact.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}</p>` : ''}
-      ${contact.notes ? `<p>${esc(contact.notes)}</p>` : ''}
-      <p class="muted">Check in every ${contact.preferred_frequency_days || 14} days
-        ${contact.last_interaction_at ? ' · last interaction ' + esc(fmtDay(contact.last_interaction_at)) : ''}
-        ${contact.next_followup_at ? ' · next check-in ' + esc(fmtDay(contact.next_followup_at)) : ''}</p>
+      ${contact.notes ? `<p class="notes">${esc(contact.notes)}</p>` : ''}
     </section>
     <section class="card">
-      <h2>Add a check-in</h2>
+      <h2>Log a check-in</h2>
       <form id="log-form">
-        <label>Note <input id="log-note" placeholder="What happened?"></label>
+        <label>What happened? <input id="log-note" placeholder="Coffee, a call, a message..."></label>
         <label>Next follow-up (optional) <input id="log-next" type="date"></label>
+        <p class="muted">Leave the date blank to schedule by their check-in frequency.</p>
         <p class="error" id="log-error"></p>
         <button class="primary" type="submit">Save check-in</button>
       </form>
     </section>
     <section class="card">
       <h2>History</h2>
-      ${interactions.length ? interactions.map((i) => `
-        <div class="row">
-          <div><strong>${esc((i.type || 'interaction').replace(/_/g, ' '))}</strong>
-            <div class="muted">${esc(fmtDate(i.occurred_at))}</div>
-            ${i.notes ? `<div class="muted">${esc(i.notes)}</div>` : ''}
-          </div>
-        </div>`).join('') : '<p class="muted">No interactions recorded yet.</p>'}
-    </section>`;
+      ${interactions.length ? `<ol class="timeline">${interactions.map((i) => `
+        <li><i class="tl-dot"></i><div><strong>${esc((i.type || 'interaction').replace(/_/g, ' '))}</strong>
+          <span class="muted"> · ${esc(fmtDate(i.occurred_at))}</span>
+          ${i.notes ? `<div>${esc(i.notes)}</div>` : ''}</div></li>`).join('')}</ol>` : '<p class="muted empty">No check-ins yet. Log the first one above.</p>'}
+    </section>
+    <div class="manage"><button class="primary" id="c-meetup">Plan a meetup with ${esc(String(contact.name || '').split(/\s+/)[0])}</button> <button id="c-edit">Edit details</button> <button class="danger" id="c-del">Delete contact</button></div>`;
 
   el('back').onclick = () => go('#/contacts');
+  el('c-meetup').onclick = () => { sessionStorage.setItem('org_meetup_title', 'Catch-up with ' + String(contact.name || '').split(/\s+/)[0]); go('#/meetups'); };
   el('c-del').onclick = async () => {
     if (!confirm('Delete ' + (contact.name || 'this contact') + '?')) return;
     try {
@@ -553,6 +634,7 @@ async function contactDetailView(id) {
     if (next) body.next_followup_at = new Date(next + 'T12:00:00').toISOString();
     try {
       await api('/api/me/interactions', { method: 'POST', body: JSON.stringify(body) });
+      flash('Check-in saved. Your next reminder is set.', [['Back to dashboard', '#/dashboard']]);
       contactDetailView(id);
     } catch (err) { el('log-error').textContent = err.message; }
   };
@@ -636,9 +718,11 @@ async function meetupsView(created) {
     </section>
     <section class="card">
       <h2>Planned</h2>
-      ${meetups.length ? meetups.map(meetupRow).join('') : '<p class="muted">No meetups yet.</p>'}
+      ${meetups.length ? meetups.slice().sort((x, y) => ((x.status || 'open') !== 'open') - ((y.status || 'open') !== 'open')).map(meetupRow).join('') : '<p class="muted empty">No meetups yet. Plan one above and share the room link with your people.</p>'}
     </section>`;
 
+  const pre = sessionStorage.getItem('org_meetup_title');
+  if (pre) { sessionStorage.removeItem('org_meetup_title'); el('m-title').value = pre; el('m-title').focus(); }
   el('m-form').onsubmit = async (e) => {
     e.preventDefault();
     el('m-error').textContent = '';
@@ -654,6 +738,7 @@ async function meetupsView(created) {
     } catch (err) { el('m-error').textContent = err.message; }
   };
   wireMeetupRows();
+  if (el('created-dash')) el('created-dash').onclick = () => go('#/dashboard');
 }
 
 function createdCard(r) {
@@ -670,6 +755,8 @@ function createdCard(r) {
         <a href="${esc(url)}" target="_blank" rel="noopener"><button type="button">Open room</button></a>
       </div>` : ''}
       ${r.invite_text ? `<div class="invite-box">${esc(r.invite_text)}</div>` : ''}
+      <p class="muted">Next: send the link to your guests. They add their preferences and vote, then you confirm a place from the room.</p>
+      <p><button class="link-btn" id="created-dash">Back to dashboard</button></p>
     </section>`;
 }
 
@@ -677,12 +764,11 @@ function meetupRow(m) {
   const url = m.room_url || (m.room_token ? roomUrl(m.room_token) : '');
   const closed = (m.status || 'open') !== 'open';
   return `
-    <div class="row">
+    <div class="row${closed ? ' is-closed' : ''}">
       <div><strong>${esc(m.title)}</strong>
         ${m.activity ? `<span class="tag">${esc(m.activity)}</span>` : ''}
         <span class="tag ${closed ? 'status-closed' : 'status-open'}">${esc(m.status || 'open')}</span>
         <div class="muted">${[m.area, fmtDate(m.starts_at), m.budget ? '₹' + m.budget + ' per person' : ''].filter(Boolean).join(' · ')}</div>
-        ${url ? `<div class="muted mono">${esc(url)}</div>` : ''}
       </div>
       <div class="actions">
         ${url ? `<button data-copy="${esc(url)}">Copy link</button>` : ''}
@@ -732,6 +818,58 @@ const toRow = (c) => ({
   freq: c.preferred_frequency_days || 14,
 });
 
+
+// --- welcome / how it works -------------------------------------------------
+// Shown to new users before setup, and reachable any time from "Guide".
+
+const CAPABILITIES = [
+  ['1', 'Keep your people close', 'Add friends, colleagues and community. Group them as Personal, Professional or Community and set how often you want to check in.'],
+  ['2', 'See who needs you', 'Your dashboard shows a network map and a calendar. The closer someone is to the centre, the sooner a check-in is due.'],
+  ['3', 'Log check-ins', 'Note what happened after a coffee or a call. The next reminder is set for you, or you pick the date.'],
+  ['4', 'Plan meetups together', 'Create a meetup and share its room link. Guests add budget, area and free times, then vote on a shortlist of places. Nothing is ever sent for you.'],
+  ['5', 'Balance your attention', 'Set goals for Personal, Professional and Community, then compare them with where your time actually went.'],
+];
+
+function welcomeView(opts = {}) {
+  const returning = !!opts.returning || localStorage.getItem('org_onboarded') === '1';
+  el('app').innerHTML = `
+    <section class="card welcome">
+      <p class="eyebrow">${returning ? 'Guide' : 'Welcome to muop'}</p>
+      <h1>${returning ? 'What you can do with muop' : 'Stay close to the people who matter'}</h1>
+      <p class="muted lede-lg">muop helps you remember to check in, and makes meeting up easy. Here is what you can do.</p>
+      <ul class="cap-list">
+        ${CAPABILITIES.map(([ic, t, d]) => `<li><span class="cap-ic" aria-hidden="true">${ic}</span><div><strong>${esc(t)}</strong><div class="muted">${esc(d)}</div></div></li>`).join('')}
+      </ul>
+      <p class="muted">Setup takes about a minute. You can skip any step and change everything later.</p>
+      <div class="quick-actions">
+        ${returning
+          ? '<button class="primary" id="w-dash">Back to dashboard</button><button id="w-setup">Run setup again</button>'
+          : '<button class="primary" id="w-start">Get started</button><button id="w-skip">Skip, take me to the dashboard</button>'}
+      </div>
+    </section>`;
+  const done = () => { localStorage.setItem('org_onboarded', '1'); go('#/dashboard'); };
+  if (returning) { el('w-dash').onclick = () => go('#/dashboard'); el('w-setup').onclick = () => go('#/onboarding'); }
+  else { el('w-start').onclick = () => go('#/onboarding'); el('w-skip').onclick = done; }
+}
+
+// One-shot message shown at the top of the next page that renders.
+function flash(msg, links) { try { sessionStorage.setItem('org_flash', JSON.stringify({ msg, links: links || [] })); } catch { /* ignore */ } }
+function installFlash() {
+  new MutationObserver(() => {
+    const host = el('app');
+    if (!host || host.querySelector('.flash') || !host.querySelector('h1')) return;
+    let f; try { f = JSON.parse(sessionStorage.getItem('org_flash') || 'null'); } catch { f = null; }
+    if (!f) return;
+    sessionStorage.removeItem('org_flash');
+    const div = document.createElement('div');
+    div.className = 'flash';
+    div.setAttribute('role', 'status');
+    div.innerHTML = `<span>${esc(f.msg)}</span>${(f.links || []).map((l) => `<button class="link-btn" data-flash-go="${esc(l[1])}">${esc(l[0])}</button>`).join('')}`;
+    host.prepend(div);
+    div.querySelectorAll('[data-flash-go]').forEach((b) => { b.onclick = () => go(b.dataset.flashGo); });
+  }).observe(el('app'), { childList: true });
+}
+
 function onboardingView() {
   const p = prefill();
   const rows = (p.contacts && p.contacts.length ? p.contacts.slice(0, 5) : [emptyRow()]).map(toRow);
@@ -739,12 +877,36 @@ function onboardingView() {
   let step = 1;
   let voice = null;
 
-  const finish = () => {
+  const finish = (added) => {
     if (voice) voice.stop();
     localStorage.setItem('org_onboarded', '1');
     sessionStorage.removeItem('org_prefill');
+    if (added && added.length) return renderDone(added);
     go('#/dashboard');
   };
+
+  function renderDone(added) {
+    el('app').innerHTML = `
+      <section class="card welcome">
+        <p class="eyebrow">You are set</p>
+        <h1>${added.length} ${added.length === 1 ? 'person' : 'people'} added. What next?</h1>
+        <div class="next-grid">
+          <button class="next-card" id="d-checkin"><strong>Log a check-in</strong><span class="muted">Record a recent catch-up with ${esc(added[0].name)}.</span></button>
+          <button class="next-card" id="d-meetup"><strong>Plan a meetup</strong><span class="muted">Create a room link to share with friends.</span></button>
+          <button class="next-card" id="d-dash"><strong>See your dashboard</strong><span class="muted">Your network map and calendar.</span></button>
+        </div>
+      </section>`;
+    el('d-checkin').onclick = async () => {
+      try {
+        const r = await api('/api/me/contacts');
+        const list = Array.isArray(r) ? r : (r.contacts || []);
+        const m = list.find((c) => c.name === added[0].name);
+        go(m ? '#/contacts/' + encodeURIComponent(m.id) : '#/contacts');
+      } catch { go('#/contacts'); }
+    };
+    el('d-meetup').onclick = () => go('#/meetups');
+    el('d-dash').onclick = () => go('#/dashboard');
+  }
 
   // Voice / typed extraction -> pre-fill only. Rows the user already typed are
   // kept; extracted people fill the remaining slots (max 5).
@@ -789,8 +951,10 @@ function onboardingView() {
           <button class="primary" id="ob-next">Next: goals</button>
           <button id="ob-skip">Skip for now</button>
         </div>
+        <p><button class="link-btn" id="ob-welcome">← What can muop do?</button></p>
       </section>`;
     renderRows();
+    el('ob-welcome').onclick = () => go('#/welcome');
     voice = window.Voice ? window.Voice.mount(el('voice-mount'), applyExtraction) : null;
     // Lets the voice assistant (assistant.js) fill this form and move on.
     window.OrganizerOnboarding = { apply: applyExtraction };
@@ -806,7 +970,7 @@ function onboardingView() {
       step = 2;
       renderStep2();
     };
-    el('ob-skip').onclick = finish;
+    el('ob-skip').onclick = () => finish();
   }
 
   function renderRows() {
@@ -847,7 +1011,7 @@ function onboardingView() {
         <p class="error" id="ob-error"></p>
         <div class="quick-actions">
           <button id="ob-back">Back</button>
-          <button class="primary" id="ob-confirm">Confirm</button>
+          <button class="primary" id="ob-confirm">Save and finish</button>
           <button id="ob-skip">Skip for now</button>
         </div>
       </section>`;
@@ -857,7 +1021,7 @@ function onboardingView() {
     inputs.forEach((i) => { i.oninput = refresh; });
     refresh();
     el('ob-back').onclick = renderStep1;
-    el('ob-skip').onclick = finish;
+    el('ob-skip').onclick = () => finish();
     el('ob-confirm').onclick = async () => {
       el('ob-error').textContent = '';
       if (total() !== 100) {
@@ -877,7 +1041,7 @@ function onboardingView() {
           await api('/api/me/contacts', { method: 'POST', body: JSON.stringify({ contacts }) });
         }
         await api('/api/me/goals', { method: 'PUT', body: JSON.stringify(goalBody) });
-        finish();
+        finish(contacts);
       } catch (e) {
         el('ob-confirm').disabled = false;
         el('ob-error').textContent = e.message;
@@ -902,8 +1066,9 @@ async function boot() {
   const onboarded = localStorage.getItem('org_onboarded') === '1';
   const hash = location.hash || '#/dashboard';
   window.onhashchange = route;
-  if (d.is_empty && !onboarded && hash !== '#/onboarding') {
-    go('#/onboarding');
+  installFlash();
+  if (d.is_empty && !onboarded && hash !== '#/onboarding' && hash !== '#/welcome') {
+    go('#/welcome');
   }
   route();
 }

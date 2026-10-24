@@ -398,6 +398,9 @@ function renderPrefs() {
   const mine = view.attendees.find((a) => a.id === meId) || { guest_name: '', preferences: {}, availability: [] };
   const p = mine.preferences || {};
   prefsFor = meId;
+  const hasPrefs = !!(p.area || p.budget_max || p.budget_min || (p.food || []).length || (p.activities || []).length || (mine.availability || []).length);
+  $('prefs-details').open = !hasPrefs;
+  $('prefs-summary').textContent = hasPrefs ? [p.area, p.budget_max ? 'up to ₹' + p.budget_max : '', (p.food || []).join(', '), (mine.availability || []).length ? mine.availability.length + ' time slots' : ''].filter(Boolean).join(' · ') : 'Tell us your area, budget and when you are free so the shortlist fits everyone.';
   const areas = [...new Set([view.meetup.area, ...view.shortlist.map((s) => s.venue.area)].filter(Boolean))];
   $('prefs-form').innerHTML = `
     <label class="field"><span class="field-label">Your name</span>

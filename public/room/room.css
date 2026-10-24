@@ -148,3 +148,16 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
   .shortlist { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+#prefs-details > summary { list-style: none; cursor: pointer; }
+#prefs-details > summary::-webkit-details-marker { display: none; }
+.edit-hint { font-size: 13px; font-weight: 600; color: #0787a1; }
+#prefs-details[open] .edit-hint { display: none; }
+#prefs-details[open] ~ .prefs-summary { display: none; }
+.prefs-summary { margin: 2px 0 0; }
+
+.how-steps { list-style: none; counter-reset: s; display: grid; gap: 8px; padding: 0; margin: 10px 0 14px; }
+.how-steps li { counter-increment: s; display: grid; grid-template-columns: 28px 1fr; column-gap: 10px; align-items: center; }
+.how-steps li::before { content: counter(s); grid-row: span 2; width: 28px; height: 28px; border-radius: 50%; background: #f6ac0d; color: #3b2a1a; font-weight: 700; display: grid; place-items: center; font-size: 14px; }
+.how-steps strong { font-size: 14px; }
+.how-steps span { font-size: 13px; color: #6b5a48; }

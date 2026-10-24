@@ -182,3 +182,84 @@ fieldset legend { font-family: "Newsreader", Georgia, serif; font-size: 15px; pa
 .due { flex: none; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: #EFEDE6; color: #6b6b6b; }
 .due-today { background: #DDF2F2; color: #0E7C86; }
 .due-late { background: #FBE3DC; color: #B4452F; }
+/* --- ux pass: dashboard layout, focus, summary ---------------------------- */
+.container.wide { max-width: 1040px; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.page-head h1 { margin: 0; }
+.page-head .lede { margin: 4px 0 0; font-size: 14px; }
+.page-head .quick-actions { margin: 0; }
+.summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.sum-chip { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 14px; text-align: left; border: 1px solid #efe6d4; background: rgba(255,255,255,0.8); font-size: 13.5px; }
+.sum-num { font: 600 28px "Newsreader", Georgia, serif; line-height: 1; }
+.sum-chip.warn { background: rgba(246,172,13,0.2); border-color: rgba(217,154,11,0.5); }
+.sum-chip.soon { background: rgba(4,193,225,0.12); }
+.sum-chip.meet { background: rgba(214,235,179,0.5); }
+.sum-chip.ok { background: rgba(214,235,179,0.5); }
+.dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.dash-grid > .card { margin-bottom: 0; }
+.dash-grid + .stats, .dash-grid + .dash-grid { margin-top: 16px; }
+.stats + .card, .stats { margin-top: 16px; }
+.graph-dot-label { font: 500 10px Inter, system-ui, sans-serif; fill: rgba(61,43,31,0.8); paint-order: stroke; stroke: rgba(255,253,244,0.9); stroke-width: 3px; pointer-events: none; }
+.g-dot { cursor: pointer; }
+.g-dot:hover circle, .g-dot:focus circle { stroke: #2e1f14; }
+.g-dot:focus { outline: none; }
+.cal-cell { font: inherit; color: inherit; cursor: pointer; padding: 2px; border-radius: 10px; }
+.cal-cell.has-ev { background: rgba(255,255,255,0.95); }
+.cal-cell.selected { background: rgba(246,172,13,0.22); border-color: #f6ac0d; }
+.cal-detail { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: rgba(117,228,222,0.16); font-size: 14px; }
+.cal-item { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+:focus-visible { outline: 2px solid #04c1e1; outline-offset: 2px; }
+.g-dot:focus-visible circle { stroke: #04c1e1; stroke-width: 3; }
+.card h2 + .muted { margin-top: -4px; }
+@media (max-width: 860px) { .dash-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .summary { grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .sum-chip { flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px; font-size: 12px; }
+  .dash-grid > .card { margin-bottom: 0; }
+  .dash-grid { gap: 12px; }
+  #sec-followups .row, #sec-meetups .row { flex-direction: row; align-items: center; }
+  .page-head .quick-actions { width: 100%; }
+  .page-head .quick-actions button { flex: 1; }
+}
+
+/* --- contacts / meetups ux --------------------------------------------- */
+.toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.toolbar input[type=search] { flex: 1 1 220px; margin-top: 0; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { padding: 7px 14px; }
+.chip.on { background: rgba(246,172,13,0.25); border-color: #d99a0b; font-weight: 600; }
+.add-card summary { font: 500 21px "Newsreader", Georgia, serif; cursor: pointer; }
+.add-card[open] summary { margin-bottom: 8px; }
+.empty { padding: 14px 0; }
+.row.is-closed { opacity: 0.6; }
+@media (max-width: 640px) { .contact-row { flex-direction: row; align-items: center; } .chips { width: 100%; } .chip { flex: 1; } }
+@media (max-width: 640px) { .chip { padding: 8px 4px; font-size: 13px; white-space: nowrap; } .chips { flex-wrap: nowrap; } }
+
+.graph-pick { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; margin-top: 10px; padding: 8px 14px; border-radius: 12px; background: rgba(117,228,222,0.16); font-size: 14px; }
+.g-dot.sel .g-vis { stroke: #2e1f14; stroke-width: 3; }
+.profile-head { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+.profile-name { margin: 0 0 4px; font-size: 28px; }
+.avatar { width: 52px; height: 52px; border-radius: 50%; background: #f6ac0d; color: #3b2a1a; display: grid; place-items: center; font: 600 24px "Newsreader", Georgia, serif; flex-shrink: 0; }
+.due-banner { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 12px; margin-bottom: 10px; }
+.due-banner.warn { background: rgba(246,172,13,0.22); }
+.due-banner.soon { background: rgba(4,193,225,0.12); }
+.due-banner.ok { background: rgba(214,235,179,0.5); }
+.notes { white-space: pre-wrap; margin: 8px 0 0; }
+.timeline { list-style: none; margin: 0; padding: 0 0 0 6px; border-left: 2px solid #efe6d4; }
+.timeline li { position: relative; padding: 0 0 14px 18px; }
+.tl-dot { position: absolute; left: -7px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: #04c1e1; border: 2px solid #fffdf4; }
+.manage { display: flex; gap: 10px; justify-content: flex-end; margin: 4px 0 24px; }
+
+/* --- welcome + flow ------------------------------------------------------ */
+.eyebrow { margin: 0 0 4px; font: 600 12px Inter, sans-serif; letter-spacing: 0.1em; text-transform: uppercase; color: #0787a1; }
+.welcome h1 { margin: 0 0 8px; font-size: 32px; line-height: 1.15; }
+.lede-lg { font-size: 15px; margin: 0 0 14px; }
+.cap-list { list-style: none; padding: 0; margin: 0 0 14px; display: grid; gap: 10px; }
+.cap-list li { display: flex; gap: 14px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,0.7); border: 1px solid #efe6d4; }
+.cap-ic { width: 38px; height: 38px; border-radius: 12px; background: rgba(246,172,13,0.2); display: grid; place-items: center; font: 600 18px 'Newsreader', Georgia, serif; flex-shrink: 0; }
+.cap-list strong { font-size: 15px; }
+.next-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+.next-card { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 16px; border-radius: 14px; border: 1px solid #efe6d4; background: rgba(255,255,255,0.8); }
+.next-card:hover { border-color: #f6ac0d; }
+.flash { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 11px 16px; margin-bottom: 14px; border-radius: 12px; background: rgba(214,235,179,0.6); border: 1px solid rgba(120,160,60,0.3); font-size: 14px; }
+@media (max-width: 640px) { .next-grid { grid-template-columns: 1fr; } .welcome h1 { font-size: 27px; } .nav a { padding: 6px 9px; } }

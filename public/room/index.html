@@ -53,6 +53,11 @@
 
     <section id="join-card" class="card hidden">
       <h2>Join with your name</h2>
+      <ol class="how-steps" aria-label="How this works">
+        <li><strong>Join</strong><span>Add your name below.</span></li>
+        <li><strong>Share what you like</strong><span>Budget, area, food and when you are free.</span></li>
+        <li><strong>Vote</strong><span>Pick a place from the shortlist. The organiser confirms it.</span></li>
+      </ol>
       <p class="muted">No account needed. Your name and preferences are only shown to people with this link.</p>
       <form id="join-form" class="join-form">
         <label class="sr-only" for="join-name">Your name</label>
@@ -62,14 +67,26 @@
       <p id="join-error" class="error" role="alert"></p>
     </section>
 
+    <section class="card">
+      <div class="card-head">
+        <h2>Shortlist</h2>
+        <span class="muted" id="vote-hint">One vote each. Tap your vote again to withdraw it.</span>
+      </div>
+      <p id="shortlist-note" class="note"></p>
+      <div id="shortlist" class="shortlist"></div>
+    </section>
+
     <div class="grid">
       <section id="prefs-card" class="card hidden">
-        <div class="card-head">
-          <h2>Your preferences</h2>
-          <span id="prefs-saved" class="saved-chip hidden">Saved ✓</span>
-        </div>
-        <form id="prefs-form"></form>
-        <p id="prefs-error" class="error" role="alert"></p>
+        <details id="prefs-details" open>
+          <summary class="card-head">
+            <h2>Your preferences</h2>
+            <span><span id="prefs-saved" class="saved-chip hidden">Saved ✓</span> <span class="edit-hint">Edit</span></span>
+          </summary>
+          <form id="prefs-form"></form>
+          <p id="prefs-error" class="error" role="alert"></p>
+        </details>
+        <p id="prefs-summary" class="muted prefs-summary"></p>
       </section>
 
       <div class="stack">
@@ -87,14 +104,6 @@
       </div>
     </div>
 
-    <section class="card">
-      <div class="card-head">
-        <h2>Shortlist</h2>
-        <span class="muted" id="vote-hint">One vote each. Tap your vote again to withdraw it.</span>
-      </div>
-      <p id="shortlist-note" class="note"></p>
-      <div id="shortlist" class="shortlist"></div>
-    </section>
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
