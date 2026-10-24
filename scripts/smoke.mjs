@@ -161,5 +161,20 @@ const full = r.json.meetup;
 await admin.from('meetup_attendees').insert(Array.from({ length: 50 }, (_, i) => ({ meetup_id: full.id, guest_name: `g${i}`, secret_hash: `h${i}` })));
 check('51st guest is rejected', (await call('POST', `/api/rooms/${full.room_token}/join`, { body: { guest_name: 'one too many' } })).status === 429);
 
+r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Last week', starts_at: new Date(Date.now() - 7 * 86400000).toISOString() } });
+const pastId = r.json.meetup.id;
+r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Expired room' } });
+const expiredId = r.json.meetup.id;
+await admin.from('meetups').update({ expires_at: new Date(Date.now() - 60000).toISOString() }).eq('id', expiredId);
+r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Unscheduled' } });
+const unscheduledId = r.json.meetup.id;
+r = await call('GET', '/api/me/dashboard', { token: alice });
+const upIds = r.json.upcoming_meetups.map((m) => m.id);
+check(
+  'dashboard hides past and expired meetups, keeps unscheduled',
+  !upIds.includes(pastId) && !upIds.includes(expiredId) && upIds.includes(unscheduledId),
+  JSON.stringify(r.json.upcoming_meetups.map((m) => m.title)),
+);
+
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
 process.exit(failures ? 1 : 0);
