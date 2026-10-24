@@ -941,9 +941,10 @@ function onboardingView() {
     el('app').innerHTML = `
       <section class="card">
         <div class="step-dots">Step 1 of 2 · People</div>
-        <h1>Who do you want to stay in touch with?</h1>
-        <p class="muted">Add up to 5 people. You can edit everything before confirming - nothing is saved yet.</p>
+        <h1>Let's find your people</h1>
         <div id="voice-mount"></div>
+        <h2 class="ob-sub">Your people <span class="muted">(up to 5)</span></h2>
+        <p class="muted">Anyone I hear or you type appears here. Check and edit them. Nothing is saved until you finish setup.</p>
         <div id="ob-rows"></div>
         <p><button class="link-btn" id="ob-add">+ Add another</button></p>
         <p class="error" id="ob-error"></p>
@@ -980,7 +981,7 @@ function onboardingView() {
         <label>Category <select data-f="category">${CATEGORIES.map((c) => `<option value="${c}" ${c === r.category ? 'selected' : ''}>${catLabel(c)}</option>`).join('')}</select></label>
         <label>Interests <input data-f="interests" value="${esc(r.interests)}" placeholder="hiking, chai"></label>
         <label>Every (days) <input data-f="freq" type="number" min="1" value="${Number(r.freq) || 14}"></label>
-        ${rows.length > 1 ? '<button class="danger remove-row" data-rm="' + i + '">×</button>' : '<span></span>'}
+        ${rows.length > 1 ? '<button class="danger remove-row" data-rm="' + i + '" aria-label="Remove this person">Remove</button>' : '<span></span>'}
       </div>`).join('');
     document.querySelectorAll('[data-rm]').forEach((b) => {
       b.onclick = () => { collectRows(); rows.splice(parseInt(b.dataset.rm, 10), 1); renderRows(); };

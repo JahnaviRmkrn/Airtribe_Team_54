@@ -55,20 +55,39 @@
     // Static markup only; all dynamic text below goes through textContent.
     root.innerHTML = `
       <div class="vx" data-mode="idle">
+        <div class="vx-guide">
+          <svg class="vx-char" viewBox="0 0 96 96" role="img" aria-label="Friendly muop guide">
+            <g class="vx-sat s1"><circle cx="80" cy="24" r="8" fill="#04C1E1" stroke="#2E1F14" stroke-width="2.4"/></g>
+            <g class="vx-sat s2"><circle cx="14" cy="30" r="6" fill="#75E4DE" stroke="#2E1F14" stroke-width="2.4"/></g>
+            <g class="vx-body">
+              <circle cx="48" cy="54" r="30" fill="#F6AC0D" stroke="#2E1F14" stroke-width="2.4"/>
+              <ellipse cx="36" cy="64" rx="5" ry="3.2" fill="#FFF3C4" opacity="0.7"/>
+              <ellipse cx="60" cy="64" rx="5" ry="3.2" fill="#FFF3C4" opacity="0.7"/>
+              <g class="vx-eyes"><circle cx="38" cy="50" r="3.4" fill="#2E1F14"/><circle cx="58" cy="50" r="3.4" fill="#2E1F14"/></g>
+              <path class="vx-smile" d="M38 61 Q48 70 58 61" fill="none" stroke="#2E1F14" stroke-width="2.6" stroke-linecap="round"/>
+              <ellipse class="vx-mouth" cx="48" cy="64" rx="6" ry="5" fill="#2E1F14"/>
+            </g>
+          </svg>
+          <div class="vx-bubble">
+            <div class="vx-title">Talk to me.</div>
+            <div class="vx-ask">Who are five people you'd love to stay in touch with?</div>
+            <div class="vx-hint">Say their names, how you know them, and how often you'd like to catch up.</div>
+          </div>
+        </div>
         <div class="vx-head">
-          <button class="vx-orb" type="button" data-vx="orb" aria-label="Talk instead">
+          <button class="vx-orb" type="button" data-vx="orb" aria-label="Tap to talk">
             <span class="vx-ring"></span><span class="vx-ring r2"></span>
             <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-2.08A7 7 0 0 0 19 12h-2Z"/></svg>
           </button>
           <div class="vx-text">
-            <div class="vx-title">Talk instead</div>
-            <div class="vx-status" data-vx="status" aria-live="polite">Tap the mic and talk for about 30 seconds.</div>
+            <div class="vx-label" data-vx="label">Tap to talk</div>
+            <div class="vx-status" data-vx="status" aria-live="polite">Your browser will ask for microphone access. You can type instead.</div>
           </div>
           <button class="vx-end hidden" type="button" data-vx="end">Done talking</button>
         </div>
         <div class="vx-log hidden" data-vx="log" aria-live="polite"></div>
         <details class="vx-fallback" data-vx="fallback">
-          <summary>Type instead</summary>
+          <summary>Prefer typing? Tell me here</summary>
           <textarea data-vx="text" rows="4" maxlength="20000"></textarea>
           <button type="button" data-vx="extract">Fill in from text</button>
         </details>
@@ -79,7 +98,8 @@
     const box = root.querySelector('.vx');
     const status = (t) => { $('status').textContent = t; };
     const error = (t) => { $('err').textContent = t || ''; };
-    const setMode = (m) => { box.dataset.mode = m; };
+    const LABELS = { idle: 'Tap to talk', connecting: 'Connecting...', live: "I'm listening", speaking: 'Speaking...', thinking: 'Thinking...', done: 'Tap to talk again', off: 'Voice unavailable' };
+    const setMode = (m) => { box.dataset.mode = m; const l = $('label'); if (l) l.textContent = LABELS[m] || LABELS.idle; };
     $('text').placeholder = EXAMPLE;
 
     function addLine(who, text) {
@@ -113,7 +133,7 @@
         });
         if (left) return;
         const n = res.contacts.length;
-        status('Found ' + n + ' ' + (n === 1 ? 'person' : 'people') + ' - review below. Nothing is saved until you confirm.');
+        status('I found ' + n + ' ' + (n === 1 ? 'person' : 'people') + '. Check and fix them below. Nothing is saved until you confirm.');
         setMode('done');
         onResult(res);
       } catch (e) {
@@ -129,7 +149,7 @@
     function voiceUnavailable(msg) {
       setMode('off');
       $('orb').disabled = true;
-      status('Voice is unavailable - type instead.');
+      status('Voice is not available right now. Type it instead and I will fill in the form.');
       if (msg) error(msg);
       $('fallback').open = true;
     }
@@ -154,7 +174,7 @@
         const session = await sdk.Conversation.startSession({
           signedUrl: signed.signed_url,
           onConnect: () => {
-            status('Listening - tell me about the people who matter.');
+            status('Go ahead. Tell me about the people who matter.');
             setMode('live');
             $('end').classList.remove('hidden');
           },

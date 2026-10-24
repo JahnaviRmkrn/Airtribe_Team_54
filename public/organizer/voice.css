@@ -3,7 +3,6 @@
       border-radius: 14px; padding: 14px; margin: 4px 0 16px; background: rgba(255,255,255,0.7); border: 1px solid #efe6d4; }
 .vx-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .vx-text { flex: 1; min-width: 160px; }
-.vx-title { font-weight: 700; font-size: 15px; }
 .vx-status { color: #5d6370; font-size: 13px; }
 .vx-orb { position: relative; flex: none; width: 52px; height: 52px; border-radius: 50%; border: none; color: #fff; cursor: pointer; padding: 0;
           display: grid; place-items: center; background: linear-gradient(135deg, var(--vx-a), var(--vx-b)); transition: transform .2s; }
@@ -31,3 +30,31 @@
 .vx-err { color: #b3382e; font-size: 13px; margin: 6px 0 0; }
 .vx-err:empty { display: none; }
 @media (prefers-reduced-motion: reduce) { .vx * { animation: none !important; transition: none !important; } }
+
+/* friendly guide character */
+.vx-guide { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+.vx-char { flex: none; overflow: visible; }
+.vx-body { transform-origin: 48px 84px; animation: vx-bob 3.2s ease-in-out infinite; }
+.vx-sat { animation: vx-float 4s ease-in-out infinite; }
+.vx-sat.s2 { animation-delay: -1.6s; }
+.vx-mouth { opacity: 0; transform-origin: 48px 64px; }
+.vx[data-mode="speaking"] .vx-mouth { opacity: 1; animation: vx-talk .35s ease-in-out infinite alternate; }
+.vx[data-mode="speaking"] .vx-smile { opacity: 0; }
+.vx[data-mode="live"] .vx-body { animation: vx-lean 2s ease-in-out infinite; }
+.vx[data-mode="thinking"] .vx-eyes { animation: vx-blink 1s ease-in-out infinite; }
+.vx-bubble { position: relative; background: #fff; border: 1px solid #efe6d4; border-radius: 16px; padding: 10px 14px; box-shadow: 0 6px 18px rgba(120,84,30,.08); }
+.vx-bubble::before { content: ""; position: absolute; left: -7px; top: 26px; width: 12px; height: 12px; background: #fff; border-left: 1px solid #efe6d4; border-bottom: 1px solid #efe6d4; transform: rotate(45deg); }
+.vx-title { font: 500 20px "Newsreader", Georgia, serif; }
+.vx-ask { font-size: 14.5px; font-weight: 600; margin-top: 2px; }
+.vx-hint { color: #6b5a48; font-size: 13px; margin-top: 4px; }
+.vx-label { font-weight: 700; font-size: 15px; }
+@keyframes vx-bob { 50% { transform: translateY(-3px); } }
+@keyframes vx-lean { 50% { transform: scale(1.04); } }
+@keyframes vx-float { 50% { transform: translateY(-4px); } }
+@keyframes vx-talk { from { transform: scaleY(.45); } to { transform: scaleY(1); } }
+@keyframes vx-blink { 0%, 80%, 100% { transform: scaleY(1); } 90% { transform: scaleY(.1); } }
+.vx-eyes { transform-origin: 48px 50px; }
+@media (max-width: 420px) { .vx-char { width: 72px; height: 72px; } .vx-title { font-size: 18px; } }
+
+.vx-char { width: 112px; height: 112px; }
+@media (max-width: 420px) { .vx-char { width: 84px; height: 84px; } }
