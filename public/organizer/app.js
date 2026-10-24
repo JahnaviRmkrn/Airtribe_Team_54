@@ -596,6 +596,7 @@ function onboardingView() {
     renderRows();
     el('ob-add').onclick = () => {
       if (rows.length >= 5) { el('ob-error').textContent = 'Up to 5 people for now - you can add more from Contacts later.'; return; }
+      collectRows();
       rows.push(emptyRow());
       renderRows();
     };
@@ -699,10 +700,10 @@ async function boot() {
   }
   const onboarded = localStorage.getItem('org_onboarded') === '1';
   const hash = location.hash || '#/dashboard';
-  if (d.is_empty && !onboarded && hash !== '#/onboarding') {
-    return go('#/onboarding');
-  }
   window.onhashchange = route;
+  if (d.is_empty && !onboarded && hash !== '#/onboarding') {
+    go('#/onboarding');
+  }
   route();
 }
 
