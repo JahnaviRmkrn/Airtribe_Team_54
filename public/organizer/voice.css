@@ -79,3 +79,18 @@
 .voice-line.user::before { content: "You: "; font-weight: 600; }
 .voice-line.agent::before { content: "muop: "; font-weight: 600; color: #0787a1; }
 @media (prefers-reduced-motion: reduce) { .voice-fab[data-state="speaking"] { animation: none; } }
+
+/* --- plan a meetup by voice (plan-voice.js) -------------------------------- */
+.pv { margin: 6px 0 16px; padding: 12px 14px; border-radius: 14px; border: 1px dashed #e3d8c4; background: rgba(117, 228, 222, 0.08); }
+.pv-head { display: flex; gap: 12px; align-items: center; }
+.pv-mic { width: 46px; height: 46px; border-radius: 50%; border: 0; cursor: pointer; font-size: 20px; background: linear-gradient(135deg, #f6ac0d, #f3c94a); box-shadow: 0 6px 16px rgba(46, 31, 20, 0.18); }
+.pv-mic[data-state="listening"], .pv-mic[data-state="speaking"] { background: linear-gradient(135deg, #04c1e1, #75e4de); }
+.pv-log { margin-top: 10px; max-height: 180px; overflow: auto; font-size: 14px; }
+.pv-line { padding: 3px 0; }
+.pv-line.user::before { content: "You: "; font-weight: 600; }
+.pv-line.agent::before { content: "muop: "; font-weight: 600; color: #0787a1; }
+.pv-result { margin-top: 12px; padding-top: 10px; border-top: 1px solid #efe6d4; }
+.pv-result h3 { margin: 0 0 6px; font-family: "Newsreader", Georgia, serif; }
+.pv-note { background: #fffdf8; border: 1px solid #efe6d4; border-radius: 10px; padding: 8px 10px; }
+.pv-msg { display: block; width: 100%; margin: 6px 0 8px; padding: 8px 10px; border: 1px solid #e3d8c4; border-radius: 10px; font: inherit; }
+.pv-share { display: flex; flex-wrap: wrap; gap: 8px; }

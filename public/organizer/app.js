@@ -821,6 +821,7 @@ async function meetupsView(created) {
     <section class="card">
       <h2>Plan a meetup</h2>
       <p class="muted">Guests join through the room link - nothing is sent automatically.</p>
+      <div id="plan-voice"></div>
       <form id="m-form">
         <div class="form-grid">
           <label class="full">Title <input id="m-title" required placeholder="Coffee catch-up"></label>
@@ -840,6 +841,7 @@ async function meetupsView(created) {
       ${meetups.length ? meetups.slice().sort((x, y) => ((x.status || 'open') !== 'open') - ((y.status || 'open') !== 'open')).map(meetupRow).join('') : '<p class="muted empty">No meetups yet. Plan one above and share the room link with your people.</p>'}
     </section>`;
 
+  if (window.PlanByVoice) window.PlanByVoice.mount(el('plan-voice'));
   const pre = sessionStorage.getItem('org_meetup_title');
   if (pre) { sessionStorage.removeItem('org_meetup_title'); el('m-title').value = pre; el('m-title').focus(); }
   el('m-form').onsubmit = async (e) => {
