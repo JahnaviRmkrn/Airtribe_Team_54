@@ -1,9 +1,8 @@
 /* Voice onboarding widget - scoped under .vx so it can't leak into styles.css. */
-.vx { --vx-a: #3b5998; --vx-b: hsl(192 70% 42%); --vx-hot: hsl(330 75% 52%);
-      border-radius: 10px; padding: 14px; margin: 4px 0 16px; background: #f7f8fa; border: 1px solid #e4e6eb; }
+.vx { --vx-a: #04c1e1; --vx-b: #75e4de; --vx-hot: #f6ac0d;
+      border-radius: 14px; padding: 14px; margin: 4px 0 16px; background: rgba(255,255,255,0.7); border: 1px solid #efe6d4; }
 .vx-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .vx-text { flex: 1; min-width: 160px; }
-.vx-title { font-weight: 700; font-size: 15px; }
 .vx-status { color: #5d6370; font-size: 13px; }
 .vx-orb { position: relative; flex: none; width: 52px; height: 52px; border-radius: 50%; border: none; color: #fff; cursor: pointer; padding: 0;
           display: grid; place-items: center; background: linear-gradient(135deg, var(--vx-a), var(--vx-b)); transition: transform .2s; }
@@ -18,16 +17,44 @@
 .vx[data-mode="connecting"] .vx-orb, .vx[data-mode="thinking"] .vx-orb { animation: vx-breathe 1.2s ease-in-out infinite; }
 @keyframes vx-ripple { 0% { transform: scale(1); opacity: .7; } 100% { transform: scale(1.7); opacity: 0; } }
 @keyframes vx-breathe { 50% { transform: scale(.92); opacity: .75; } }
-.vx-end { border-color: hsl(330 75% 52% / .5); color: hsl(330 70% 40%); font-weight: 600; }
+.vx-end { border-color: rgba(246,172,13,.55); color: #7a4d05; font-weight: 600; }
 .vx-log { margin-top: 12px; max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px; }
 .vx-msg { display: flex; }
 .vx-msg span { max-width: 82%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
-.vx-msg.agent span { background: #fff; border: 1px solid #e4e6eb; border-bottom-left-radius: 4px; }
+.vx-msg.agent span { background: #fff; border: 1px solid #efe6d4; border-bottom-left-radius: 4px; }
 .vx-msg.user { justify-content: flex-end; }
 .vx-msg.user span { background: var(--vx-a); color: #fff; border-bottom-right-radius: 4px; }
 .vx-fallback { margin-top: 12px; }
-.vx-fallback summary { cursor: pointer; font-size: 14px; color: #3b5998; }
+.vx-fallback summary { cursor: pointer; font-size: 14px; color: #0787a1; }
 .vx-fallback textarea { margin: 8px 0; font: inherit; }
-.vx-err { color: #c00; font-size: 13px; margin: 6px 0 0; }
+.vx-err { color: #b3382e; font-size: 13px; margin: 6px 0 0; }
 .vx-err:empty { display: none; }
 @media (prefers-reduced-motion: reduce) { .vx * { animation: none !important; transition: none !important; } }
+
+/* friendly guide character */
+.vx-guide { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+.vx-char { flex: none; overflow: visible; }
+.vx-body { transform-origin: 48px 84px; animation: vx-bob 3.2s ease-in-out infinite; }
+.vx-sat { animation: vx-float 4s ease-in-out infinite; }
+.vx-sat.s2 { animation-delay: -1.6s; }
+.vx-mouth { opacity: 0; transform-origin: 48px 64px; }
+.vx[data-mode="speaking"] .vx-mouth { opacity: 1; animation: vx-talk .35s ease-in-out infinite alternate; }
+.vx[data-mode="speaking"] .vx-smile { opacity: 0; }
+.vx[data-mode="live"] .vx-body { animation: vx-lean 2s ease-in-out infinite; }
+.vx[data-mode="thinking"] .vx-eyes { animation: vx-blink 1s ease-in-out infinite; }
+.vx-bubble { position: relative; background: #fff; border: 1px solid #efe6d4; border-radius: 16px; padding: 10px 14px; box-shadow: 0 6px 18px rgba(120,84,30,.08); }
+.vx-bubble::before { content: ""; position: absolute; left: -7px; top: 26px; width: 12px; height: 12px; background: #fff; border-left: 1px solid #efe6d4; border-bottom: 1px solid #efe6d4; transform: rotate(45deg); }
+.vx-title { font: 500 20px "Newsreader", Georgia, serif; }
+.vx-ask { font-size: 14.5px; font-weight: 600; margin-top: 2px; }
+.vx-hint { color: #6b5a48; font-size: 13px; margin-top: 4px; }
+.vx-label { font-weight: 700; font-size: 15px; }
+@keyframes vx-bob { 50% { transform: translateY(-3px); } }
+@keyframes vx-lean { 50% { transform: scale(1.04); } }
+@keyframes vx-float { 50% { transform: translateY(-4px); } }
+@keyframes vx-talk { from { transform: scaleY(.45); } to { transform: scaleY(1); } }
+@keyframes vx-blink { 0%, 80%, 100% { transform: scaleY(1); } 90% { transform: scaleY(.1); } }
+.vx-eyes { transform-origin: 48px 50px; }
+@media (max-width: 420px) { .vx-char { width: 72px; height: 72px; } .vx-title { font-size: 18px; } }
+
+.vx-char { width: 112px; height: 112px; }
+@media (max-width: 420px) { .vx-char { width: 84px; height: 84px; } }

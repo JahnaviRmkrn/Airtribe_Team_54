@@ -3,15 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Meetup room</title>
+  <title>muop - Meetup room</title>
+  <link rel="icon" href="/muop-mark.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
   <meta name="description" content="Join the meetup room: share your budget, area and availability, then vote on where to go.">
   <meta name="robots" content="noindex">
   <meta name="referrer" content="no-referrer">
   <link rel="stylesheet" href="/room/room.css">
+  <script src="/product-analytics.js" defer></script>
 </head>
 <body>
   <header class="r-top">
-    <span class="r-brand"><span class="r-logo">◆</span> Meetup room</span>
+    <span class="r-brand">
+      <svg width="24" height="24" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <path d="M14 32 L24 14 L34 32 L14 32 Z" stroke="#2E1F14" stroke-width="2.4" stroke-linejoin="round" opacity="0.9"/>
+        <circle cx="14" cy="32" r="7" fill="#F6AC0D" stroke="#2E1F14" stroke-width="2.4"/>
+        <circle cx="24" cy="14" r="7" fill="#04C1E1" stroke="#2E1F14" stroke-width="2.4"/>
+        <circle cx="34" cy="32" r="7" fill="#75E4DE" stroke="#2E1F14" stroke-width="2.4"/>
+      </svg>
+      muop <span class="r-logo">meetup room</span>
+    </span>
     <span id="status-pill" class="pill">Loading…</span>
   </header>
 
@@ -27,29 +40,53 @@
     </section>
 
     <div id="banner"></div>
+    <section id="payment-card" class="card hidden" aria-label="Your payment">
+      <h2>Your payment</h2>
+      <p id="payment-status" role="status" aria-live="polite"></p>
+      <p class="muted">Checkout opens on Pine Labs. Returning here does not confirm payment; check status after checkout.</p>
+      <button id="pay-btn" class="btn primary" type="button">Pay with Pine Labs</button>
+      <button id="payment-check" class="btn ghost" type="button">Check payment status</button>
+    </section>
     <p id="conn" class="conn hidden" role="status"></p>
 
     <section id="org-panel" class="card org hidden" aria-label="Organiser controls"></section>
 
     <section id="join-card" class="card hidden">
       <h2>Join with your name</h2>
+      <ol class="how-steps" aria-label="How this works">
+        <li><strong>Join</strong><span>Add your name below.</span></li>
+        <li><strong>Share what you like</strong><span>Budget, area, food and when you are free.</span></li>
+        <li><strong>Vote</strong><span>Pick a place from the shortlist. The organiser confirms it.</span></li>
+      </ol>
       <p class="muted">No account needed. Your name and preferences are only shown to people with this link.</p>
       <form id="join-form" class="join-form">
         <label class="sr-only" for="join-name">Your name</label>
         <input id="join-name" maxlength="60" autocomplete="given-name" placeholder="e.g. Priya" required>
-        <button id="join-btn" class="btn primary" type="submit">Join room</button>
+        <button id="join-btn" class="btn primary" type="submit">Continue as guest</button>
       </form>
       <p id="join-error" class="error" role="alert"></p>
     </section>
 
+    <section class="card">
+      <div class="card-head">
+        <h2>Shortlist</h2>
+        <span class="muted" id="vote-hint">One vote each. Tap your vote again to withdraw it.</span>
+      </div>
+      <p id="shortlist-note" class="note"></p>
+      <div id="shortlist" class="shortlist"></div>
+    </section>
+
     <div class="grid">
       <section id="prefs-card" class="card hidden">
-        <div class="card-head">
-          <h2>Your preferences</h2>
-          <span id="prefs-saved" class="saved-chip hidden">Saved ✓</span>
-        </div>
-        <form id="prefs-form"></form>
-        <p id="prefs-error" class="error" role="alert"></p>
+        <details id="prefs-details" open>
+          <summary class="card-head">
+            <h2>Your preferences</h2>
+            <span><span id="prefs-saved" class="saved-chip hidden">Saved ✓</span> <span class="edit-hint">Edit</span></span>
+          </summary>
+          <form id="prefs-form"></form>
+          <p id="prefs-error" class="error" role="alert"></p>
+        </details>
+        <p id="prefs-summary" class="muted prefs-summary"></p>
       </section>
 
       <div class="stack">
@@ -67,14 +104,6 @@
       </div>
     </div>
 
-    <section class="card">
-      <div class="card-head">
-        <h2>Shortlist</h2>
-        <span class="muted" id="vote-hint">One vote each. Tap your vote again to withdraw it.</span>
-      </div>
-      <p id="shortlist-note" class="note"></p>
-      <div id="shortlist" class="shortlist"></div>
-    </section>
   </main>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

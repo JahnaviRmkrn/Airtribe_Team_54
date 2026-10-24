@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const deps = vi.hoisted(() => ({
   db: null,
+  guestId: 'guest',
   createOrder: vi.fn(),
   cancelOrder: vi.fn(),
   getOrderStatus: vi.fn(),
@@ -11,7 +12,7 @@ vi.mock('@/lib/supabase/admin', () => ({ adminClient: () => deps.db }));
 vi.mock('@/lib/ratelimit', () => ({ limitRoom: vi.fn() }));
 vi.mock('@/lib/room', () => ({
   getRoom: async () => ({ id: 'room', status: 'open', final_venue_id: 'venue' }),
-  requireGuest: async () => ({ id: 'guest' }),
+  requireGuest: async () => ({ id: deps.guestId }),
   requireOpen: vi.fn(),
 }));
 vi.mock('@/lib/pinelabs', () => ({
@@ -22,8 +23,7 @@ vi.mock('@/lib/pinelabs', () => ({
   getOrderStatus: deps.getOrderStatus,
 }));
 
-import { HttpError } from '../lib/http';
-import { POST } from '../app/api/rooms/[token]/pay/route';
+import { GET, POST } from '../app/api/rooms/[token]/pay/route';
 
 function deferred() {
   let resolve, reject;
@@ -60,7 +60,8 @@ function database() {
             if (!payment || filters.some(([key, value]) => payment[key] !== value)) return { data: null, error: null };
             payment = { ...payment, ...values, updated_at: new Date(now + version++).toISOString() };
           }
-          return { data: payment ? { ...payment } : null, error: null };
+          const matches = payment && (operation !== 'read' || !filters.some(([key, value]) => payment[key] !== value));
+          return { data: matches ? { ...payment } : null, error: null };
         };
         return Promise.resolve().then(run).then(resolve, reject);
       },
@@ -78,6 +79,7 @@ beforeEach(() => {
   version = 0;
   venuePrice = 500;
   payment = null;
+  deps.guestId = 'guest';
   deps.db = database();
   deps.cancelOrder.mockResolvedValue(undefined);
   deps.getOrderStatus.mockResolvedValue('pending');
@@ -131,15 +133,28 @@ describe('payment creation claim fencing', () => {
     expect(payment.pine_order_id).toBe('B');
   });
 
-  it('preserves the old checkout when cancellation for a changed amount fails', async () => {
+  it('preserves the old payable checkout when the venue amount changes', async () => {
     deps.createOrder.mockResolvedValue(order('A'));
     expect((await post()).status).toBe(201);
     const original = { ...payment };
     venuePrice = 800;
-    deps.cancelOrder.mockRejectedValueOnce(new HttpError(502, 'Cancellation unconfirmed'));
-    expect((await post()).status).toBe(502);
+    expect((await post()).status).toBe(409);
+    expect(deps.cancelOrder).not.toHaveBeenCalled();
     expect(payment).toEqual(original);
     expect(deps.createOrder).toHaveBeenCalledTimes(1);
   });
 
+});
+
+
+describe('payment guest ownership', () => {
+  it('does not expose another guest checkout or query its provider status', async () => {
+    deps.createOrder.mockResolvedValue(order('A'));
+    expect((await post()).status).toBe(201);
+    deps.guestId = 'other-guest';
+    const response = await GET(new Request('https://example.test/api/rooms/token/pay'), { params: Promise.resolve({ token: 'token' }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ payment: null });
+    expect(deps.getOrderStatus).not.toHaveBeenCalled();
+  });
 });

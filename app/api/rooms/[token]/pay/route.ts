@@ -50,7 +50,7 @@ async function refresh(p: PaymentRow): Promise<PaymentRow> {
   if (p.status !== 'pending' || !p.pine_order_id) return p;
   const status = await getOrderStatus(p.pine_order_id);
   if (status === p.status) return p;
-  const { data } = await adminClient()
+  const { data, error } = await adminClient()
     .from('meetup_payments')
     .update({ status })
     .eq('id', p.id)
@@ -58,7 +58,9 @@ async function refresh(p: PaymentRow): Promise<PaymentRow> {
     .eq('status', 'pending')
     .select(cols)
     .maybeSingle();
-  return (data as PaymentRow | null) ?? { ...p, status };
+  if (error) throw new HttpError(503, 'Could not save payment status, please retry');
+  if (!data) throw new HttpError(409, 'Payment changed, please check status again');
+  return data as PaymentRow;
 }
 
 // GET /api/rooms/:token/pay -> the current guest's own payment (or null)
@@ -95,10 +97,8 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
       if (!row.pine_order_id && Date.now() - new Date(row.updated_at).getTime() < STALE_CLAIM_MS) {
         throw new HttpError(409, 'Payment is already being created, retry in a moment');
       }
-      // Venue (price) changed since this order was made: retire the old order.
-      // Keep the old order tracked unless cancellation is confirmed. If it
-      // was paid concurrently, a subsequent refresh will reconcile its status.
-      if (row.pine_order_id) await cancelOrder(row.pine_order_id);
+      // Never replace an order that could still be paid in another tab.
+      if (row.pine_order_id) throw new HttpError(409, 'The venue price changed. Ask the organiser to reconcile the existing payment before retrying.');
     }
     // Claim the row for a new order; updated_at guards against a concurrent claim.
     const { data } = await db

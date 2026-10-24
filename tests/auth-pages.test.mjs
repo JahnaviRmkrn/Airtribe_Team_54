@@ -48,6 +48,7 @@ function page(name, auth = {}, search = '') {
     '@/lib/supabase/browser': { browserClient: client },
     '@/lib/password-auth': { passwordAuth },
     '@/lib/urls': { safeNext },
+    '@vercel/analytics': { track: vi.fn() },
     './login.css': {},
     '../login/login.css': {},
   };

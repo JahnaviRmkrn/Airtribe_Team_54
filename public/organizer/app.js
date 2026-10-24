@@ -44,18 +44,26 @@ async function api(path, opts = {}) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || ('Request failed (' + res.status + ')'));
   }
+  if (res.status === 201 && opts.method === 'POST' && path === '/api/me/meetups') {
+    window.team54Track?.('meetup_created');
+  }
   if (res.status === 204) return null;
   return res.json();
 }
 
 // --- routing -------------------------------------------------------------
 
-// Every new view invalidates outstanding reads from previous navigation.
-let viewVersion = 0;
-
 function go(hash) { location.hash = hash; }
 
+// Every view, including direct refreshes and synchronous pages, invalidates
+// outstanding work. Late reads or mutations must not paint over a newer view.
+let navGen = 0;
+const stale = (token) => token !== navGen;
+
 function route() {
+  navGen++;
+  window.OrganizerOnboarding = null;
+  el('app').className = 'container';
   el('nav').classList.remove('hidden');
   const hash = location.hash || '#/dashboard';
   document.querySelectorAll('[data-nav]').forEach((a) => {
@@ -67,13 +75,14 @@ function route() {
     '#/dashboard': dashboardView,
     '#/contacts': contactsView,
     '#/meetups': meetupsView,
-    '#/onboarding': onboardingView,
+    '#/onboarding': () => onboardingView(),
+    '#/welcome': welcomeView,
   };
   (views[hash] || dashboardView)();
 }
 
 function renderLoading(msg) {
-  const version = ++viewVersion;
+  const version = ++navGen;
   el('app').innerHTML = '<div class="card state-box"><span class="spinner"></span><p class="muted">' + esc(msg || 'Loading...') + '</p></div>';
   return version;
 }
@@ -110,13 +119,47 @@ const roomUrl = (token) => location.origin + '/m/' + token;
 
 // --- dashboard -----------------------------------------------------------
 
+// "Your people": every contact, soonest check-in first, with a due badge.
+function peopleCard(contacts) {
+  const DAY = 86400000;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const due = (c) => {
+    if (!c.next_followup_at) return null;
+    const d = new Date(c.next_followup_at); d.setHours(0, 0, 0, 0);
+    const n = Math.round((d - today) / DAY);
+    return Number.isFinite(n) ? n : null;
+  };
+  const badge = (n) => n === null ? '' : n < 0 ? '<span class="due due-late">overdue</span>'
+    : n === 0 ? '<span class="due due-today">today</span>'
+    : n <= 7 ? '<span class="due">soon</span>' : `<span class="due">in ${n} days</span>`;
+  const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  const people = contacts.slice().sort((a, b) => (due(a) ?? 1e9) - (due(b) ?? 1e9) || String(a.name || '').localeCompare(String(b.name || '')));
+  return `
+    <section class="card people-card">
+      <h2>Your people</h2>
+      <p class="muted">${people.length} ${people.length === 1 ? 'person' : 'people'} on your mind. A little time for your people goes a long way.</p>
+      ${people.length ? `<ul class="people-list">${people.map((c) => `
+        <li><button class="person" data-person="${esc(c.id || '')}">
+          <span class="avatar avatar-${esc(c.category || 'personal')}">${esc(initials(c.name))}</span>
+          <span class="person-info"><strong>${esc(c.name || 'Someone')}</strong>
+            <span class="muted">${esc(catLabel(c.category))}${c.interests && c.interests.length ? ' · ' + esc([].concat(c.interests).slice(0, 2).join(', ')) : ''}</span></span>
+          ${badge(due(c))}
+        </button></li>`).join('')}</ul>` : '<p class="muted">No one yet. Add your people to see them here.</p>'}
+    </section>`;
+}
+
 async function dashboardView() {
-  const version = renderLoading('Loading your dashboard...');
-  let d;
+  const nav = renderLoading('Loading your dashboard...');
+  let d, graphContacts = [];
   try {
     d = await api('/api/me/dashboard');
-  } catch (e) { if (version === viewVersion) renderError(e, dashboardView); return; }
-  if (version !== viewVersion) return;
+    if (stale(nav)) return;
+    try {
+      const rc = await api('/api/me/contacts');
+      if (stale(nav)) return;
+      graphContacts = Array.isArray(rc) ? rc : (rc.contacts || []);
+    } catch { graphContacts = []; }
+  } catch (e) { if (stale(nav)) return; return renderError(e, dashboardView); }
 
   const counts = d.contact_counts || {};
   const totalContacts = CATEGORIES.reduce((s, c) => s + (counts[c] || 0), 0);
@@ -126,7 +169,8 @@ async function dashboardView() {
   const recent = d.recent_activity || [];
 
   if (d.is_empty) {
-    el('app').innerHTML = `
+    if (stale(nav)) return;
+  el('app').innerHTML = `
       <h1>Dashboard</h1>
       <div class="card state-box">
         <h2>Welcome to Organizer</h2>
@@ -135,7 +179,9 @@ async function dashboardView() {
           <button class="primary" id="qa-add">Add person</button>
           <button class="primary" id="qa-meetup">Plan a meetup</button>
         </div>
+        <p><button class="link-btn" id="qa-guide">What can muop do?</button></p>
       </div>`;
+    el('qa-guide').onclick = () => go('#/welcome');
     el('qa-add').onclick = () => { sessionStorage.setItem('org_new_contact', '1'); go('#/contacts'); };
     el('qa-meetup').onclick = () => go('#/meetups');
     return;
@@ -144,14 +190,45 @@ async function dashboardView() {
   const followupRow = (f, overdue) => `
     <div class="row" data-fu-name="${esc(f.name || '')}">
       <div><strong>${esc(f.name || 'Someone')}</strong>
-        ${f.category ? `<span class="tag">${esc(catLabel(f.category))}</span>` : ''}
-        <div class="muted">${overdue ? 'Was due' : 'Due'} ${esc(fmtDate(f.next_followup_at))}</div>
+        ${f.category ? `<span class="tag">${esc(catLabel(f.category))}</span>` : ''}${overdue ? ' <span class="tag overdue">Overdue</span>' : ''}
+        <div class="muted">${overdue ? 'Was due' : 'Due'} ${esc(fmtDay(f.next_followup_at))}</div>
       </div>
       <div class="actions"><button data-done="${esc(f.id || f.contact_id || '')}" data-name="${esc(f.name || '')}">Mark done</button></div>
     </div>`;
 
+  if (stale(nav)) return;
+  const nOver = (followups.overdue || []).length;
+  const nWeek = (followups.upcoming || []).filter((f) => new Date(f.next_followup_at).getTime() < Date.now() + 7 * 864e5).length;
+  const nMeet = meetups.length;
+  const chip = (n, label, cls, target) => `<button class="sum-chip ${cls}" data-jump="${target}"><span class="sum-num">${n}</span><span>${label}</span></button>`;
+  const summary = `<div class="summary" role="group" aria-label="At a glance">
+      ${chip(nOver, nOver === 1 ? 'check-in overdue' : 'check-ins overdue', nOver ? 'warn' : 'ok', 'sec-followups')}
+      ${chip(nWeek, 'due this week', 'soon', 'sec-followups')}
+      ${chip(nMeet, nMeet === 1 ? 'meetup planned' : 'meetups planned', 'meet', 'sec-meetups')}
+    </div>`;
+
+  el('app').className = 'container wide';
   el('app').innerHTML = `
-    <h1>Dashboard</h1>
+    <div class="page-head">
+      <div><h1>Dashboard</h1><p class="muted lede">${nOver ? 'A few people are waiting to hear from you.' : 'You are up to date. Nice.'}</p></div>
+      <div class="quick-actions">
+        <button class="primary" id="qa-add">Add person</button>
+        <button class="primary" id="qa-meetup">Plan a meetup</button>
+      </div>
+    </div>
+    ${summary}
+    <div class="dash-grid">
+    <section class="card">
+      <h2>Your network</h2>
+      <p class="muted">Each dot is a person, grouped by category. The closer to the centre, the sooner a check-in is due.</p>
+      ${networkGraphSVG(graphContacts)}
+    </section>
+    <section class="card">
+      <h2>Calendar</h2>
+      <p class="muted">This month. Tap a day to see what is on it.</p>
+      ${calendarHTML(graphContacts, meetups)}
+    </section>
+    </div>
     <div class="stats">
       <div class="stat card">
         <div class="stat-num">${totalContacts}</div>
@@ -165,17 +242,14 @@ async function dashboardView() {
       </div>
     </div>
     ${act.sufficient_data && d.goals ? goalsComparison(d.goals, act) : ''}
-    <div class="quick-actions">
-      <button class="primary" id="qa-add">Add person</button>
-      <button class="primary" id="qa-meetup">Plan a meetup</button>
-    </div>
-    <section class="card">
+    <div class="dash-grid">
+    <section class="card" id="sec-followups">
       <h2>Follow-ups</h2>
       ${(followups.overdue || []).map((f) => followupRow(f, true)).join('')}
       ${(followups.upcoming || []).map((f) => followupRow(f, false)).join('')}
       ${!(followups.overdue || []).length && !(followups.upcoming || []).length ? '<p class="muted">No follow-ups due.</p>' : ''}
     </section>
-    <section class="card">
+    <section class="card" id="sec-meetups">
       <h2>Upcoming meetups</h2>
       ${meetups.length ? meetups.map((m) => `
         <div class="row">
@@ -185,8 +259,10 @@ async function dashboardView() {
             ${m.room_token ? `<div class="muted mono">${esc(roomUrl(m.room_token))}</div>` : ''}
           </div>
           ${m.room_token ? `<div class="actions"><button data-copy="${esc(roomUrl(m.room_token))}">Copy link</button></div>` : ''}
-        </div>`).join('') : '<p class="muted">No meetups planned.</p>'}
+        </div>`).join('') : '<p class="muted">No meetups planned yet. Plan one to get people together.</p>'}
     </section>
+    </div>
+    ${peopleCard(graphContacts)}
     <section class="card">
       <h2>Recent activity</h2>
       ${recent.length ? recent.map((r) => `
@@ -199,10 +275,148 @@ async function dashboardView() {
         </div>`).join('') : '<p class="muted">No activity recorded yet.</p>'}
     </section>`;
 
+  document.querySelectorAll('[data-person]').forEach((b) => { b.onclick = () => go('#/contacts/' + encodeURIComponent(b.dataset.person)); });
   el('qa-add').onclick = () => { sessionStorage.setItem('org_new_contact', '1'); go('#/contacts'); };
   el('qa-meetup').onclick = () => go('#/meetups');
+  document.querySelectorAll('[data-jump]').forEach((b) => { b.onclick = () => el(b.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  wireCalendar();
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
   document.querySelectorAll('[data-done]').forEach((b) => { b.onclick = () => markDoneForm(b); });
+  document.querySelectorAll('[data-gcontact]').forEach((n) => {
+    const pick = () => {
+      document.querySelectorAll('.g-dot.sel').forEach((x) => x.classList.remove('sel'));
+      n.classList.add('sel');
+      const box = el('graph-pick');
+      if (!box) return;
+      box.innerHTML = `<div><strong>${esc(n.dataset.gname)}</strong><div class="muted">${esc(n.dataset.gsub)}</div></div><button class="primary" id="graph-open">Open</button>`;
+      el('graph-open').onclick = () => go('#/contacts/' + encodeURIComponent(n.dataset.gcontact));
+    };
+    n.onclick = pick;
+    n.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
+  });
+}
+
+// --- network graph (dashboard) -------------------------------------------
+// Sectors = real contact categories; rings = real follow-up timing buckets
+// (overdue / due within 7 days / later or unscheduled). No invented ranks.
+
+function networkGraphSVG(contacts) {
+  const SIZE = 520, C = SIZE / 2;
+  const RINGS = [92, 158, 220];
+  const BANDS = [[36, 86], [100, 152], [166, 214]];
+  const RING_LABELS = ['Overdue', 'This week', 'Later'];
+  const DOT_FILL = { personal: '#E89B00', professional: '#04C1E1', community: '#3FAE9C' };
+  const now = Date.now();
+  const WEEK = 7 * 24 * 3600 * 1000;
+  const urgency = (c) => {
+    if (!c.next_followup_at) return 2;
+    const t = new Date(c.next_followup_at).getTime();
+    if (isNaN(t)) return 2;
+    if (t < now - 24 * 3600 * 1000) return 0;
+    if (t < now + WEEK) return 1;
+    return 2;
+  };
+  // Deterministic layout: dots in the same category + timing slot are spread
+  // evenly across the sector (+-36deg) and over staggered radii, so they never
+  // overlap. Ring labels sit on the gap between sectors (straight down).
+  const slots = {};
+  (contacts || []).forEach((c) => {
+    const ci = Math.max(0, CATEGORIES.indexOf(c.category));
+    (slots[ci + '-' + urgency(c)] = slots[ci + '-' + urgency(c)] || []).push(c);
+  });
+  const LABEL_W = 46, ROW_GAP = 25, HALF = 30;
+  const dots = Object.entries(slots).map(([key, list]) => {
+    const [ci, u] = key.split('-').map(Number);
+    list.sort((x, y) => String(x.name || '').localeCompare(String(y.name || '')));
+    const [r0, r1] = BANDS[u];
+    const rows = Math.max(1, Math.min(Math.floor((r1 - r0) / ROW_GAP) + 1, Math.ceil(list.length / 2)));
+    const showLabels = list.length <= rows * Math.max(1, Math.floor((2 * HALF * Math.PI / 180 * ((r0 + r1) / 2)) / LABEL_W));
+    return list.map((c, i) => {
+      const row = i % rows, k = Math.floor(i / rows);
+      const inRow = Math.ceil((list.length - row) / rows);
+      const r = rows === 1 ? (r0 + r1) / 2 : r0 + (r1 - r0) * row / (rows - 1);
+      const step = 2 * HALF / inRow;
+      const angleDeg = ci * 120 - 90 - HALF + step * (k + 0.5) + (rows > 1 ? (row % 2 ? 1 : -1) * step / 4 : 0);
+      const a = angleDeg * Math.PI / 180;
+      const x = C + r * Math.cos(a), y = C + r * Math.sin(a);
+      const sub = c.next_followup_at ? ' · next check-in ' + fmtDay(c.next_followup_at) : ' · no check-in date';
+      const first = String(c.name || '').split(/\s+/)[0].slice(0, 9);
+      return `<g class="g-dot" data-gcontact="${esc(c.id || '')}" data-gname="${esc(c.name || 'Someone')}" data-gsub="${esc(catLabel(c.category) + sub)}" tabindex="0" role="link" aria-label="${esc((c.name || 'Someone') + sub)}"><circle class="g-hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="20" fill="transparent"/><circle class="g-vis" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="${DOT_FILL[c.category] || '#9a9a9a'}" stroke="#fff" stroke-width="2"><title>${esc((c.name || 'Someone') + sub)}</title></circle>${showLabels ? `<text x="${x.toFixed(1)}" y="${(y + 20).toFixed(1)}" text-anchor="middle" class="graph-dot-label">${esc(first)}</text>` : ''}</g>`;
+    }).join('');
+  }).join('');
+  const rings = RINGS.map((r) => `<circle cx="${C}" cy="${C}" r="${r}" fill="none" stroke="rgba(60,42,20,0.18)" stroke-width="1" stroke-dasharray="4 5"/>`).join('');
+  const ringLabels = RING_LABELS.map((t, i) => {
+    const r = (BANDS[i][0] + BANDS[i][1]) / 2;
+    return `<text x="${C}" y="${(C + r + 4).toFixed(1)}" text-anchor="middle" class="graph-ring-label">${t}</text>`;
+  }).join('');
+  const spokes = CATEGORIES.map((cname, i) => {
+    const a = (i * 120 - 90) * Math.PI / 180;
+    const x2 = C + RINGS[2] * Math.cos(a), y2 = C + RINGS[2] * Math.sin(a);
+    const lx = C + (RINGS[2] + 24) * Math.cos(a), ly = C + (RINGS[2] + 24) * Math.sin(a) + 4;
+    return `<line x1="${C}" y1="${C}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="rgba(60,42,20,0.12)" stroke-width="1"/>` +
+      `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" class="graph-sector-label" fill="${DOT_FILL[cname]}">${catLabel(cname)}</text>`;
+  }).join('');
+  const legend = CATEGORIES.map((cname) =>
+    `<span class="graph-legend-item"><i style="background:${DOT_FILL[cname]}"></i>${catLabel(cname)}</span>`).join('');
+  if (!(contacts || []).length) return '<p class="muted">Add your people to see them here.</p>';
+  return `<div class="network-graph"><svg viewBox="0 0 ${SIZE} ${SIZE}" role="img" aria-label="Network graph of your contacts">
+    <circle cx="${C}" cy="${C}" r="${RINGS[2]}" fill="rgba(255,255,255,0.55)" stroke="rgba(60,42,20,0.22)" stroke-width="1"/>
+    ${rings}${spokes}${ringLabels}
+    <circle cx="${C}" cy="${C}" r="12" fill="#3d2b1f"/><text x="${C}" y="${(C + 4)}" text-anchor="middle" class="graph-you">You</text>
+    ${dots}
+  </svg><div class="graph-pick" id="graph-pick" aria-live="polite"><span class="muted">Tap a person to see who they are.</span></div><div class="graph-legend">${legend}</div></div>`;
+}
+
+// --- calendar (dashboard) --------------------------------------------------
+// Current month grid; entries come only from real follow-up and meetup dates.
+
+function calendarHTML(contacts, meetups) {
+  const now = new Date();
+  const year = now.getFullYear(), month = now.getMonth();
+  const monthName = now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const first = new Date(year, month, 1);
+  const startOffset = first.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const events = {};
+  const add = (iso, kind, label) => {
+    const t = new Date(iso);
+    if (isNaN(t) || t.getFullYear() !== year || t.getMonth() !== month) return;
+    const day = t.getDate();
+    (events[day] = events[day] || []).push({ kind, label, at: t });
+  };
+  (contacts || []).forEach((c) => c.next_followup_at && add(c.next_followup_at, 'followup', (c.name || 'Follow-up')));
+  (meetups || []).forEach((m) => m.starts_at && add(m.starts_at, 'meetup', (m.title || 'Meetup')));
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) cells.push('<div class="cal-cell cal-pad"></div>');
+  for (let day = 1; day <= daysInMonth; day++) {
+    const evs = events[day] || [];
+    const today = day === now.getDate() ? ' cal-today' : '';
+    const dots = evs.slice(0, 4).map((e) => `<i class="cal-dot ${e.kind}" title="${esc(e.label)}"></i>`).join('');
+    const has = evs.length ? ' has-ev' : '';
+    const tip = evs.map((e) => (e.kind === 'meetup' ? 'Meetup: ' : 'Check-in: ') + e.label).join('; ');
+    cells.push(`<button type="button" class="cal-cell${today}${has}" data-day="${day}" aria-label="${esc(monthName.split(' ')[0] + ' ' + day + (tip ? ': ' + tip : ': nothing planned'))}"><span class="cal-day">${day}</span><span class="cal-dots">${dots}</span></button>`);
+  }
+  const names = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => `<div class="cal-head">${d}</div>`).join('');
+  window.__calEvents = events;
+  return `<div class="calendar"><div class="cal-month">${esc(monthName)}</div><div class="cal-grid">${names}${cells.join('')}</div>
+    <div class="cal-detail" id="cal-detail" aria-live="polite"></div>
+    <div class="graph-legend"><span class="graph-legend-item"><i class="cal-dot followup"></i>Check-in</span><span class="graph-legend-item"><i class="cal-dot meetup"></i>Meetup</span></div></div>`;
+}
+
+function wireCalendar() {
+  const ev = window.__calEvents || {};
+  const box = el('cal-detail');
+  if (!box) return;
+  const show = (day) => {
+    const list = ev[day] || [];
+    document.querySelectorAll('.cal-cell[data-day]').forEach((b) => b.classList.toggle('selected', Number(b.dataset.day) === Number(day)));
+    const when = new Date(new Date().getFullYear(), new Date().getMonth(), Number(day)).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+    box.innerHTML = `<strong>${esc(when)}</strong>` + (list.length
+      ? list.map((e) => `<div class="cal-item"><i class="cal-dot ${e.kind}"></i>${e.kind === 'meetup' ? 'Meetup' : 'Check-in'}: ${esc(e.label)}</div>`).join('')
+      : '<div class="muted">Nothing planned.</div>');
+  };
+  document.querySelectorAll('.cal-cell[data-day]').forEach((b) => { b.onclick = () => show(b.dataset.day); });
+  show(new Date().getDate());
 }
 
 function goalsComparison(goals, act) {
@@ -226,6 +440,7 @@ function goalsComparison(goals, act) {
 // --- mark a follow-up done ------------------------------------------------
 
 function markDoneForm(btn) {
+  const nav = navGen;
   const row = btn.closest('.row');
   const contactId = btn.dataset.done;
   const field = (name) => row.querySelector('[data-fu="' + name + '"]');
@@ -249,8 +464,9 @@ function markDoneForm(btn) {
     if (next) body.next_followup_at = new Date(next + 'T12:00:00').toISOString();
     try {
       await api('/api/me/interactions', { method: 'POST', body: JSON.stringify(body) });
-      dashboardView();
+      if (!stale(nav)) dashboardView();
     } catch (e) {
+      if (stale(nav)) return;
       field('save').disabled = false;
       field('error').textContent = e.message;
     }
@@ -260,19 +476,29 @@ function markDoneForm(btn) {
 // --- contacts --------------------------------------------------------------
 
 async function contactsView() {
-  const version = renderLoading('Loading contacts...');
+  const nav = renderLoading('Loading contacts...');
   const filter = sessionStorage.getItem('org_filter') || '';
   let contacts;
   try {
     const r = await api('/api/me/contacts' + (filter ? '?category=' + encodeURIComponent(filter) : ''));
     contacts = Array.isArray(r) ? r : (r.contacts || []);
-  } catch (e) { if (version === viewVersion) renderError(e, contactsView); return; }
-  if (version !== viewVersion) return;
+  } catch (e) { if (stale(nav)) return; return renderError(e, contactsView); }
 
+  if (stale(nav)) return;
+  const openForm = !!sessionStorage.getItem('org_new_contact') || !contacts.length;
   el('app').innerHTML = `
-    <h1>Contacts</h1>
+    <div class="page-head"><div><h1>Contacts</h1><p class="muted lede">${contacts.length} ${contacts.length === 1 ? 'person' : 'people'}${filter ? ' in ' + esc(filter) : ''}</p></div></div>
     <section class="card">
-      <h2>Add person</h2>
+      <div class="toolbar">
+        <input id="c-search" type="search" placeholder="Search by name or interest" aria-label="Search contacts">
+        <div class="chips" role="group" aria-label="Filter by category">
+          ${['', ...CATEGORIES].map((c) => `<button type="button" class="chip${c === filter ? ' on' : ''}" data-filter="${c}">${c ? catLabel(c) : 'All'}</button>`).join('')}
+        </div>
+      </div>
+      <div id="contact-list"></div>
+    </section>
+    <details class="card add-card" id="add-details" ${openForm ? 'open' : ''}>
+      <summary>Add a person</summary>
       <form id="add-form">
         <div class="form-grid">
           <label>Name <input id="c-name" placeholder="Name" required></label>
@@ -287,21 +513,23 @@ async function contactsView() {
         <p class="error" id="add-error"></p>
         <button class="primary" type="submit">Add</button>
       </form>
-    </section>
-    <section class="card">
-      <div class="row spread">
-        <h2>Your people</h2>
-        <select id="filter" style="width:auto">
-          <option value="">All categories</option>
-          ${CATEGORIES.map((c) => `<option value="${c}" ${c === filter ? 'selected' : ''}>${catLabel(c)}</option>`).join('')}
-        </select>
-      </div>
-      <div id="contact-list">
-        ${contacts.length ? contacts.map(contactRow).join('') : '<p class="muted">' + (filter ? 'No ' + filter + ' contacts yet.' : 'No contacts yet.') + '</p>'}
-      </div>
-    </section>`;
+    </details>`;
 
-  el('filter').onchange = () => { sessionStorage.setItem('org_filter', el('filter').value); contactsView(); };
+  const sorted = contacts.slice().sort((x, y) => {
+    const tx = x.next_followup_at ? new Date(x.next_followup_at).getTime() : Infinity;
+    const ty = y.next_followup_at ? new Date(y.next_followup_at).getTime() : Infinity;
+    return tx - ty || String(x.name).localeCompare(String(y.name));
+  });
+  const paint = () => {
+    const q = el('c-search').value.trim().toLowerCase();
+    const list = sorted.filter((c) => !q || (c.name || '').toLowerCase().includes(q) || (c.interests || []).some((i) => String(i).toLowerCase().includes(q)));
+    el('contact-list').innerHTML = list.length ? list.map(contactRow).join('')
+      : `<p class="muted empty">${q ? 'No one matches "' + esc(q) + '".' : (filter ? 'No ' + filter + ' contacts yet.' : 'No contacts yet. Add your first person below.')}</p>`;
+    document.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => go('#/contacts/' + encodeURIComponent(b.dataset.view)); });
+  };
+  el('c-search').oninput = paint;
+  paint();
+  document.querySelectorAll('[data-filter]').forEach((b) => { b.onclick = () => { sessionStorage.setItem('org_filter', b.dataset.filter); contactsView(); }; });
   el('add-form').onsubmit = async (e) => {
     e.preventDefault();
     el('add-error').textContent = '';
@@ -317,22 +545,26 @@ async function contactsView() {
     if (next) body.next_followup_at = new Date(next + 'T12:00:00').toISOString();
     try {
       await api('/api/me/contacts', { method: 'POST', body: JSON.stringify(body) });
+      if (stale(nav)) return;
+      flash(body.name + ' added. Open them to log a check-in or plan a meetup.');
       contactsView();
-    } catch (err) { el('add-error').textContent = err.message; }
+    } catch (err) { if (!stale(nav)) el('add-error').textContent = err.message; }
   };
-  document.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => go('#/contacts/' + encodeURIComponent(b.dataset.view)); });
   if (sessionStorage.getItem('org_new_contact')) {
     sessionStorage.removeItem('org_new_contact');
+    el('add-details').scrollIntoView({ block: 'center' });
     el('c-name').focus();
   }
 }
 
 function contactRow(c) {
+  const t = c.next_followup_at ? new Date(c.next_followup_at).getTime() : NaN;
+  const overdue = !isNaN(t) && t < Date.now() - 24 * 3600 * 1000;
   return `
-    <div class="row">
-      <div><strong>${esc(c.name)}</strong> <span class="tag">${esc(catLabel(c.category))}</span>
+    <div class="row contact-row">
+      <div><strong>${esc(c.name)}</strong> <span class="tag">${esc(catLabel(c.category))}</span>${overdue ? ' <span class="tag overdue">Overdue</span>' : ''}
         ${(c.interests || []).length ? `<div class="interest-pills">${c.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}</div>` : ''}
-        ${c.next_followup_at ? `<div class="muted">Next check-in: ${esc(fmtDay(c.next_followup_at))}</div>` : ''}
+        <div class="muted">${c.next_followup_at ? (overdue ? 'Was due ' : 'Next check-in ') + esc(fmtDay(c.next_followup_at)) : 'No check-in scheduled'}</div>
       </div>
       <div class="actions"><button data-view="${esc(c.id)}">Open</button></div>
     </div>`;
@@ -341,59 +573,61 @@ function contactRow(c) {
 // --- contact detail: profile + history, edit, delete ------------------------
 
 async function contactDetailView(id) {
-  const version = renderLoading('Loading contact...');
+  const nav = renderLoading('Loading contact...');
   let contact, interactions;
   try {
     const r = await api('/api/me/contacts/' + encodeURIComponent(id));
     contact = r.contact || r;
     interactions = r.interactions || [];
-  } catch (e) { if (version === viewVersion) renderError(e, () => contactDetailView(id)); return; }
-  if (version !== viewVersion) return;
+  } catch (e) { if (stale(nav)) return; return renderError(e, () => contactDetailView(id)); }
 
+  if (stale(nav)) return;
+  const tt = contact.next_followup_at ? new Date(contact.next_followup_at).getTime() : NaN;
+  const dueDays = isNaN(tt) ? null : Math.round((tt - Date.now()) / 864e5);
+  const dueText = dueDays === null ? 'No check-in scheduled' : dueDays < -1 ? `Check-in overdue by ${-dueDays} days` : dueDays <= 0 ? 'Check-in due today' : `Next check-in in ${dueDays} day${dueDays === 1 ? '' : 's'}`;
+  const dueCls = dueDays !== null && dueDays < -1 ? 'warn' : dueDays !== null && dueDays <= 7 ? 'soon' : 'ok';
   el('app').innerHTML = `
     <p><button class="link-btn" id="back">← All contacts</button></p>
-    <section class="card" id="profile-card">
-      <div class="row spread">
-        <h2>${esc(contact.name)}</h2>
-        <div class="actions">
-          <button id="c-edit">Edit</button>
-          <button class="danger" id="c-del">Delete</button>
+    <section class="card profile" id="profile-card">
+      <div class="profile-head">
+        <div class="avatar" aria-hidden="true">${esc(String(contact.name || '?').trim().charAt(0).toUpperCase())}</div>
+        <div>
+          <h1 class="profile-name">${esc(contact.name)}</h1>
+          <span class="tag">${esc(catLabel(contact.category))}</span>
         </div>
       </div>
-      <p><span class="tag">${esc(catLabel(contact.category))}</span></p>
+      <div class="due-banner ${dueCls}"><strong>${esc(dueText)}</strong>
+        <span class="muted">${contact.next_followup_at ? esc(fmtDay(contact.next_followup_at)) + ' · ' : ''}every ${contact.preferred_frequency_days || 14} days${contact.last_interaction_at ? ' · last spoke ' + esc(fmtDay(contact.last_interaction_at)) : ''}</span></div>
       ${(contact.interests || []).length ? `<p class="interest-pills">${contact.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}</p>` : ''}
-      ${contact.notes ? `<p>${esc(contact.notes)}</p>` : ''}
-      <p class="muted">Check in every ${contact.preferred_frequency_days || 14} days
-        ${contact.last_interaction_at ? ' · last interaction ' + esc(fmtDay(contact.last_interaction_at)) : ''}
-        ${contact.next_followup_at ? ' · next check-in ' + esc(fmtDay(contact.next_followup_at)) : ''}</p>
+      ${contact.notes ? `<p class="notes">${esc(contact.notes)}</p>` : ''}
     </section>
     <section class="card">
-      <h2>Add a check-in</h2>
+      <h2>Log a check-in</h2>
       <form id="log-form">
-        <label>Note <input id="log-note" placeholder="What happened?"></label>
+        <label>What happened? <input id="log-note" placeholder="Coffee, a call, a message..."></label>
         <label>Next follow-up (optional) <input id="log-next" type="date"></label>
+        <p class="muted">Leave the date blank to schedule by their check-in frequency.</p>
         <p class="error" id="log-error"></p>
         <button class="primary" type="submit">Save check-in</button>
       </form>
     </section>
     <section class="card">
       <h2>History</h2>
-      ${interactions.length ? interactions.map((i) => `
-        <div class="row">
-          <div><strong>${esc((i.type || 'interaction').replace(/_/g, ' '))}</strong>
-            <div class="muted">${esc(fmtDate(i.occurred_at))}</div>
-            ${i.notes ? `<div class="muted">${esc(i.notes)}</div>` : ''}
-          </div>
-        </div>`).join('') : '<p class="muted">No interactions recorded yet.</p>'}
-    </section>`;
+      ${interactions.length ? `<ol class="timeline">${interactions.map((i) => `
+        <li><i class="tl-dot"></i><div><strong>${esc((i.type || 'interaction').replace(/_/g, ' '))}</strong>
+          <span class="muted"> · ${esc(fmtDate(i.occurred_at))}</span>
+          ${i.notes ? `<div>${esc(i.notes)}</div>` : ''}</div></li>`).join('')}</ol>` : '<p class="muted empty">No check-ins yet. Log the first one above.</p>'}
+    </section>
+    <div class="manage"><button class="primary" id="c-meetup">Plan a meetup with ${esc(String(contact.name || '').split(/\s+/)[0])}</button> <button id="c-edit">Edit details</button> <button class="danger" id="c-del">Delete contact</button></div>`;
 
   el('back').onclick = () => go('#/contacts');
+  el('c-meetup').onclick = () => { sessionStorage.setItem('org_meetup_title', 'Catch-up with ' + String(contact.name || '').split(/\s+/)[0]); go('#/meetups'); };
   el('c-del').onclick = async () => {
     if (!confirm('Delete ' + (contact.name || 'this contact') + '?')) return;
     try {
       await api('/api/me/contacts/' + encodeURIComponent(id), { method: 'DELETE' });
-      go('#/contacts');
-    } catch (e) { alert(e.message); }
+      if (!stale(nav)) go('#/contacts');
+    } catch (e) { if (!stale(nav)) alert(e.message); }
   };
   el('c-edit').onclick = () => editContactForm(id, contact);
   el('log-form').onsubmit = async (e) => {
@@ -404,12 +638,15 @@ async function contactDetailView(id) {
     if (next) body.next_followup_at = new Date(next + 'T12:00:00').toISOString();
     try {
       await api('/api/me/interactions', { method: 'POST', body: JSON.stringify(body) });
+      if (stale(nav)) return;
+      flash('Check-in saved. Your next reminder is set.', [['Back to dashboard', '#/dashboard']]);
       contactDetailView(id);
-    } catch (err) { el('log-error').textContent = err.message; }
+    } catch (err) { if (!stale(nav)) el('log-error').textContent = err.message; }
   };
 }
 
 function editContactForm(id, c) {
+  const nav = ++navGen;
   const card = el('profile-card');
   card.innerHTML = `
     <h2>Edit ${esc(c.name)}</h2>
@@ -448,22 +685,22 @@ function editContactForm(id, c) {
     if (!Object.keys(patch).length) return contactDetailView(id);
     try {
       await api('/api/me/contacts/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(patch) });
-      contactDetailView(id);
-    } catch (err) { el('e-error').textContent = err.message; }
+      if (!stale(nav)) contactDetailView(id);
+    } catch (err) { if (!stale(nav)) el('e-error').textContent = err.message; }
   };
 }
 
 // --- meetups -----------------------------------------------------------------
 
 async function meetupsView(created) {
-  const version = renderLoading('Loading meetups...');
+  const nav = renderLoading('Loading meetups...');
   let meetups;
   try {
     const r = await api('/api/me/meetups');
     meetups = Array.isArray(r) ? r : (r.meetups || []);
-  } catch (e) { if (version === viewVersion) renderError(e, () => meetupsView()); return; }
-  if (version !== viewVersion) return;
+  } catch (e) { if (stale(nav)) return; return renderError(e, () => meetupsView()); }
 
+  if (stale(nav)) return;
   el('app').innerHTML = `
     <h1>Meetups</h1>
     ${created ? createdCard(created) : ''}
@@ -486,9 +723,11 @@ async function meetupsView(created) {
     </section>
     <section class="card">
       <h2>Planned</h2>
-      ${meetups.length ? meetups.map(meetupRow).join('') : '<p class="muted">No meetups yet.</p>'}
+      ${meetups.length ? meetups.slice().sort((x, y) => ((x.status || 'open') !== 'open') - ((y.status || 'open') !== 'open')).map(meetupRow).join('') : '<p class="muted empty">No meetups yet. Plan one above and share the room link with your people.</p>'}
     </section>`;
 
+  const pre = sessionStorage.getItem('org_meetup_title');
+  if (pre) { sessionStorage.removeItem('org_meetup_title'); el('m-title').value = pre; el('m-title').focus(); }
   el('m-form').onsubmit = async (e) => {
     e.preventDefault();
     el('m-error').textContent = '';
@@ -500,10 +739,11 @@ async function meetupsView(created) {
     if (budget > 0) body.budget = budget;
     try {
       const r = await api('/api/me/meetups', { method: 'POST', body: JSON.stringify(body) });
-      meetupsView(r);
-    } catch (err) { el('m-error').textContent = err.message; }
+      if (!stale(nav)) meetupsView(r);
+    } catch (err) { if (!stale(nav)) el('m-error').textContent = err.message; }
   };
   wireMeetupRows();
+  if (el('created-dash')) el('created-dash').onclick = () => go('#/dashboard');
 }
 
 function createdCard(r) {
@@ -520,6 +760,8 @@ function createdCard(r) {
         <a href="${esc(url)}" target="_blank" rel="noopener"><button type="button">Open room</button></a>
       </div>` : ''}
       ${r.invite_text ? `<div class="invite-box">${esc(r.invite_text)}</div>` : ''}
+      <p class="muted">Next: send the link to your guests. They add their preferences and vote, then you confirm a place from the room.</p>
+      <p><button class="link-btn" id="created-dash">Back to dashboard</button></p>
     </section>`;
 }
 
@@ -527,7 +769,7 @@ function meetupRow(m) {
   const url = m.room_url || (m.room_token ? roomUrl(m.room_token) : '');
   const closed = (m.status || 'open') !== 'open';
   return `
-    <div class="row">
+    <div class="row${closed ? ' is-closed' : ''}">
       <div><strong>${esc(m.title)}</strong>
         ${m.activity ? `<span class="tag">${esc(m.activity)}</span>` : ''}
         <span class="tag ${closed ? 'status-closed' : 'status-open'}">${esc(m.status || 'open')}</span>
@@ -542,14 +784,15 @@ function meetupRow(m) {
 }
 
 function wireMeetupRows() {
+  const nav = navGen;
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
   document.querySelectorAll('[data-close]').forEach((b) => {
     b.onclick = async () => {
       if (!confirm('Close this meetup? Guests will no longer be able to vote.')) return;
       try {
         await api('/api/me/meetups/' + encodeURIComponent(b.dataset.close), { method: 'PATCH', body: JSON.stringify({ status: 'closed' }) });
-        meetupsView();
-      } catch (e) { alert(e.message); }
+        if (!stale(nav)) meetupsView();
+      } catch (e) { if (!stale(nav)) alert(e.message); }
     };
   });
   const copyRoom = el('copy-room');
@@ -582,25 +825,104 @@ const toRow = (c) => ({
   freq: c.preferred_frequency_days || 14,
 });
 
+
+// --- welcome / how it works -------------------------------------------------
+// Shown to new users before setup, and reachable any time from "Guide".
+
+const CAPABILITIES = [
+  ['1', 'Keep your people close', 'Add friends, colleagues and community. Group them as Personal, Professional or Community and set how often you want to check in.'],
+  ['2', 'See who needs you', 'Your dashboard shows a network map and a calendar. The closer someone is to the centre, the sooner a check-in is due.'],
+  ['3', 'Log check-ins', 'Note what happened after a coffee or a call. The next reminder is set for you, or you pick the date.'],
+  ['4', 'Plan meetups together', 'Create a meetup and share its room link. Guests add budget, area and free times, then vote on a shortlist of places. Nothing is ever sent for you.'],
+  ['5', 'Balance your attention', 'Set goals for Personal, Professional and Community, then compare them with where your time actually went.'],
+];
+
+function welcomeView(opts = {}) {
+  ++navGen;
+  const returning = !!opts.returning || localStorage.getItem('org_onboarded') === '1';
+  el('app').innerHTML = `
+    <section class="card welcome">
+      <p class="eyebrow">${returning ? 'Guide' : 'Welcome to muop'}</p>
+      <h1>${returning ? 'What you can do with muop' : 'Stay close to the people who matter'}</h1>
+      <p class="muted lede-lg">muop helps you remember to check in, and makes meeting up easy. Here is what you can do.</p>
+      <ul class="cap-list">
+        ${CAPABILITIES.map(([ic, t, d]) => `<li><span class="cap-ic" aria-hidden="true">${ic}</span><div><strong>${esc(t)}</strong><div class="muted">${esc(d)}</div></div></li>`).join('')}
+      </ul>
+      <p class="muted">Setup takes about a minute. You can skip any step and change everything later.</p>
+      <div class="quick-actions">
+        ${returning
+          ? '<button class="primary" id="w-dash">Back to dashboard</button><button id="w-setup">Run setup again</button>'
+          : '<button class="primary" id="w-start">Get started</button><button id="w-skip">Skip, take me to the dashboard</button>'}
+      </div>
+    </section>`;
+  const done = () => { localStorage.setItem('org_onboarded', '1'); go('#/dashboard'); };
+  if (returning) { el('w-dash').onclick = () => go('#/dashboard'); el('w-setup').onclick = () => go('#/onboarding'); }
+  else { el('w-start').onclick = () => go('#/onboarding'); el('w-skip').onclick = done; }
+}
+
+// One-shot message shown at the top of the next page that renders.
+function flash(msg, links) { try { sessionStorage.setItem('org_flash', JSON.stringify({ msg, links: links || [] })); } catch { /* ignore */ } }
+function installFlash() {
+  new MutationObserver(() => {
+    const host = el('app');
+    if (!host || host.querySelector('.flash') || !host.querySelector('h1')) return;
+    let f; try { f = JSON.parse(sessionStorage.getItem('org_flash') || 'null'); } catch { f = null; }
+    if (!f) return;
+    sessionStorage.removeItem('org_flash');
+    const div = document.createElement('div');
+    div.className = 'flash';
+    div.setAttribute('role', 'status');
+    div.innerHTML = `<span>${esc(f.msg)}</span>${(f.links || []).map((l) => `<button class="link-btn" data-flash-go="${esc(l[1])}">${esc(l[0])}</button>`).join('')}`;
+    host.prepend(div);
+    div.querySelectorAll('[data-flash-go]').forEach((b) => { b.onclick = () => go(b.dataset.flashGo); });
+  }).observe(el('app'), { childList: true });
+}
+
 function onboardingView() {
-  ++viewVersion;
+  const nav = ++navGen;
   const p = prefill();
   const rows = (p.contacts && p.contacts.length ? p.contacts.slice(0, 5) : [emptyRow()]).map(toRow);
   const goals = { personal: 50, professional: 30, community: 20, ...(p.goals || {}) };
   let step = 1;
   let voice = null;
 
-  const finish = () => {
+  const finish = (added) => {
+    if (stale(nav)) return;
     if (voice) voice.stop();
     localStorage.setItem('org_onboarded', '1');
     sessionStorage.removeItem('org_prefill');
+    if (added && added.length) return renderDone(added);
     go('#/dashboard');
   };
+
+  function renderDone(added) {
+    el('app').innerHTML = `
+      <section class="card welcome">
+        <p class="eyebrow">You are set</p>
+        <h1>${added.length} ${added.length === 1 ? 'person' : 'people'} added. What next?</h1>
+        <div class="next-grid">
+          <button class="next-card" id="d-checkin"><strong>Log a check-in</strong><span class="muted">Record a recent catch-up with ${esc(added[0].name)}.</span></button>
+          <button class="next-card" id="d-meetup"><strong>Plan a meetup</strong><span class="muted">Create a room link to share with friends.</span></button>
+          <button class="next-card" id="d-dash"><strong>See your dashboard</strong><span class="muted">Your network map and calendar.</span></button>
+        </div>
+      </section>`;
+    el('d-checkin').onclick = async () => {
+      try {
+        const r = await api('/api/me/contacts');
+        const list = Array.isArray(r) ? r : (r.contacts || []);
+        const m = list.find((c) => c.name === added[0].name);
+        if (stale(nav)) return;
+        go(m ? '#/contacts/' + encodeURIComponent(m.id) : '#/contacts');
+      } catch { if (!stale(nav)) go('#/contacts'); }
+    };
+    el('d-meetup').onclick = () => go('#/meetups');
+    el('d-dash').onclick = () => go('#/dashboard');
+  }
 
   // Voice / typed extraction -> pre-fill only. Rows the user already typed are
   // kept; extracted people fill the remaining slots (max 5).
   function applyExtraction(res) {
-    if (step !== 1 || !el('ob-rows')) return; // late result after leaving the people step
+    if (stale(nav) || step !== 1 || !el('ob-rows')) return; // late result after leaving the people step
     collectRows();
     el('ob-error').textContent = '';
     const kept = rows.filter((r) => r.name);
@@ -619,6 +941,9 @@ function onboardingView() {
     if (merged.length >= 5 && kept.length + added.length > 5) {
       el('ob-error').textContent = 'Only the first 5 people were kept - you can add more from Contacts later.';
     }
+    // "That's everyone, save it": move on to the goals step. Saving still needs
+    // the explicit Confirm there, so a misheard command can't write anything.
+    if (res.action === 'confirm' && merged.some((r) => r.name)) el('ob-next').click();
   }
 
   function renderStep1() {
@@ -627,9 +952,10 @@ function onboardingView() {
     el('app').innerHTML = `
       <section class="card">
         <div class="step-dots">Step 1 of 2 · People</div>
-        <h1>Who do you want to stay in touch with?</h1>
-        <p class="muted">Add up to 5 people. You can edit everything before confirming - nothing is saved yet.</p>
+        <h1>Let's find your people</h1>
         <div id="voice-mount"></div>
+        <h2 class="ob-sub">Your people <span class="muted">(up to 5)</span></h2>
+        <p class="muted">Anyone I hear or you type appears here. Check and edit them. Nothing is saved until you finish setup.</p>
         <div id="ob-rows"></div>
         <p><button class="link-btn" id="ob-add">+ Add another</button></p>
         <p class="error" id="ob-error"></p>
@@ -637,9 +963,13 @@ function onboardingView() {
           <button class="primary" id="ob-next">Next: goals</button>
           <button id="ob-skip">Skip for now</button>
         </div>
+        <p><button class="link-btn" id="ob-welcome">← What can muop do?</button></p>
       </section>`;
     renderRows();
+    el('ob-welcome').onclick = () => go('#/welcome');
     voice = window.Voice ? window.Voice.mount(el('voice-mount'), applyExtraction) : null;
+    // Lets the voice assistant (assistant.js) fill this form and move on.
+    window.OrganizerOnboarding = { apply: applyExtraction };
     el('ob-add').onclick = () => {
       if (rows.length >= 5) { el('ob-error').textContent = 'Up to 5 people for now - you can add more from Contacts later.'; return; }
       collectRows();
@@ -652,7 +982,7 @@ function onboardingView() {
       step = 2;
       renderStep2();
     };
-    el('ob-skip').onclick = finish;
+    el('ob-skip').onclick = () => finish();
   }
 
   function renderRows() {
@@ -662,7 +992,7 @@ function onboardingView() {
         <label>Category <select data-f="category">${CATEGORIES.map((c) => `<option value="${c}" ${c === r.category ? 'selected' : ''}>${catLabel(c)}</option>`).join('')}</select></label>
         <label>Interests <input data-f="interests" value="${esc(r.interests)}" placeholder="hiking, chai"></label>
         <label>Every (days) <input data-f="freq" type="number" min="1" value="${Number(r.freq) || 14}"></label>
-        ${rows.length > 1 ? '<button class="danger remove-row" data-rm="' + i + '">×</button>' : '<span></span>'}
+        ${rows.length > 1 ? '<button class="danger remove-row" data-rm="' + i + '" aria-label="Remove this person">Remove</button>' : '<span></span>'}
       </div>`).join('');
     document.querySelectorAll('[data-rm]').forEach((b) => {
       b.onclick = () => { collectRows(); rows.splice(parseInt(b.dataset.rm, 10), 1); renderRows(); };
@@ -693,7 +1023,7 @@ function onboardingView() {
         <p class="error" id="ob-error"></p>
         <div class="quick-actions">
           <button id="ob-back">Back</button>
-          <button class="primary" id="ob-confirm">Confirm</button>
+          <button class="primary" id="ob-confirm">Save and finish</button>
           <button id="ob-skip">Skip for now</button>
         </div>
       </section>`;
@@ -703,7 +1033,7 @@ function onboardingView() {
     inputs.forEach((i) => { i.oninput = refresh; });
     refresh();
     el('ob-back').onclick = renderStep1;
-    el('ob-skip').onclick = finish;
+    el('ob-skip').onclick = () => finish();
     el('ob-confirm').onclick = async () => {
       el('ob-error').textContent = '';
       if (total() !== 100) {
@@ -725,8 +1055,9 @@ function onboardingView() {
         if (contacts.length) {
           await api('/api/me/contacts', { method: 'POST', body: JSON.stringify({ contacts }) });
         }
-        finish();
+        finish(contacts);
       } catch (e) {
+        if (stale(nav)) return;
         el('ob-confirm').disabled = false;
         el('ob-error').textContent = e.message;
       }
@@ -750,8 +1081,9 @@ async function boot() {
   const onboarded = localStorage.getItem('org_onboarded') === '1';
   const hash = location.hash || '#/dashboard';
   window.onhashchange = route;
-  if (d.is_empty && !onboarded && hash !== '#/onboarding') {
-    go('#/onboarding');
+  installFlash();
+  if (d.is_empty && !onboarded && hash !== '#/onboarding' && hash !== '#/welcome') {
+    go('#/welcome');
   }
   route();
 }

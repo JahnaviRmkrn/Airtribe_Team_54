@@ -1,0 +1,329 @@
+{
+  "timestamp": "2026-10-24T11:26:45.379Z",
+  "origin": "http://localhost:3054",
+  "expected_source": null,
+  "passed": 1,
+  "total": 10,
+  "results": [
+    {
+      "id": "01-messy-baseline",
+      "status": 200,
+      "duration_ms": 3479,
+      "output": {
+        "contacts": [
+          {
+            "name": "Umm",
+            "category": "personal",
+            "interests": []
+          },
+          {
+            "name": "Priya Sharma",
+            "category": "personal",
+            "interests": []
+          },
+          {
+            "name": "Arjun Rao",
+            "category": "professional",
+            "interests": []
+          },
+          {
+            "name": "Fatima Khan",
+            "category": "community",
+            "interests": []
+          }
+        ],
+        "goals": {
+          "personal": 50,
+          "professional": 30,
+          "community": 20
+        },
+        "source": "rules",
+        "saved": false
+      },
+      "failures": [
+        "contact count",
+        "Priya Sharma: frequency",
+        "Arjun Rao: frequency",
+        "Fatima Khan: frequency"
+      ],
+      "passed": false
+    },
+    {
+      "id": "02-seven-people",
+      "status": 200,
+      "duration_ms": 1108,
+      "output": {
+        "contacts": [
+          {
+            "name": "Ananya",
+            "category": "personal",
+            "interests": []
+          },
+          {
+            "name": "Rohan",
+            "category": "personal",
+            "interests": []
+          },
+          {
+            "name": "Meera",
+            "category": "professional",
+            "interests": []
+          },
+          {
+            "name": "Vikram",
+            "category": "professional",
+            "interests": []
+          },
+          {
+            "name": "Farah",
+            "category": "community",
+            "interests": []
+          }
+        ],
+        "goals": {
+          "personal": 50,
+          "professional": 25,
+          "community": 25
+        },
+        "source": "rules",
+        "saved": false
+      },
+      "failures": [
+        "Ananya: frequency",
+        "Rohan: frequency",
+        "Meera: frequency",
+        "Vikram: frequency",
+        "Farah: frequency"
+      ],
+      "passed": false
+    },
+    {
+      "id": "03-self-correction",
+      "status": 200,
+      "duration_ms": 943,
+      "output": {
+        "contacts": [
+          {
+            "name": "Neha",
+            "category": "personal",
+            "interests": []
+          },
+          {
+            "name": "Dev Patel",
+            "category": "professional",
+            "interests": []
+          }
+        ],
+        "goals": {
+          "personal": 45,
+          "professional": 44,
+          "community": 11
+        },
+        "source": "rules",
+        "saved": false
+      },
+      "failures": [
+        "missing Sneha Iyer",
+        "Dev Patel: frequency",
+        "invented Neha"
+      ],
+      "passed": false
+    },
+    {
+      "id": "04-hinglish",
+      "status": 200,
+      "duration_ms": 1198,
+      "output": {
+        "contacts": [],
+        "goals": {
+          "personal": 42,
+          "professional": 33,
+          "community": 25
+        },
+        "source": "rules",
+        "saved": false
+      },
+      "failures": [
+        "contact count",
+        "missing Aditi",
+        "missing Suresh Nair",
+        "missing Imran"
+      ],
+      "passed": false
+    },
+    {
+      "id": "05-assistant-decoy",
+      "status": 200,
+      "duration_ms": 1325,
+      "output": {
+        "contacts": [
+          {
+            "name": "Karthik",
+            "category": "personal",
+            "interests": []
+          },
+          {
+            "name": "Lakshmi",
+            "category": "professional",
+            "interests": []
+          }
+        ],
+        "goals": {
+          "personal": 70,
+          "professional": 20,
+          "community": 10
+        },
+        "source": "rules",
+        "saved": false
+      },
+      "failures": [
+        "Karthik: frequency",
+        "Lakshmi: frequency"
+      ],
+      "passed": false
+    },
+    {
+      "id": "06-no-people",
+      "status": 200,
+      "duration_ms": 1819,
+      "output": {
+        "contacts": [],
+        "goals": {
+          "personal": 34,
+          "professional": 33,
+          "community": 33
+        },
+        "source": "rules",
+        "saved": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "07-unknown-frequency",
+      "status": 200,
+      "duration_ms": 1097,
+      "output": {
+        "contacts": [
+          {
+            "name": "Zoya",
+            "category": "personal",
+            "interests": []
+          },
+          {
+            "name": "Pranav",
+            "category": "professional",
+            "interests": []
+          },
+          {
+            "name": "Kavya",
+            "category": "community",
+            "interests": []
+          }
+        ],
+        "goals": {
+          "personal": 0,
+          "professional": 75,
+          "community": 25
+        },
+        "source": "rules",
+        "saved": false
+      },
+      "failures": [
+        "Pranav: frequency",
+        "Kavya: frequency"
+      ],
+      "passed": false
+    },
+    {
+      "id": "08-repeated-name",
+      "status": 200,
+      "duration_ms": 1744,
+      "output": {
+        "contacts": [
+          {
+            "name": "Aarav Shah",
+            "category": "personal",
+            "interests": []
+          },
+          {
+            "name": "Pooja Desai",
+            "category": "professional",
+            "interests": []
+          },
+          {
+            "name": "Yusuf Ali",
+            "category": "community",
+            "interests": []
+          }
+        ],
+        "goals": {
+          "personal": 50,
+          "professional": 25,
+          "community": 25
+        },
+        "source": "rules",
+        "saved": false
+      },
+      "failures": [
+        "Aarav Shah: frequency",
+        "Pooja Desai: frequency",
+        "Yusuf Ali: frequency"
+      ],
+      "passed": false
+    },
+    {
+      "id": "09-injection",
+      "status": 200,
+      "duration_ms": 1205,
+      "output": {
+        "contacts": [
+          {
+            "name": "Diya",
+            "category": "personal",
+            "interests": []
+          }
+        ],
+        "goals": {
+          "personal": 50,
+          "professional": 30,
+          "community": 20
+        },
+        "source": "rules",
+        "saved": false
+      },
+      "failures": [
+        "Diya: frequency"
+      ],
+      "passed": false
+    },
+    {
+      "id": "10-multiline",
+      "status": 200,
+      "duration_ms": 1232,
+      "output": {
+        "contacts": [
+          {
+            "name": "Sanjana Rao",
+            "category": "personal",
+            "interests": []
+          }
+        ],
+        "goals": {
+          "personal": 50,
+          "professional": 39,
+          "community": 11
+        },
+        "source": "rules",
+        "saved": false
+      },
+      "failures": [
+        "contact count",
+        "Sanjana Rao: frequency",
+        "missing Deepak Menon",
+        "missing Ayesha"
+      ],
+      "passed": false
+    }
+  ]
+}

@@ -10,7 +10,7 @@ function organizer(overrides = {}) {
   const nodes = new Map();
   const document = {
     getElementById(id) {
-      if (!nodes.has(id)) nodes.set(id, { innerHTML: '', classList: { remove() {} } });
+      if (!nodes.has(id)) nodes.set(id, { innerHTML: '', value: '', classList: { remove() {}, toggle() {} } });
       return nodes.get(id);
     },
     querySelectorAll: () => [],
@@ -18,6 +18,9 @@ function organizer(overrides = {}) {
   const context = vm.createContext({
     document,
     location: { origin: 'https://example.test', hash: '' },
+    window: {},
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    localStorage: { getItem: () => null, setItem() {} },
     ...overrides,
   });
   vm.runInContext(source, context);
@@ -122,6 +125,9 @@ describe('onboarding retries', () => {
     expect(document.getElementById('ob-error').textContent).toBe('Retry goals');
     await document.getElementById('ob-confirm').onclick();
     expect(calls.filter((path) => path === '/api/me/contacts')).toHaveLength(1);
+    expect(document.getElementById('app').innerHTML).toContain('1 person added. What next?');
+    expect(calls.filter((path) => path === '/api/me/goals')).toHaveLength(2);
+    document.getElementById('d-dash').onclick();
     expect(context.location.hash).toBe('#/dashboard');
   });
 });
@@ -161,5 +167,68 @@ describe('organizer navigation races', () => {
     reject(new Error('Old request failed'));
     await stale;
     expect(document.getElementById('app').innerHTML).toBe(latest);
+  });
+});
+
+
+describe('latest dashboard reconciliation', () => {
+  it('retains calendar events and safely renders them when a day is selected', () => {
+    const { context, document } = organizer();
+    const today = new Date().toISOString();
+    context.contacts = [{ name: '<img src=x onerror=alert(1)>', next_followup_at: today }];
+    context.meetups = [{ title: 'Coffee meetup', starts_at: today }];
+    vm.runInContext('calendarHTML(contacts, meetups); wireCalendar()', context);
+    const details = document.getElementById('cal-detail').innerHTML;
+    expect(details).toContain('Coffee meetup');
+    expect(details).toContain(escaped);
+    expect(details).not.toContain(attack);
+  });
+
+  it.each(['welcomeView()', 'onboardingView()'])(
+    'ignores dashboard secondary contact results after opening %s', async (destination) => {
+      let resolve;
+      let requestedContacts;
+      const started = new Promise((done) => { requestedContacts = done; });
+      const pending = new Promise((done) => { resolve = done; });
+      const { context, document } = organizer({
+        fetch: async (path) => {
+          if (path === '/api/me/contacts') { requestedContacts(); return pending; }
+          return { ok: true, status: 200, json: async () => ({ is_empty: false }) };
+        },
+      });
+      const stale = vm.runInContext('dashboardView()', context);
+      await started;
+      vm.runInContext(destination, context);
+      const latest = document.getElementById('app').innerHTML;
+      resolve({ ok: true, status: 200, json: async () => ({ contacts: [] }) });
+      await stale;
+      expect(document.getElementById('app').innerHTML).toBe(latest);
+    },
+  );
+
+  it('does not navigate away after a meetup save completes on an old page', async () => {
+    let resolve;
+    const pending = new Promise((done) => { resolve = done; });
+    const { context, document } = organizer({
+      fetch: async (_path, opts) => opts.method === 'POST' ? pending
+        : { ok: true, status: 200, json: async () => ({ meetups: [] }) },
+    });
+    await vm.runInContext('meetupsView()', context);
+    document.getElementById('m-title').value = 'Coffee';
+    const save = document.getElementById('m-form').onsubmit({ preventDefault() {} });
+    vm.runInContext('welcomeView()', context);
+    const latest = document.getElementById('app').innerHTML;
+    resolve({ ok: true, status: 201, json: async () => ({ meetup: { title: 'Coffee' } }) });
+    await save;
+    expect(document.getElementById('app').innerHTML).toBe(latest);
+  });
+});
+
+
+describe('dashboard people robustness', () => {
+  it('renders malformed non-string contact names without crashing', () => {
+    const { context } = organizer();
+    context.contacts = [{ name: 123, category: 'personal' }, { name: 'Alice', category: 'personal' }];
+    expect(vm.runInContext('peopleCard(contacts)', context)).toContain('123');
   });
 });

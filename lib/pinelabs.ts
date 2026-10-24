@@ -35,7 +35,7 @@ function getToolkit(): Toolkit {
 // Pine Labs bills in paise; venue prices are whole INR. null when there is no usable price.
 export function amountPaise(pricePerPerson: number | null | undefined): number | null {
   if (typeof pricePerPerson !== 'number' || !Number.isInteger(pricePerPerson) || pricePerPerson <= 0) return null;
-  return pricePerPerson * 100;
+  return Number.isSafeInteger(pricePerPerson * 100) ? pricePerPerson * 100 : null;
 }
 
 // Pine Labs order statuses -> ours. Unknown or in-flight states stay pending.
@@ -59,9 +59,9 @@ async function call(name: string, args: unknown): Promise<Record<string, unknown
   const tk = getToolkit();
   try {
     return JSON.parse(await tk.handleToolCall(name, args));
-  } catch (e) {
+  } catch {
     // Log the tool error, never the args (they include the client secret).
-    console.error(`Pine Labs ${name} failed:`, e instanceof Error ? e.message : e);
+    console.error(`Pine Labs ${name} failed`);
     throw new HttpError(502, 'Payment provider error, please retry');
   }
 }
@@ -78,6 +78,12 @@ export async function createOrder(o: { amountPaise: number; merchantRef: string;
   });
   if (typeof res.order_id !== 'string' || typeof res.redirect_url !== 'string') {
     throw new HttpError(502, 'Payment provider error, please retry');
+  }
+  try {
+    const url = new URL(res.redirect_url);
+    if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Invalid redirect');
+  } catch {
+    throw new HttpError(502, 'Payment provider returned an invalid checkout link');
   }
   return { orderId: res.order_id, redirectUrl: res.redirect_url };
 }

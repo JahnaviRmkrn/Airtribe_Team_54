@@ -22,7 +22,7 @@ describe('amountPaise', () => {
   });
 
   it('returns null when there is no usable price', () => {
-    for (const p of [null, undefined, 0, -10, 12.5, Number.NaN]) expect(pl.amountPaise(p)).toBeNull();
+    for (const p of [null, undefined, 0, -10, 12.5, Number.NaN, Number.MAX_SAFE_INTEGER]) expect(pl.amountPaise(p)).toBeNull();
   });
 });
 
@@ -70,6 +70,11 @@ describe('toolkit calls', () => {
       callback_url: 'https://app/m/tok?payment=done',
       purchase_details: { customer: { first_name: 'Asha' } },
     });
+  });
+
+  it.each(['javascript:alert(1)', 'http://pay/checkout', 'https://user:password@pay/checkout'])('rejects unsafe checkout URL %s', async redirect_url => {
+    execute.mockResolvedValue(JSON.stringify({order_id:'v1-1',redirect_url}));
+    await expect(pl.createOrder({amountPaise:100,merchantRef:'ref',callbackUrl:'https://app/m/tok',guestName:'Asha'})).rejects.toMatchObject({status:502});
   });
 
   it('getOrderStatus maps the order status', async () => {

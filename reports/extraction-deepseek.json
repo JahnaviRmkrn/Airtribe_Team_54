@@ -1,0 +1,339 @@
+{
+  "timestamp": "2026-10-24T11:33:47.394Z",
+  "origin": "http://localhost:3054",
+  "expected_source": "deepseek",
+  "passed": 10,
+  "total": 10,
+  "results": [
+    {
+      "id": "01-messy-baseline",
+      "status": 200,
+      "duration_ms": 3782,
+      "output": {
+        "contacts": [
+          {
+            "name": "Priya Sharma",
+            "category": "personal",
+            "interests": [
+              "books"
+            ],
+            "preferred_frequency_days": 7
+          },
+          {
+            "name": "Arjun Rao",
+            "category": "professional",
+            "interests": [],
+            "preferred_frequency_days": 30
+          },
+          {
+            "name": "Fatima Khan",
+            "category": "community",
+            "interests": [],
+            "preferred_frequency_days": 14
+          }
+        ],
+        "goals": {
+          "personal": 50,
+          "professional": 30,
+          "community": 20
+        },
+        "source": "deepseek",
+        "saved": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "02-seven-people",
+      "status": 200,
+      "duration_ms": 1922,
+      "output": {
+        "contacts": [
+          {
+            "name": "Ananya",
+            "category": "personal",
+            "interests": [],
+            "preferred_frequency_days": 7
+          },
+          {
+            "name": "Rohan",
+            "category": "personal",
+            "interests": [],
+            "preferred_frequency_days": 30
+          },
+          {
+            "name": "Meera",
+            "category": "professional",
+            "interests": [],
+            "preferred_frequency_days": 30
+          },
+          {
+            "name": "Vikram",
+            "category": "professional",
+            "interests": [],
+            "preferred_frequency_days": 14
+          },
+          {
+            "name": "Farah",
+            "category": "community",
+            "interests": [],
+            "preferred_frequency_days": 7
+          }
+        ],
+        "goals": {
+          "personal": 50,
+          "professional": 25,
+          "community": 25
+        },
+        "source": "deepseek",
+        "saved": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "03-self-correction",
+      "status": 200,
+      "duration_ms": 1000,
+      "output": {
+        "contacts": [
+          {
+            "name": "Sneha Iyer",
+            "category": "personal",
+            "interests": [],
+            "preferred_frequency_days": 14
+          },
+          {
+            "name": "Dev Patel",
+            "category": "professional",
+            "interests": [],
+            "preferred_frequency_days": 30
+          }
+        ],
+        "goals": {
+          "personal": 45,
+          "professional": 44,
+          "community": 11
+        },
+        "source": "deepseek",
+        "saved": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "04-hinglish",
+      "status": 200,
+      "duration_ms": 1994,
+      "output": {
+        "contacts": [
+          {
+            "name": "Aditi",
+            "category": "personal",
+            "interests": [],
+            "preferred_frequency_days": 7
+          },
+          {
+            "name": "Suresh Nair",
+            "category": "professional",
+            "interests": [],
+            "preferred_frequency_days": 30
+          },
+          {
+            "name": "Imran",
+            "category": "community",
+            "interests": [],
+            "preferred_frequency_days": 14
+          }
+        ],
+        "goals": {
+          "personal": 42,
+          "professional": 33,
+          "community": 25
+        },
+        "source": "deepseek",
+        "saved": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "05-assistant-decoy",
+      "status": 200,
+      "duration_ms": 1227,
+      "output": {
+        "contacts": [
+          {
+            "name": "Karthik",
+            "category": "personal",
+            "interests": [],
+            "preferred_frequency_days": 7
+          },
+          {
+            "name": "Lakshmi",
+            "category": "professional",
+            "interests": [],
+            "preferred_frequency_days": 30
+          }
+        ],
+        "goals": {
+          "personal": 70,
+          "professional": 20,
+          "community": 10
+        },
+        "source": "deepseek",
+        "saved": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "06-no-people",
+      "status": 200,
+      "duration_ms": 910,
+      "output": {
+        "contacts": [],
+        "goals": {
+          "personal": 34,
+          "professional": 33,
+          "community": 33
+        },
+        "source": "deepseek",
+        "saved": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "07-unknown-frequency",
+      "status": 200,
+      "duration_ms": 1403,
+      "output": {
+        "contacts": [
+          {
+            "name": "Zoya",
+            "category": "personal",
+            "interests": []
+          },
+          {
+            "name": "Pranav",
+            "category": "professional",
+            "interests": [],
+            "preferred_frequency_days": 45
+          },
+          {
+            "name": "Kavya",
+            "category": "community",
+            "interests": [],
+            "preferred_frequency_days": 30
+          }
+        ],
+        "goals": {
+          "personal": 0,
+          "professional": 75,
+          "community": 25
+        },
+        "source": "deepseek",
+        "saved": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "08-repeated-name",
+      "status": 200,
+      "duration_ms": 2000,
+      "output": {
+        "contacts": [
+          {
+            "name": "Aarav Shah",
+            "category": "personal",
+            "interests": [],
+            "preferred_frequency_days": 30
+          },
+          {
+            "name": "Pooja Desai",
+            "category": "professional",
+            "interests": [],
+            "preferred_frequency_days": 14
+          },
+          {
+            "name": "Yusuf Ali",
+            "category": "community",
+            "interests": [],
+            "preferred_frequency_days": 7
+          }
+        ],
+        "goals": {
+          "personal": 50,
+          "professional": 25,
+          "community": 25
+        },
+        "source": "deepseek",
+        "saved": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "09-injection",
+      "status": 200,
+      "duration_ms": 2246,
+      "output": {
+        "contacts": [
+          {
+            "name": "Diya",
+            "category": "personal",
+            "interests": [],
+            "preferred_frequency_days": 7
+          }
+        ],
+        "goals": {
+          "personal": 50,
+          "professional": 30,
+          "community": 20
+        },
+        "source": "deepseek",
+        "saved": false
+      },
+      "failures": [],
+      "passed": true
+    },
+    {
+      "id": "10-multiline",
+      "status": 200,
+      "duration_ms": 1119,
+      "output": {
+        "contacts": [
+          {
+            "name": "Sanjana Rao",
+            "category": "personal",
+            "interests": [],
+            "preferred_frequency_days": 7
+          },
+          {
+            "name": "Deepak Menon",
+            "category": "professional",
+            "interests": [],
+            "preferred_frequency_days": 14
+          },
+          {
+            "name": "Ayesha",
+            "category": "community",
+            "interests": [],
+            "preferred_frequency_days": 30
+          }
+        ],
+        "goals": {
+          "personal": 50,
+          "professional": 39,
+          "community": 11
+        },
+        "source": "deepseek",
+        "saved": false
+      },
+      "failures": [],
+      "passed": true
+    }
+  ]
+}

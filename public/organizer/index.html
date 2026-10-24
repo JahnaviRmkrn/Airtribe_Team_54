@@ -3,22 +3,37 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Organizer</title>
+  <title>muop</title>
+  <link rel="icon" href="/muop-mark.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/organizer/styles.css">
   <link rel="stylesheet" href="/organizer/voice.css">
+  <script src="/product-analytics.js" defer></script>
 </head>
 <body>
   <header class="topbar">
-    <span class="brand">Organizer</span>
+    <span class="brand">
+      <svg width="26" height="26" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+        <path d="M14 32 L24 14 L34 32 L14 32 Z" stroke="#2E1F14" stroke-width="2.4" stroke-linejoin="round" opacity="0.9"/>
+        <circle cx="14" cy="32" r="7" fill="#F6AC0D" stroke="#2E1F14" stroke-width="2.4"/>
+        <circle cx="24" cy="14" r="7" fill="#04C1E1" stroke="#2E1F14" stroke-width="2.4"/>
+        <circle cx="34" cy="32" r="7" fill="#75E4DE" stroke="#2E1F14" stroke-width="2.4"/>
+      </svg>
+      muop
+    </span>
     <nav id="nav" class="nav hidden">
       <a href="#/dashboard" data-nav="dashboard">Dashboard</a>
       <a href="#/contacts" data-nav="contacts">Contacts</a>
       <a href="#/meetups" data-nav="meetups">Meetups</a>
+      <a href="#/welcome" data-nav="welcome">Guide</a>
     </nav>
   </header>
   <main id="app" class="container">
     <div class="card"><p class="muted">Loading...</p></div>
   </main>
+  <script src="/organizer/assistant.js"></script>
   <script src="/organizer/voice.js"></script>
   <script src="/organizer/app.js"></script>
 </body>

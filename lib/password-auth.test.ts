@@ -17,7 +17,7 @@ describe('explicit password authentication', () => {
     const auth = client();
     auth.signUp.mockResolvedValue({ data: { session: null }, error: null });
     const callback = 'https://example.test/auth/callback?next=%2Forganizer';
-    expect(await passwordAuth(asAuth(auth), 'sign_up', 'user@example.test', 'password', callback)).toEqual({ signedIn: false });
+    expect(await passwordAuth(asAuth(auth), 'sign_up', 'user@example.test', 'password', callback)).toEqual({ signedIn: false, newAccount: false });
     expect(auth.signUp).toHaveBeenCalledWith({ email: 'user@example.test', password: 'password', options: { emailRedirectTo: callback } });
     expect(auth.signInWithPassword).not.toHaveBeenCalled();
   });
@@ -26,6 +26,22 @@ describe('explicit password authentication', () => {
     const auth = client();
     auth.signInWithPassword.mockResolvedValue({ data: { session: { access_token: 'test-session' } }, error: null });
     auth.signUp.mockResolvedValue({ data: { session: { access_token: 'test-session' } }, error: null });
-    expect(await passwordAuth(asAuth(auth), mode, 'user@example.test', 'password', 'https://example.test/auth/callback')).toEqual({ signedIn: true });
+    expect(await passwordAuth(asAuth(auth), mode, 'user@example.test', 'password', 'https://example.test/auth/callback')).toEqual({ signedIn: true, newAccount: false });
+  });
+});
+
+
+describe('signup analytics classification', () => {
+  it.each([
+    ['fresh explicit signup', 'sign_up', [{ id: 'identity' }], 0, true],
+    ['existing account', 'sign_up', [], 0, false],
+    ['older account', 'sign_up', [{ id: 'identity' }], 120_000, false],
+    ['ordinary sign-in', 'sign_in', [{ id: 'identity' }], 0, false],
+  ] as const)('counts only a %s', async (_name, mode, identities, age, expected) => {
+    const auth = client();
+    const result = { data: { session: null, user: { identities, created_at: new Date(Date.now() - age).toISOString() } }, error: null };
+    auth.signUp.mockResolvedValue(result);
+    auth.signInWithPassword.mockResolvedValue(result);
+    expect((await passwordAuth(asAuth(auth), mode, 'user@example.test', 'password', 'https://example.test/auth/callback')).newAccount).toBe(expected);
   });
 });

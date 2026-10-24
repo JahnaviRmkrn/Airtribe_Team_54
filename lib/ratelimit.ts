@@ -13,6 +13,7 @@ export const LIMITS = {
   organizer: { max: 30, windowSeconds: 60 }, // confirm, close
   pay: { max: 10, windowSeconds: 60 },
   extract: { max: 10, windowSeconds: 60 }, // per signed-in user (LLM spend)
+  assistant: { max: 30, windowSeconds: 60 }, // per signed-in user (LLM spend, several rounds per command)
   voice: { max: 5, windowSeconds: 600 }, // per signed-in user (ElevenLabs sessions)
 } satisfies Record<string, Limit>;
 export type Preset = keyof typeof LIMITS;

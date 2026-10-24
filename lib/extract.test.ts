@@ -110,3 +110,23 @@ describe('extractBody', () => {
     expect(extractBody.safeParse({ transcript: 'my friend Arjun' }).success).toBe(true);
   });
 });
+
+describe('voice commands (ported from feature/ai-voice)', () => {
+  it('adds people from "add X to <category>" commands', () => {
+    const r = ruleExtract('add Priya to family. Add Arjun as a mentor. Sneha in friends');
+    expect(r.contacts.map((c) => [c.name, c.category])).toEqual([
+      ['Priya', 'personal'], ['Arjun', 'professional'], ['Sneha', 'personal'],
+    ]);
+  });
+
+  it('sets action=confirm only on an explicit save command', () => {
+    expect(ruleExtract('my sister Priya. That is all for now').action).toBeUndefined();
+    expect(ruleExtract("my sister Priya. That's everyone, save it").action).toBe('confirm');
+    expect(ruleExtract('add Priya to family, confirm').action).toBe('confirm');
+  });
+
+  it('passes an LLM confirm action through and drops anything else', () => {
+    expect(clean({ contacts: [], goals: {}, action: 'confirm' }).action).toBe('confirm');
+    expect(clean({ contacts: [], goals: {}, action: 'delete everything' }).action).toBeUndefined();
+  });
+});

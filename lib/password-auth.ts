@@ -16,5 +16,11 @@ export async function passwordAuth(
     ? await auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } })
     : await auth.signInWithPassword({ email, password });
   if (result.error) throw result.error;
-  return { signedIn: Boolean(result.data.session) };
+  const user = result.data.user;
+  const age = user?.created_at ? Date.now() - Date.parse(user.created_at) : NaN;
+  // Existing-account responses can contain an empty identity list. Never count
+  // those, failed sign-ins, or old accounts as a fresh explicit signup.
+  const newAccount = mode === 'sign_up' && Boolean(user?.identities?.length)
+    && Number.isFinite(age) && age >= 0 && age < 60_000;
+  return { signedIn: Boolean(result.data.session), newAccount };
 }
