@@ -12,6 +12,10 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
+    files: ["scripts/**/*.mjs"],
+    rules: { "no-undef": "error" },
+  },
+  {
     ignores: [
       "node_modules/**",
       ".next/**",

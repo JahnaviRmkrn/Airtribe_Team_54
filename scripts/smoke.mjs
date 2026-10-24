@@ -199,23 +199,23 @@ if (!env.SUPABASE_SERVICE_ROLE_KEY) {
     !upIds.includes(pastId) && !upIds.includes(expiredId) && upIds.includes(unscheduledId),
     JSON.stringify(r.json.upcoming_meetups.map((m) => m.title)),
   );
-}
 
-// Vote withdrawal on a closed room (race found by spec/MeetupRoom.tla).
-r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Unvote race', activity: 'dinner', area: 'Koramangala' } });
-const uv = r.json.meetup;
-r = await call('POST', `/api/rooms/${uv.room_token}/join`, { body: { guest_name: 'Voter', preferences: { food: ['veg'] } } });
-const voter = r.json.guest_secret;
-const uvVenue = r.json.room.shortlist[0].venue.id;
-await call('POST', `/api/rooms/${uv.room_token}/vote`, { guest: voter, body: { venue_id: uvVenue } });
-await call('POST', `/api/rooms/${uv.room_token}/close`, { token: alice });
-const { error: delErr } = await admin.from('venue_votes').delete().eq('meetup_id', uv.id);
-check('DB rejects vote withdrawal in closed room', delErr?.message.includes('room_closed'), JSON.stringify(delErr));
-r = await call('GET', `/api/rooms/${uv.room_token}`);
-check('closed room keeps its votes', r.json.votes[uvVenue] === 1, JSON.stringify(r.json.votes));
-check('deleting a closed meetup still cascades', (await call('DELETE', `/api/me/meetups/${uv.id}`, { token: alice })).status === 200);
-const { count: leftover } = await admin.from('venue_votes').select('id', { count: 'exact', head: true }).eq('meetup_id', uv.id);
-check('no orphan votes after delete', leftover === 0, String(leftover));
+  // Vote withdrawal on a closed room (race found by spec/MeetupRoom.tla).
+  r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Unvote race', activity: 'dinner', area: 'Koramangala' } });
+  const uv = r.json.meetup;
+  r = await call('POST', `/api/rooms/${uv.room_token}/join`, { body: { guest_name: 'Voter', preferences: { food: ['veg'] } } });
+  const voter = r.json.guest_secret;
+  const uvVenue = r.json.room.shortlist[0].venue.id;
+  await call('POST', `/api/rooms/${uv.room_token}/vote`, { guest: voter, body: { venue_id: uvVenue } });
+  await call('POST', `/api/rooms/${uv.room_token}/close`, { token: alice });
+  const { error: delErr } = await admin.from('venue_votes').delete().eq('meetup_id', uv.id);
+  check('DB rejects vote withdrawal in closed room', delErr?.message.includes('room_closed'), JSON.stringify(delErr));
+  r = await call('GET', `/api/rooms/${uv.room_token}`);
+  check('closed room keeps its votes', r.json.votes[uvVenue] === 1, JSON.stringify(r.json.votes));
+  check('deleting a closed meetup still cascades', (await call('DELETE', `/api/me/meetups/${uv.id}`, { token: alice })).status === 200);
+  const { count: leftover } = await admin.from('venue_votes').select('id', { count: 'exact', head: true }).eq('meetup_id', uv.id);
+  check('no orphan votes after delete', leftover === 0, String(leftover));
+}
 
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
 process.exit(failures ? 1 : 0);
