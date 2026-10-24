@@ -50,8 +50,9 @@ Ported from Arindom Chetia's PR #3 (FastAPI `routers/voice.py`, `static/voice.*`
   `{ contacts: [<=5 { name, category, interests[], preferred_frequency_days? }], goals: { personal, professional, community }, source: "deepseek"|"gemini"|"openai"|"rules", saved: false }`.
   Goals are integers that always total 100. It calls DeepSeek if `DEEPSEEK_API_KEY`
   is set, else Gemini if `GEMINI_API_KEY` is set, else OpenAI if
-  `OPENAI_API_KEY` is set, and otherwise (or if every configured call fails
-  or returns invalid JSON) uses a rule-based parser
+  `OPENAI_API_KEY` is set (or any OpenAI-compatible API via `OPENAI_BASE_URL`
+  + `EXTRACT_MODEL`), and otherwise (or if every configured call fails or
+  returns invalid JSON) uses a rule-based parser
   (`lib/extract.ts`). Every result is validated with zod and clamped before it
   is returned. It requires sign-in so it can't be used as a free LLM proxy.
 - `GET /api/voice/signed-url` mints a short-lived ElevenLabs conversation URL
