@@ -50,6 +50,11 @@ Set env vars (Project > Settings > Environment Variables, or `npx vercel env add
 | `SUPABASE_SERVICE_ROLE_KEY` | service_role / secret key | **server-only**: mark Sensitive, never prefix `NEXT_PUBLIC_` |
 | `NEXT_PUBLIC_SITE_URL` | `https://<app>` (no trailing path) | public; Production only, so previews link to themselves |
 
+Optional AI features are server-only and can be set the same way (mark Sensitive):
+`DEEPSEEK_API_KEY` (or `GEMINI_API_KEY` / `OPENAI_API_KEY`) powers `POST /api/extract`
+onboarding pre-fill, `ELEVENLABS_API_KEY` + `ELEVENLABS_AGENT_ID` power voice onboarding.
+Without them the app still works: extraction uses the rule-based parser and voice is hidden.
+
 `NEXT_PUBLIC_*` values are inlined at build time: after adding or changing any of
 them, redeploy (Deployments > Redeploy, or `npx vercel --prod`). A missing var does
 not fail the build; requests fail with `Missing env var <NAME>` in the function logs.

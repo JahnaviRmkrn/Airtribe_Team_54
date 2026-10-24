@@ -338,6 +338,35 @@ skip_nonce_check = false
 # If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
 email_optional = false
 
+
+# --- Social sign-in for the Organizer app (Google / Facebook / LinkedIn) ---
+# Credentials come from each provider's developer console; see docs/social-auth-setup.md.
+# Export the env vars below before `supabase start`, then set enabled = true.
+# Hosted projects: set the same values in Dashboard -> Authentication -> Providers instead.
+# Instagram is NOT a built-in provider; it uses a custom OAuth2 provider
+# (`custom:instagram`) configured in the dashboard - same guide.
+
+[auth.external.google]
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+# Overrides the default auth callback URL derived from auth.external_url.
+redirect_uri = ""
+# Google blocks nonce checks on localhost; enable when testing Google locally.
+skip_nonce_check = true
+
+[auth.external.facebook]
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_FACEBOOK_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_FACEBOOK_SECRET)"
+redirect_uri = ""
+
+[auth.external.linkedin_oidc]
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_LINKEDIN_OIDC_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_LINKEDIN_OIDC_SECRET)"
+redirect_uri = ""
+
 # Allow Solana wallet holders to sign in to your project via the Sign in with Solana (SIWS, EIP-4361) standard.
 # You can configure "web3" rate limit in the [auth.rate_limit] section and set up [auth.captcha] if self-hosting.
 [auth.web3.solana]
@@ -416,3 +445,4 @@ enabled = true
 # formatted with uppercase keywords, indent 2, max width 180, trailing commas,
 # and column/key alignment. Set to "null" to emit raw, unformatted SQL.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":180,\"commaStyle\":\"trailing\"}"
+

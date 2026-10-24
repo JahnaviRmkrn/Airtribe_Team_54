@@ -21,6 +21,13 @@ Deploying (Vercel + hosted Supabase): see [DEPLOY.md](DEPLOY.md).
 ## Auth
 
 - `/login` has a minimal page (magic link, or email+password sign-in/sign-up).
+- Social sign-in: `/login` also has **Google, Facebook, LinkedIn and
+  Instagram** buttons via Supabase Auth OAuth. Each one needs a developer app
+  on the provider's side and its client ID/secret entered in the Supabase
+  project - per-provider steps and callback URLs are in
+  [docs/social-auth-setup.md](docs/social-auth-setup.md). Instagram is wired as
+  a custom OAuth2 provider (`custom:instagram`) because Supabase has no
+  built-in Instagram provider.
 - In the browser the session lives in cookies, so `fetch('/api/me/...')` just works.
 - From scripts/curl: `Authorization: Bearer <supabase access_token>`.
 
@@ -47,11 +54,12 @@ Deploying (Vercel + hosted Supabase): see [DEPLOY.md](DEPLOY.md).
 Ported from Arindom Chetia's PR #3 (FastAPI `routers/voice.py`, `static/voice.*`).
 
 - `POST /api/extract` returns
-  `{ contacts: [<=5 { name, category, interests[], preferred_frequency_days? }], goals: { personal, professional, community }, source: "gemini"|"openai"|"rules", saved: false }`.
-  Goals are integers that always total 100. It calls Gemini if `GEMINI_API_KEY`
-  is set, else OpenAI if `OPENAI_API_KEY` is set (or any OpenAI-compatible API,
-  e.g. DeepSeek, via `OPENAI_BASE_URL` + `EXTRACT_MODEL`), and otherwise (or if the
-  call fails or returns invalid JSON) uses a rule-based parser
+  `{ contacts: [<=5 { name, category, interests[], preferred_frequency_days? }], goals: { personal, professional, community }, source: "deepseek"|"gemini"|"openai"|"rules", saved: false }`.
+  Goals are integers that always total 100. It calls DeepSeek if `DEEPSEEK_API_KEY`
+  is set, else Gemini if `GEMINI_API_KEY` is set, else OpenAI if
+  `OPENAI_API_KEY` is set (or any OpenAI-compatible API via `OPENAI_BASE_URL`
+  + `EXTRACT_MODEL`), and otherwise (or if every configured call fails or
+  returns invalid JSON) uses a rule-based parser
   (`lib/extract.ts`). Every result is validated with zod and clamped before it
   is returned. It requires sign-in so it can't be used as a free LLM proxy.
 - `GET /api/voice/signed-url` mints a short-lived ElevenLabs conversation URL
@@ -226,3 +234,4 @@ http://localhost:3000/organizer/ . Any 401 from `/api/me/*` redirects to
 - Errors render the API's `{ "error": "message" }`; every list has loading,
   empty and error states; everything survives a refresh and works at phone and
   desktop widths.
+
