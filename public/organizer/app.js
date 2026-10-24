@@ -55,6 +55,21 @@ async function api(path, opts = {}) {
 
 function go(hash) { location.hash = hash; }
 
+// mailto: hand-off - opens the user's own mail app with a ready message.
+function mailtoHref(to, subject, body) {
+  return 'mailto:' + encodeURIComponent(to || '').replace(/%40/g, '@')
+    + '?subject=' + encodeURIComponent(subject || '') + '&body=' + encodeURIComponent(body || '');
+}
+function checkInEmail(c) {
+  const first = String(c.name || '').split(/\s+/)[0] || 'there';
+  const about = (c.interests || []).length ? ` How's the ${c.interests[0]} going?` : '';
+  return mailtoHref(c.email, 'Catching up', `Hi ${first},\n\nIt's been a while - I was just thinking of you.${about} Free for a coffee or a call this week?\n\nCheers`);
+}
+function meetupInviteEmail(m, url) {
+  const when = m.starts_at ? ' on ' + fmtDate(m.starts_at) : '';
+  return mailtoHref('', `Join me: ${m.title}`, `Hi!\n\nI'm planning "${m.title}"${when}${m.area ? ' around ' + m.area : ''}. Pick a venue and tell us when you're free here:\n${url}\n\nNo sign-up needed. See you there!`);
+}
+
 // Each navigation bumps navGen; a view that finishes loading after the user
 // has moved on must not paint over the newer page.
 let navGen = 0;
@@ -368,37 +383,79 @@ function networkGraphSVG(contacts) {
 // --- calendar (dashboard) --------------------------------------------------
 // Current month grid; entries come only from real follow-up and meetup dates.
 
+// Calendar markers. Colour = status (red: overdue, you haven't connected;
+// yellow: due soon, turns red if you don't reach out). Icon = network:
+// professional 💼, personal ❤️, community ● dot; meetups 📅.
+const CAT_ICON = { professional: '💼', personal: '❤️', community: '●' };
+const dayStart = (d) => { const t = new Date(d); t.setHours(0, 0, 0, 0); return t; };
+const lateText = (n) => `${n} day${n === 1 ? '' : 's'} overdue`;
+function calMarker(e) {
+  if (e.kind === 'meetup') return `<i class="cal-mark meetup" title="${esc(e.label)}">📅</i>`;
+  const tip = e.label + (e.status === 'overdue' ? ` - not connected, ${lateText(e.late)}` : ' - due soon');
+  return `<i class="cal-mark ${e.status} cat-${esc(e.cat || 'personal')}" title="${esc(tip)}">${CAT_ICON[e.cat] || '●'}</i>`;
+}
+function calLine(e) {
+  if (e.kind === 'meetup') return `Meetup: ${esc(e.label)}${e.time ? ` · ${esc(e.time)}` : ''}`;
+  return e.status === 'overdue'
+    ? `Haven't connected with <strong>${esc(e.label)}</strong> · ${lateText(e.late)}`
+    : `Check in with ${esc(e.label)}`;
+}
+
 function calendarHTML(contacts, meetups) {
   const now = new Date();
+  const today0 = dayStart(now);
   const year = now.getFullYear(), month = now.getMonth();
   const monthName = now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const first = new Date(year, month, 1);
   const startOffset = first.getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const events = {};
-  const add = (iso, kind, label) => {
-    const t = new Date(iso);
-    if (isNaN(t) || t.getFullYear() !== year || t.getMonth() !== month) return;
-    const day = t.getDate();
-    (events[day] = events[day] || []).push({ kind, label, at: t });
+  const add = (t, ev) => {
+    if (t.getFullYear() !== year || t.getMonth() !== month) return;
+    (events[t.getDate()] = events[t.getDate()] || []).push(ev);
   };
-  (contacts || []).forEach((c) => c.next_followup_at && add(c.next_followup_at, 'followup', (c.name || 'Follow-up')));
-  (meetups || []).forEach((m) => m.starts_at && add(m.starts_at, 'meetup', (m.title || 'Meetup')));
+  const overdue = [];
+  (contacts || []).forEach((c) => {
+    const t = c.next_followup_at && new Date(c.next_followup_at);
+    if (!t || isNaN(t)) return;
+    const late = Math.round((today0 - dayStart(t)) / 864e5);
+    const ev = { kind: 'followup', status: late > 0 ? 'overdue' : 'soon', cat: c.category, label: c.name || 'Someone', late };
+    if (late > 0) overdue.push(ev);
+    add(t, ev);
+  });
+  (meetups || []).forEach((m) => {
+    const t = m.starts_at && new Date(m.starts_at);
+    if (t && !isNaN(t)) add(t, { kind: 'meetup', label: m.title || 'Meetup', time: t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) });
+  });
+  overdue.sort((x, y) => y.late - x.late);
+  // Read by wireCalendar() for the day detail panel.
+  window.__calEvents = events;
+
   const cells = [];
   for (let i = 0; i < startOffset; i++) cells.push('<div class="cal-cell cal-pad"></div>');
   for (let day = 1; day <= daysInMonth; day++) {
     const evs = events[day] || [];
-    const today = day === now.getDate() ? ' cal-today' : '';
-    const dots = evs.slice(0, 4).map((e) => `<i class="cal-dot ${e.kind}" title="${esc(e.label)}"></i>`).join('');
-    const has = evs.length ? ' has-ev' : '';
-    const tip = evs.map((e) => (e.kind === 'meetup' ? 'Meetup: ' : 'Check-in: ') + e.label).join('; ');
-    cells.push(`<button type="button" class="cal-cell${today}${has}" data-day="${day}" aria-label="${esc(monthName.split(' ')[0] + ' ' + day + (tip ? ': ' + tip : ': nothing planned'))}"><span class="cal-day">${day}</span><span class="cal-dots">${dots}</span></button>`);
+    const isToday = day === now.getDate();
+    const cls = (isToday ? ' cal-today' : '') + (evs.length ? ' has-ev' : '') + (evs.some((e) => e.status === 'overdue') ? ' cal-late' : '');
+    const marks = evs.slice(0, 3).map(calMarker).join('') + (evs.length > 3 ? `<span class="cal-more">+${evs.length - 3}</span>` : '');
+    const tip = evs.map((e) => (e.kind === 'meetup' ? 'Meetup: ' : e.status === 'overdue' ? 'Not connected: ' : 'Check-in: ') + e.label).join('; ');
+    cells.push(`<button type="button" class="cal-cell${cls}" data-day="${day}"${isToday ? ' aria-current="date"' : ''} aria-label="${esc(monthName.split(' ')[0] + ' ' + day + (tip ? ': ' + tip : ': nothing planned'))}"><span class="cal-day">${day}</span><span class="cal-dots">${marks}</span></button>`);
   }
   const names = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => `<div class="cal-head">${d}</div>`).join('');
-  return `<div class="calendar"><div class="cal-month">${esc(monthName)}</div><div class="cal-grid">${names}${cells.join('')}</div>
+  const todayLabel = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const lines = overdue.map((e) => `<li class="late">${calMarker(e)}<span>${calLine(e)}</span></li>`);
+  return `<div class="calendar">
+    <div class="cal-todaybar"><strong>Today</strong> ${esc(todayLabel)}
+      ${overdue.length ? `<span class="cal-overdue-count">${overdue.length} overdue</span>` : '<span class="cal-ok">All caught up</span>'}</div>
+    ${lines.length ? `<ul class="cal-todaylist">${lines.join('')}</ul>` : ''}
+    <div class="cal-month">${esc(monthName)}</div><div class="cal-grid">${names}${cells.join('')}</div>
     <div class="cal-detail" id="cal-detail" aria-live="polite"></div>
-    <div class="graph-legend"><span class="graph-legend-item"><i class="cal-dot followup"></i>Check-in</span><span class="graph-legend-item"><i class="cal-dot meetup"></i>Meetup</span></div></div>`;
-  window.__calEvents = events;
+    <div class="graph-legend">
+      <span class="graph-legend-item"><i class="cal-mark overdue">●</i>Haven't connected (overdue)</span>
+      <span class="graph-legend-item"><i class="cal-mark soon">●</i>Due soon - turns red</span>
+      <span class="graph-legend-item">💼 Professional</span><span class="graph-legend-item">❤️ Personal</span><span class="graph-legend-item">● Community</span>
+      <span class="graph-legend-item">📅 Meetup</span>
+    </div></div>`;
 }
 
 function wireCalendar() {
@@ -410,7 +467,7 @@ function wireCalendar() {
     document.querySelectorAll('.cal-cell[data-day]').forEach((b) => b.classList.toggle('selected', Number(b.dataset.day) === Number(day)));
     const when = new Date(new Date().getFullYear(), new Date().getMonth(), Number(day)).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
     box.innerHTML = `<strong>${esc(when)}</strong>` + (list.length
-      ? list.map((e) => `<div class="cal-item"><i class="cal-dot ${e.kind}"></i>${e.kind === 'meetup' ? 'Meetup' : 'Check-in'}: ${esc(e.label)}</div>`).join('')
+      ? list.map((e) => `<div class="cal-item${e.status === 'overdue' ? ' late' : ''}">${calMarker(e)}<span>${calLine(e)}</span></div>`).join('')
       : '<div class="muted">Nothing planned.</div>');
   };
   document.querySelectorAll('.cal-cell[data-day]').forEach((b) => { b.onclick = () => show(b.dataset.day); });
@@ -504,6 +561,7 @@ async function contactsView() {
           <label class="full">Interests <input id="c-interests" placeholder="hiking, chai, board games (comma-separated)"></label>
           <label>Check in every (days) <input id="c-freq" type="number" min="1" value="14"></label>
           <label>Next follow-up <input id="c-next" type="date"></label>
+          <label>Email <input id="c-email" type="email" placeholder="name@example.com"></label>
           <label class="full">Notes <input id="c-notes" placeholder="Notes"></label>
         </div>
         <p class="error" id="add-error"></p>
@@ -535,6 +593,8 @@ async function contactsView() {
       interests: parseInterests(el('c-interests').value),
       notes: el('c-notes').value.trim(),
     };
+    const email = el('c-email').value.trim();
+    if (email) body.email = email;
     const freq = parseInt(el('c-freq').value, 10);
     if (freq > 0) body.preferred_frequency_days = freq;
     const next = el('c-next').value;
@@ -589,7 +649,7 @@ async function contactDetailView(id) {
         <div class="avatar" aria-hidden="true">${esc(String(contact.name || '?').trim().charAt(0).toUpperCase())}</div>
         <div>
           <h1 class="profile-name">${esc(contact.name)}</h1>
-          <span class="tag">${esc(catLabel(contact.category))}</span>
+          <span class="tag">${esc(catLabel(contact.category))}</span>${contact.email ? ` <span class="muted">${esc(contact.email)}</span>` : ''}
         </div>
       </div>
       <div class="due-banner ${dueCls}"><strong>${esc(dueText)}</strong>
@@ -614,7 +674,7 @@ async function contactDetailView(id) {
           <span class="muted"> · ${esc(fmtDate(i.occurred_at))}</span>
           ${i.notes ? `<div>${esc(i.notes)}</div>` : ''}</div></li>`).join('')}</ol>` : '<p class="muted empty">No check-ins yet. Log the first one above.</p>'}
     </section>
-    <div class="manage"><button class="primary" id="c-meetup">Plan a meetup with ${esc(String(contact.name || '').split(/\s+/)[0])}</button> <button id="c-edit">Edit details</button> <button class="danger" id="c-del">Delete contact</button></div>`;
+    <div class="manage"><button class="primary" id="c-meetup">Plan a meetup with ${esc(String(contact.name || '').split(/\s+/)[0])}</button> <a class="button" id="c-email-link" href="${esc(checkInEmail(contact))}">Email</a> <button id="c-edit">Edit details</button> <button class="danger" id="c-del">Delete contact</button></div>`;
 
   el('back').onclick = () => go('#/contacts');
   el('c-meetup').onclick = () => { sessionStorage.setItem('org_meetup_title', 'Catch-up with ' + String(contact.name || '').split(/\s+/)[0]); go('#/meetups'); };
@@ -652,6 +712,7 @@ function editContactForm(id, c) {
       <label class="full">Interests <input id="e-interests" value="${esc((c.interests || []).join(', '))}"></label>
       <label>Check in every (days) <input id="e-freq" type="number" min="1" value="${c.preferred_frequency_days || 14}"></label>
       <label>Next follow-up <input id="e-next" type="date" value="${c.next_followup_at ? esc(new Date(c.next_followup_at).toISOString().slice(0, 10)) : ''}"></label>
+      <label>Email <input id="e-email" type="email" value="${esc(c.email || '')}" placeholder="name@example.com"></label>
       <label class="full">Notes <input id="e-notes" value="${esc(c.notes || '')}"></label>
     </div>
     <p class="error" id="e-error"></p>
@@ -671,6 +732,8 @@ function editContactForm(id, c) {
     if (JSON.stringify(interests) !== JSON.stringify(c.interests || [])) patch.interests = interests;
     const notes = el('e-notes').value.trim();
     if (notes !== (c.notes || '')) patch.notes = notes;
+    const email = el('e-email').value.trim();
+    if (email !== (c.email || '')) patch.email = email || null;
     const freq = parseInt(el('e-freq').value, 10);
     if (freq > 0 && freq !== c.preferred_frequency_days) patch.preferred_frequency_days = freq;
     const nextVal = el('e-next').value;
@@ -772,6 +835,7 @@ function meetupRow(m) {
       </div>
       <div class="actions">
         ${url ? `<button data-copy="${esc(url)}">Copy link</button>` : ''}
+        ${url && !closed ? `<a class="button" href="${esc(meetupInviteEmail(m, url))}">Email invite</a>` : ''}
         ${!closed ? `<button class="danger" data-close="${esc(m.id)}">Close</button>` : ''}
       </div>
     </div>`;

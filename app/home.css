@@ -248,3 +248,25 @@
   .home .container-wide { width: min(100% - 36px, 540px); }
 }
 
+
+/* Hero v2 (Khiv's mock-up): "Keep Your People Close." */
+.home .hero-cta { gap:16px; padding:8px 8px 8px 22px; }
+.home .hero-cta-arrow { display:inline-grid; place-items:center; width:38px; height:38px; border-radius:50%; background:#2e1f14; color:#fffdf4; }
+.home .hero-footnote { display:flex; align-items:center; gap:11px; margin:22px 0 0; font-size:13px; color:rgba(255,253,244,.78); }
+.home .hero-copy .caption-line { width:28px; height:1px; background:currentColor; opacity:.6; display:inline-block; }
+@media (max-width: 700px) {
+  /* Phone: photo on top, cream panel below, like the mock-up. */
+  .home .hero { height:auto; min-height:100svh; max-height:none; background:#fffdf4; color:#2e1f14; }
+  .home .hero-photo { position:relative; inset:auto; height:46svh; min-height:300px; background-position:center 60%; }
+  .home .hero-photo::after { background:linear-gradient(0deg,rgba(255,253,244,.15),transparent 40%); }
+  .home .hero-copy { justify-content:flex-start; padding-top:26px; padding-bottom:40px; }
+  .home .hero-copy .eyebrow { color:#0787a1; margin:0 0 10px; letter-spacing:.02em; text-transform:none; font-size:.8rem; }
+  .home .hero h1 { font-size:clamp(2.2rem,9.5vw,2.9rem); line-height:1.05; letter-spacing:-.03em; color:#2e1f14; }
+  .home .hero-description { color:#6b5a48; margin-top:14px; font-size:15px; line-height:1.5; }
+  .home .hero-actions { width:100%; flex-direction:column; align-items:stretch; gap:14px; }
+  .home .hero-cta { justify-content:space-between; width:100%; }
+  .home .hero-actions .text-link { display:none; }
+  .home .hero-footnote { color:#6b5a48; }
+  .home .hero-caption, .home .hero-scroll { display:none; }
+  .home .hero > .site-header { position:absolute; top:0; left:0; right:0; padding-left:20px; padding-right:20px; }
+}

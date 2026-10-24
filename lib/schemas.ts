@@ -11,6 +11,7 @@ const contactBase = z.object({
   category,
   interests: tags,
   notes: z.string().max(5000).nullable(),
+  email: z.email().max(254).nullable(),
   preferred_frequency_days: z.number().int().min(1).max(365).nullable(),
   last_interaction_at: isoDate,
   next_followup_at: isoDate,
