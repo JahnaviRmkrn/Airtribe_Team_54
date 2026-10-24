@@ -1,6 +1,6 @@
-# Organizer App - Team 54 (AI Builders Day)
+# Moup - Team 54 (AI Builders Day)
 
-Person B deliverable: the Organizer app frontend, plus a FastAPI backend that
+Person B deliverable: the Moup app frontend, plus a FastAPI backend that
 mocks Person A's API until the real one is ready.
 
 ## Run

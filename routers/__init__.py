@@ -1,1 +1,1 @@
-# API route modules for the Organizer app.
+# API route modules for Moup.

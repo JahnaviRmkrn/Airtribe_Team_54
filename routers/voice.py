@@ -67,7 +67,7 @@ class ExtractIn(BaseModel):
 
 
 EXTRACT_PROMPT = """You extract structured onboarding data from a conversation transcript
-between a user and a voice assistant for a relationship-organizer app.
+between a user and a voice assistant for Moup, a relationship management app.
 
 Return ONLY JSON of this exact shape:
 {"contacts": [{"name": str, "category": "Family"|"Friends"|"Work"|"Mentors", "notes": str}],

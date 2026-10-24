@@ -1,4 +1,4 @@
-"""Mock of Person A's API for the Organizer app.
+"""Mock of Person A's API for Moup.
 
 The frontend only talks to /api/*, so swap this router for a proxy to A's
 real base URL when it is ready - no frontend changes needed.

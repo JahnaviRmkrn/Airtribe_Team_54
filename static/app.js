@@ -1,4 +1,4 @@
-// Organizer app - Team 54, AI Builders Day.
+// Moup app - Team 54, AI Builders Day.
 // Talks only to /api/* (mocked by routers/api.py until Person A's API is ready).
 // Nothing is ever sent automatically - every action is an explicit button.
 
@@ -83,7 +83,7 @@ function landingView() {
     <section class="landing-hero">
       <span class="pill accent">⚡ AI Builders Day · Team 54</span>
       <h1>Stay close to the people who actually matter.</h1>
-      <p class="lead">The personal relationship organizer powered by 30-second AI voice check-ins and frictionless collaborative meetup rooms.</p>
+      <p class="lead">Moup is the personal relationship organizer powered by 30-second AI voice check-ins and frictionless collaborative meetup rooms.</p>
       <div class="landing-cta-row">
         <button class="primary" id="hero-demo-btn">Try Interactive Demo</button>
         <button class="ghost" id="hero-signin-btn">Sign In</button>

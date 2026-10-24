@@ -1,4 +1,4 @@
-"""Organizer app - Team 54, AI Builders Day.
+"""Moup - Team 54, AI Builders Day.
 
 FastAPI backend that mocks Person A's API and serves the frontend.
 Run: uvicorn main:app --reload
@@ -28,7 +28,7 @@ _load_dotenv()
 
 from routers import api, rooms, voice  # noqa: E402  (env must be loaded first)
 
-app = FastAPI(title="Organizer App API (mock)", version="0.2.0")
+app = FastAPI(title="Moup API (mock)", version="0.2.0")
 
 app.include_router(api.router, prefix="/api")
 app.include_router(voice.router, prefix="/api", tags=["voice"])

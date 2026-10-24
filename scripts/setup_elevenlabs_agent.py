@@ -15,11 +15,11 @@ import urllib.error
 import urllib.request
 
 FIRST_MESSAGE = (
-    "Hi there! Welcome to Organizer. I'm here to help calibrate your network in about thirty seconds. "
+    "Hi there! Welcome to Moup. I'm here to help calibrate your network in about thirty seconds. "
     "Who are a few people—friends, family, or colleagues—you'd love to stay closer to?"
 )
 
-PROMPT = """You are a friendly, warm, and efficient onboarding conversational assistant for Organizer, a personal relationship management app.
+PROMPT = """You are a friendly, warm, and efficient onboarding conversational assistant for Moup, a personal relationship management app.
 Your objective is to quickly learn two things in under 60 seconds:
 
 1. Up to FIVE key people the user wants to prioritize staying in touch with.
@@ -41,7 +41,7 @@ def main() -> None:
     if not key:
         sys.exit("Set ELEVENLABS_API_KEY first.")
     body = {
-        "name": "Organizer onboarding (Team 54)",
+        "name": "Moup onboarding (Team 54)",
         "conversation_config": {
             "agent": {
                 "first_message": FIRST_MESSAGE,
