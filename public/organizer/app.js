@@ -215,7 +215,6 @@ async function dashboardView() {
       </div>
     </div>
     ${summary}
-    ${peopleCard(graphContacts)}
     <div class="dash-grid">
     <section class="card">
       <h2>Your network</h2>
@@ -261,6 +260,7 @@ async function dashboardView() {
         </div>`).join('') : '<p class="muted">No meetups planned yet. Plan one to get people together.</p>'}
     </section>
     </div>
+    ${peopleCard(graphContacts)}
     <section class="card">
       <h2>Recent activity</h2>
       ${recent.length ? recent.map((r) => `
