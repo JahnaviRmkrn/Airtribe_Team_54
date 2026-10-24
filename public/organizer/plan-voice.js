@@ -35,7 +35,8 @@
       'Do not invent details. If something is undecided, leave it out.',
       'When you have enough, read the plan back in one or two sentences and ask if you should create it. Only after a clear yes, call save_meetup_plan once.',
       'After it is created, tell them the room link and a summary are ready to send on WhatsApp, SMS or email, and that friends will share where they are coming from so muop can suggest a fair place in the middle.',
-      `Today is ${now.toDateString()} and the local time zone offset is ${-now.getTimezoneOffset() / 60} hours from UTC (India is +05:30). Convert dates like "this Saturday at 11" to ISO 8601 with that offset.`,
+      `Right now it is ${now.toLocaleString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: 'numeric', minute: '2-digit' })} and the local time zone offset is ${-now.getTimezoneOffset() / 60} hours from UTC (India is +05:30). Convert dates like "this Saturday at 11" to ISO 8601 with that offset.`,
+      'Never schedule in the past: if the day they name is today but that time has already passed, use the same day next week, and say the date out loud when you read the plan back.',
     ].join('\n');
   }
 
@@ -111,7 +112,12 @@
     async function save(args) {
       const body = { title: String(args.title || '').slice(0, 120) || 'Meetup', activity: ACTIVITIES.includes(args.activity) ? args.activity : 'dinner' };
       if (args.area) body.area = String(args.area).slice(0, 80);
-      if (args.starts_at && !isNaN(Date.parse(args.starts_at))) body.starts_at = new Date(args.starts_at).toISOString();
+      if (args.starts_at && !isNaN(Date.parse(args.starts_at))) {
+        let t = new Date(args.starts_at);
+        // "This Saturday at 11" said on a Saturday evening: roll a just-missed time forward a week.
+        if (t < new Date() && Date.now() - t < 7 * 864e5) t = new Date(t.getTime() + 7 * 864e5);
+        body.starts_at = t.toISOString();
+      }
       if (Number(args.budget) > 0) body.budget = Math.round(Number(args.budget));
       const invitees = Array.isArray(args.invitees) ? args.invitees.map(String).slice(0, 20) : [];
       body.notes = [args.summary, invitees.length ? 'Inviting: ' + invitees.join(', ') : ''].filter(Boolean).join('\n').slice(0, 2000);
