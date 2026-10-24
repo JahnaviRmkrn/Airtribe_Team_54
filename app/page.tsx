@@ -28,15 +28,15 @@ export default async function Home() {
         <LandingHeader />
 
         <div className="hero-copy container-wide">
-          <p className="eyebrow rise-in">For the people you mean to call</p>
-          <h1 className="serif rise-in rise-delay-1">Somewhere between<br />&ldquo;we should&rdquo; <em>and</em> &ldquo;we did.&rdquo;</h1>
-          <p className="hero-description rise-in rise-delay-2">Life gets full. The people we love can slip to the edges of it.<br className="desktop-break" /> muop helps you make your way back to each other.</p>
+          <p className="eyebrow rise-in">For Your People</p>
+          <h1 className="serif rise-in rise-delay-1">Keep Your People Close.</h1>
+          <p className="hero-description rise-in rise-delay-2">Busy Days Happen. A Little Hello Goes A Long Way.</p>
           <div className="hero-actions rise-in rise-delay-2">
-            <Link className="button-primary" href="/login">Make time for your people <ArrowRight size={17} /></Link>
+            <Link className="button-primary hero-cta" href="/login">Maintain Your Relationships Better <span className="hero-cta-arrow"><ArrowRight size={17} /></span></Link>
             <a className="text-link" href="#why">A little more about it <ArrowDown size={15} /></a>
           </div>
+          <p className="hero-footnote rise-in rise-delay-2"><span className="caption-line" /> One Warm Hello Can Change A Day.</p>
         </div>
-        <div className="hero-caption"><span className="caption-line" /> A small reach-out can change the whole shape of a day.</div>
         <div className="hero-scroll" aria-hidden="true">SCROLL TO FEEL IT <span /></div>
       </section>
 
