@@ -166,3 +166,19 @@ fieldset legend { font-family: "Newsreader", Georgia, serif; font-size: 15px; pa
 .cal-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
 .cal-dot.followup { background: #04c1e1; }
 .cal-dot.meetup { background: #f6ac0d; }
+
+/* Dashboard: "Your people" list (muop phone-mockup style) */
+.people-list { list-style: none; margin: 0; padding: 0; }
+.people-list li + li { border-top: 1px solid rgba(0,0,0,.08); }
+.person { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 2px; background: none; border: 0; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.person:hover { background: rgba(0,0,0,.03); }
+.person:focus-visible { outline: 2px solid #04C1E1; outline-offset: 2px; }
+.person-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.person-info .muted { font-size: .85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-family: Georgia, serif; font-size: 15px; }
+.avatar-personal { background: #E8A598; }
+.avatar-professional { background: #8EC3C1; }
+.avatar-community { background: #E9C46A; }
+.due { flex: none; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: #EFEDE6; color: #6b6b6b; }
+.due-today { background: #DDF2F2; color: #0E7C86; }
+.due-late { background: #FBE3DC; color: #B4452F; }

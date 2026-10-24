@@ -55,7 +55,14 @@ async function api(path, opts = {}) {
 
 function go(hash) { location.hash = hash; }
 
+// Each navigation bumps navGen; a view that finishes loading after the user
+// has moved on must not paint over the newer page.
+let navGen = 0;
+const navToken = () => navGen;
+const stale = (token) => token !== navGen;
+
 function route() {
+  navGen++;
   el('nav').classList.remove('hidden');
   const hash = location.hash || '#/dashboard';
   document.querySelectorAll('[data-nav]').forEach((a) => {
@@ -108,7 +115,37 @@ const roomUrl = (token) => location.origin + '/m/' + token;
 
 // --- dashboard -----------------------------------------------------------
 
+// "Your people": every contact, soonest check-in first, with a due badge.
+function peopleCard(contacts) {
+  const DAY = 86400000;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const due = (c) => {
+    if (!c.next_followup_at) return null;
+    const d = new Date(c.next_followup_at); d.setHours(0, 0, 0, 0);
+    const n = Math.round((d - today) / DAY);
+    return Number.isFinite(n) ? n : null;
+  };
+  const badge = (n) => n === null ? '' : n < 0 ? '<span class="due due-late">overdue</span>'
+    : n === 0 ? '<span class="due due-today">today</span>'
+    : n <= 7 ? '<span class="due">soon</span>' : `<span class="due">in ${n} days</span>`;
+  const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  const people = contacts.slice().sort((a, b) => (due(a) ?? 1e9) - (due(b) ?? 1e9) || (a.name || '').localeCompare(b.name || ''));
+  return `
+    <section class="card people-card">
+      <h2>Your people</h2>
+      <p class="muted">${people.length} ${people.length === 1 ? 'person' : 'people'} on your mind. A little time for your people goes a long way.</p>
+      ${people.length ? `<ul class="people-list">${people.map((c) => `
+        <li><button class="person" data-person="${esc(c.id || '')}">
+          <span class="avatar avatar-${esc(c.category || 'personal')}">${esc(initials(c.name))}</span>
+          <span class="person-info"><strong>${esc(c.name || 'Someone')}</strong>
+            <span class="muted">${esc(catLabel(c.category))}${c.interests && c.interests.length ? ' · ' + esc([].concat(c.interests).slice(0, 2).join(', ')) : ''}</span></span>
+          ${badge(due(c))}
+        </button></li>`).join('')}</ul>` : '<p class="muted">No one yet. Add your people to see them here.</p>'}
+    </section>`;
+}
+
 async function dashboardView() {
+  const nav = navToken();
   renderLoading('Loading your dashboard...');
   let d, graphContacts = [];
   try {
@@ -117,7 +154,7 @@ async function dashboardView() {
       const rc = await api('/api/me/contacts');
       graphContacts = Array.isArray(rc) ? rc : (rc.contacts || []);
     } catch (e2) { graphContacts = []; }
-  } catch (e) { return renderError(e, dashboardView); }
+  } catch (e) { if (stale(nav)) return; return renderError(e, dashboardView); }
 
   const counts = d.contact_counts || {};
   const totalContacts = CATEGORIES.reduce((s, c) => s + (counts[c] || 0), 0);
@@ -127,7 +164,8 @@ async function dashboardView() {
   const recent = d.recent_activity || [];
 
   if (d.is_empty) {
-    el('app').innerHTML = `
+    if (stale(nav)) return;
+  el('app').innerHTML = `
       <h1>Dashboard</h1>
       <div class="card state-box">
         <h2>Welcome to Organizer</h2>
@@ -151,8 +189,10 @@ async function dashboardView() {
       <div class="actions"><button data-done="${esc(f.id || f.contact_id || '')}" data-name="${esc(f.name || '')}">Mark done</button></div>
     </div>`;
 
+  if (stale(nav)) return;
   el('app').innerHTML = `
     <h1>Dashboard</h1>
+    ${peopleCard(graphContacts)}
     <section class="card">
       <h2>Your network</h2>
       <p class="muted">Each dot is a person. The section is their category; the closer to the centre, the sooner they are due a check-in.</p>
@@ -210,6 +250,7 @@ async function dashboardView() {
         </div>`).join('') : '<p class="muted">No activity recorded yet.</p>'}
     </section>`;
 
+  document.querySelectorAll('[data-person]').forEach((b) => { b.onclick = () => go('#/contacts/' + encodeURIComponent(b.dataset.person)); });
   el('qa-add').onclick = () => { sessionStorage.setItem('org_new_contact', '1'); go('#/contacts'); };
   el('qa-meetup').onclick = () => go('#/meetups');
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
@@ -365,14 +406,16 @@ function markDoneForm(btn) {
 // --- contacts --------------------------------------------------------------
 
 async function contactsView() {
+  const nav = navToken();
   renderLoading('Loading contacts...');
   const filter = sessionStorage.getItem('org_filter') || '';
   let contacts;
   try {
     const r = await api('/api/me/contacts' + (filter ? '?category=' + encodeURIComponent(filter) : ''));
     contacts = Array.isArray(r) ? r : (r.contacts || []);
-  } catch (e) { return renderError(e, contactsView); }
+  } catch (e) { if (stale(nav)) return; return renderError(e, contactsView); }
 
+  if (stale(nav)) return;
   el('app').innerHTML = `
     <h1>Contacts</h1>
     <section class="card">
@@ -445,14 +488,16 @@ function contactRow(c) {
 // --- contact detail: profile + history, edit, delete ------------------------
 
 async function contactDetailView(id) {
+  const nav = navToken();
   renderLoading('Loading contact...');
   let contact, interactions;
   try {
     const r = await api('/api/me/contacts/' + encodeURIComponent(id));
     contact = r.contact || r;
     interactions = r.interactions || [];
-  } catch (e) { return renderError(e, () => contactDetailView(id)); }
+  } catch (e) { if (stale(nav)) return; return renderError(e, () => contactDetailView(id)); }
 
+  if (stale(nav)) return;
   el('app').innerHTML = `
     <p><button class="link-btn" id="back">← All contacts</button></p>
     <section class="card" id="profile-card">
@@ -559,13 +604,15 @@ function editContactForm(id, c) {
 // --- meetups -----------------------------------------------------------------
 
 async function meetupsView(created) {
+  const nav = navToken();
   renderLoading('Loading meetups...');
   let meetups;
   try {
     const r = await api('/api/me/meetups');
     meetups = Array.isArray(r) ? r : (r.meetups || []);
-  } catch (e) { return renderError(e, () => meetupsView()); }
+  } catch (e) { if (stale(nav)) return; return renderError(e, () => meetupsView()); }
 
+  if (stale(nav)) return;
   el('app').innerHTML = `
     <h1>Meetups</h1>
     ${created ? createdCard(created) : ''}
