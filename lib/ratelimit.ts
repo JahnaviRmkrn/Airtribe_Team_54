@@ -14,7 +14,9 @@ export const LIMITS = {
   pay: { max: 10, windowSeconds: 60 },
   extract: { max: 10, windowSeconds: 60 }, // per signed-in user (LLM spend)
   assistant: { max: 30, windowSeconds: 60 }, // per signed-in user (LLM spend, several rounds per command)
-  guestVoice: { max: 20, windowSeconds: 600 }, // per IP per room (room voice helper, joined guests only)
+  guestVoice: { max: 20, windowSeconds: 600 }, // per IP per room: cheap pre-auth filter for the room voice helper
+  guestVoiceGuest: { max: 5, windowSeconds: 600 }, // per joined guest (the secret is portable across IPs)
+  guestVoiceRoom: { max: 60, windowSeconds: 600 }, // per room across everyone
   voice: { max: 50, windowSeconds: 600 }, // per signed-in user (Gemini Live / transcribe sessions; demo-friendly)
   draft: { max: 20, windowSeconds: 60 }, // per signed-in user (LLM spend)
   transcribe: { max: 10, windowSeconds: 60 }, // per signed-in user (Gemini audio)

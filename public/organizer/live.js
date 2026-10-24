@@ -46,7 +46,9 @@
   const unb64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
 
   async function getToken(url) {
-    const res = await fetch(url || '/api/voice/live-token', { credentials: 'include' });
+    const u = new URL(url || '/api/voice/live-token', location.origin);
+    if (u.origin !== location.origin) throw new Error('Voice token URL must be same-origin');
+    const res = await fetch(u.href, { credentials: 'include' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(data.error || 'Voice is unavailable'), { status: res.status });
     return data;
