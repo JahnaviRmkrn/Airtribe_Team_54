@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { userClient } from '@/lib/supabase/server';
 import './home.css';
 
 const LOGO = (
@@ -10,7 +12,13 @@ const LOGO = (
   </svg>
 );
 
-export default function Home() {
+// Reads the session cookie, so this must render per request (not prerendered).
+export const dynamic = 'force-dynamic';
+
+// Signed-in users skip the landing page and go straight to the organizer app.
+export default async function Home() {
+  const { data } = await (await userClient()).auth.getUser();
+  if (data.user) redirect('/organizer');
   return (
     <main className="home">
       <section className="hero">
