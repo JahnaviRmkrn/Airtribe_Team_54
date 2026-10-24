@@ -10,7 +10,7 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -185,10 +185,21 @@ def list_meetups() -> list:
 
 
 @router.post("/meetups")
-def add_meetup(body: MeetupIn) -> dict:
+def add_meetup(body: MeetupIn, request: Request) -> dict:
+    from routers.rooms import _refresh_shortlist, create_room  # lazy: rooms imports this module
+
     state = load()
-    room = f"https://meet.team54.app/room/{secrets.token_hex(4)}"
-    m = {"id": secrets.token_hex(4), "room_link": room, "created_at": now(), **body.model_dump()}
+    mid = secrets.token_hex(4)
+    room = create_room(state, body.title, body.when, meetup_id=mid)
+    _refresh_shortlist(room)
+    base = str(request.base_url).rstrip("/")
+    m = {
+        "id": mid,
+        "room_link": f"{base}/m/{room['token']}",
+        "organizer_link": f"{base}/m/{room['token']}?key={room['organizer_key']}",
+        "created_at": now(),
+        **body.model_dump(),
+    }
     state["meetups"].append(m)
     log(state, "meetup", f"Planned meetup: {m['title']}")
     save(state)

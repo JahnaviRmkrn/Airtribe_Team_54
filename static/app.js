@@ -79,8 +79,14 @@ function onboardingView() {
     <section class="card">
       <h1>Confirm your details</h1>
       <p class="muted">Check and edit anything before continuing.</p>
+      <div id="voice-mount"></div>
       <label>Name <input id="ob-name" value="${esc(name)}"></label>
       <label>Email <input id="ob-email" value="${esc(state.email)}" readonly></label>
+      <div id="ob-contacts-wrap" class="hidden">
+        <h2>People we heard <span class="ob-pill" id="ob-source"></span></h2>
+        <p class="muted">Edit or remove anyone. Nothing is saved until you confirm.</p>
+        <div id="ob-contacts" class="ob-contacts"></div>
+      </div>
       <h2>Attention goals</h2>
       <p class="muted">How do you want to split your attention? Must total 100%.</p>
       <div class="goals-grid">
@@ -109,6 +115,31 @@ function onboardingView() {
     });
     refresh();
   };
+  // Voice / typed extraction -> pre-fill only. Saved solely by the confirm button below.
+  const renderExtracted = (contacts) => {
+    el('ob-contacts-wrap').classList.toggle('hidden', !contacts.length);
+    el('ob-contacts').innerHTML = contacts.map((c) => `
+      <div class="ob-contact">
+        <input class="ob-c-name" value="${esc(c.name)}" aria-label="Name">
+        <select class="ob-c-cat" aria-label="Category">${CATEGORIES.map((x) => `<option ${x === c.category ? 'selected' : ''}>${x}</option>`).join('')}</select>
+        <input class="ob-c-notes ob-notes" value="${esc(c.notes)}" placeholder="Notes" aria-label="Notes">
+        <button type="button" class="danger ob-c-del" aria-label="Remove ${esc(c.name)}">Remove</button>
+      </div>`).join('');
+    el('ob-contacts').querySelectorAll('.ob-c-del').forEach((b) => {
+      b.onclick = () => {
+        b.closest('.ob-contact').remove();
+        if (!el('ob-contacts').children.length) el('ob-contacts-wrap').classList.add('hidden');
+      };
+    });
+  };
+  if (window.Voice) {
+    window.Voice.mount(el('voice-mount'), (res) => {
+      inputs.forEach((i) => { i.value = res.goals[i.dataset.cat] ?? 0; });
+      refresh();
+      el('ob-source').textContent = res.source === 'rules' ? 'auto-detected' : 'from voice';
+      renderExtracted(res.contacts);
+    });
+  }
   el('ob-save').onclick = async () => {
     if (total() !== 100) {
       el('ob-error').textContent = 'Goals must total 100% - currently ' + total() + '%.';
@@ -116,6 +147,10 @@ function onboardingView() {
     }
     const goals = Object.fromEntries(inputs.map((i) => [i.dataset.cat, parseInt(i.value) || 0]));
     await api('/goals', { method: 'PUT', body: JSON.stringify({ goals }) });
+    const rows = [...document.querySelectorAll('.ob-contact')]
+      .map((r) => ({ name: r.querySelector('.ob-c-name').value.trim(), category: r.querySelector('.ob-c-cat').value, notes: r.querySelector('.ob-c-notes').value.trim() }))
+      .filter((c) => c.name);
+    for (const c of rows) await api('/contacts', { method: 'POST', body: JSON.stringify(c) });
     state.onboarded = true;
     go('#/dashboard');
   };
@@ -293,9 +328,12 @@ async function meetupsView() {
       <h2>Planned</h2>
       ${meetups.length ? meetups.map((m) => `
         <div class="row">
-          <div><strong>${esc(m.title)}</strong> - ${esc(m.when)}
+          <div><strong>${esc(m.title)}</strong> - ${esc(m.when)}${m.venue ? ` · 📍 ${esc(m.venue)}` : ''}
             <div class="muted mono">${esc(m.room_link)}</div></div>
-          <button data-copy="${esc(m.room_link)}">Copy link</button>
+          <div>
+            <button data-copy="${esc(m.room_link)}">Copy link</button>
+            ${m.organizer_link ? `<a href="${esc(m.organizer_link)}" target="_blank" rel="noopener"><button type="button">Open room</button></a>` : ''}
+          </div>
         </div>`).join('') : '<p class="muted">No meetups yet.</p>'}
     </section>`;
   el('m-form').onsubmit = async (e) => {
