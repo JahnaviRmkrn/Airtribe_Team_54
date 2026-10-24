@@ -21,6 +21,13 @@ Deploying (Vercel + hosted Supabase): see [DEPLOY.md](DEPLOY.md).
 ## Auth
 
 - `/login` has a minimal page (magic link, or email+password sign-in/sign-up).
+- Social sign-in: `/login` also has **Google, Facebook, LinkedIn and
+  Instagram** buttons via Supabase Auth OAuth. Each one needs a developer app
+  on the provider's side and its client ID/secret entered in the Supabase
+  project - per-provider steps and callback URLs are in
+  [docs/social-auth-setup.md](docs/social-auth-setup.md). Instagram is wired as
+  a custom OAuth2 provider (`custom:instagram`) because Supabase has no
+  built-in Instagram provider.
 - In the browser the session lives in cookies, so `fetch('/api/me/...')` just works.
 - From scripts/curl: `Authorization: Bearer <supabase access_token>`.
 
@@ -227,3 +234,4 @@ http://localhost:3000/organizer/ . Any 401 from `/api/me/*` redirects to
 - Errors render the API's `{ "error": "message" }`; every list has loading,
   empty and error states; everything survives a refresh and works at phone and
   desktop widths.
+
