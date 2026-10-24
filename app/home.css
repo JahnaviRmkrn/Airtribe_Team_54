@@ -9,7 +9,7 @@
 .home a { color: inherit; }
 .home button { font: inherit; color: inherit; cursor: pointer; }
 .home .hero { position: relative; overflow: hidden; background: #254e50; color: var(--cream); }
-.home .hero-photo { background-image: url('/images/muop-beach-hero.jpg'); }
+.home .hero-photo { background-image: url('/images/muop-hero.jpg'); }
 .home .reachout-section { position: relative; overflow: hidden; }
 .home .nav-cta svg, .home .button-primary svg, .home .text-link svg, .home .product-link svg,
 .home .closing-button svg, .home .back-top svg, .home .message-time svg { flex-shrink: 0; }
