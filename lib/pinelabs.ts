@@ -87,7 +87,12 @@ export async function getOrderStatus(orderId: string): Promise<PaymentStatus> {
   return mapOrderStatus((res.data as { status?: string } | undefined)?.status);
 }
 
-// Best effort: an order superseded by a new amount should not stay payable.
+// Do not replace a payable order unless the provider confirms cancellation.
+// A timeout or ambiguous response must leave the existing checkout tracked.
 export async function cancelOrder(orderId: string) {
-  await call('cancelOrder', { order_id: orderId }).catch(() => undefined);
+  const res = await call('cancelOrder', { order_id: orderId });
+  const status = (res.data as { status?: string } | undefined)?.status;
+  if (status?.toUpperCase() !== 'CANCELLED') {
+    throw new HttpError(502, 'Could not confirm payment cancellation, please retry');
+  }
 }

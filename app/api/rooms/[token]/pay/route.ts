@@ -96,8 +96,8 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
         throw new HttpError(409, 'Payment is already being created, retry in a moment');
       }
       // Venue (price) changed since this order was made: retire the old order.
-      // WARNING: best effort. If the guest pays the old order before the cancel
-      // lands, that payment is no longer tracked here; reconcile in Pine Labs.
+      // Keep the old order tracked unless cancellation is confirmed. If it
+      // was paid concurrently, a subsequent refresh will reconcile its status.
       if (row.pine_order_id) await cancelOrder(row.pine_order_id);
     }
     // Claim the row for a new order; updated_at guards against a concurrent claim.

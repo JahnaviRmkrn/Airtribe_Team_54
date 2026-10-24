@@ -22,6 +22,7 @@ vi.mock('@/lib/pinelabs', () => ({
   getOrderStatus: deps.getOrderStatus,
 }));
 
+import { HttpError } from '../lib/http';
 import { POST } from '../app/api/rooms/[token]/pay/route';
 
 function deferred() {
@@ -33,6 +34,7 @@ function deferred() {
 let now;
 let payment;
 let version;
+let venuePrice;
 // In-memory query builder implements compare-and-swap filters, not real DB calls.
 function database() {
   return { from(table) {
@@ -49,7 +51,7 @@ function database() {
       maybeSingle() { return query; },
       then(resolve, reject) {
         const run = () => {
-          if (table === 'venues') return { data: { price_per_person: 500 }, error: null };
+          if (table === 'venues') return { data: { price_per_person: venuePrice }, error: null };
           if (table === 'meetup_attendees') return { data: { guest_name: 'Guest' }, error: null };
           if (operation === 'insert') {
             payment = { id: 'payment', status: 'pending', pine_order_id: null, redirect_url: null, ...values,
@@ -74,6 +76,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   now = Date.parse('2026-10-24T12:00:00Z');
   version = 0;
+  venuePrice = 500;
   payment = null;
   deps.db = database();
   deps.cancelOrder.mockResolvedValue(undefined);
@@ -127,4 +130,16 @@ describe('payment creation claim fencing', () => {
     expect((await second).status).toBe(201);
     expect(payment.pine_order_id).toBe('B');
   });
+
+  it('preserves the old checkout when cancellation for a changed amount fails', async () => {
+    deps.createOrder.mockResolvedValue(order('A'));
+    expect((await post()).status).toBe(201);
+    const original = { ...payment };
+    venuePrice = 800;
+    deps.cancelOrder.mockRejectedValueOnce(new HttpError(502, 'Cancellation unconfirmed'));
+    expect((await post()).status).toBe(502);
+    expect(payment).toEqual(original);
+    expect(deps.createOrder).toHaveBeenCalledTimes(1);
+  });
+
 });

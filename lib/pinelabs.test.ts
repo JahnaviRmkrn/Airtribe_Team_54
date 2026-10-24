@@ -83,4 +83,22 @@ describe('toolkit calls', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     await expect(pl.getOrderStatus('v1-1')).rejects.toMatchObject({ status: 502 });
   });
+
+  it('requires provider confirmation before retiring a payable order', async () => {
+    execute.mockResolvedValue(JSON.stringify({ data: { status: 'CANCELLED' } }));
+    await expect(pl.cancelOrder('old-order')).resolves.toBeUndefined();
+    expect(execute).toHaveBeenCalledWith('cancelOrder', { order_id: 'old-order' });
+  });
+
+  it.each(['PENDING', 'PROCESSED', undefined])('does not treat %s as confirmed cancellation', async (status) => {
+    execute.mockResolvedValue(JSON.stringify({ data: { status } }));
+    await expect(pl.cancelOrder('old-order')).rejects.toMatchObject({ status: 502 });
+  });
+
+  it('propagates cancellation failures so a second payable order is not created', async () => {
+    execute.mockRejectedValue(new Error('Provider unavailable'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(pl.cancelOrder('old-order')).rejects.toMatchObject({ status: 502 });
+  });
+
 });
