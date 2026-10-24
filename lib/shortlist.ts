@@ -92,7 +92,12 @@ export function shortlist(
     if (areaVotes > 0) {
       score += 2 * (areaVotes / (headcount + (meetup.area ? 1 : 0)));
       relevant = true;
-      reasons.push(`In ${v.area} (preferred by ${areaVotes})`);
+      // The organiser's area is weighted like a vote, but the reason only
+      // counts guests: "preferred by 1" with nobody in the room reads as a bug.
+      const organiserPick = !!meetup.area && norm(meetup.area) === norm(v.area);
+      const guestVotes = areaVotes - (organiserPick ? 1 : 0);
+      const who = [organiserPick ? "organiser's pick" : '', guestVotes ? `preferred by ${guestVotes}` : ''].filter(Boolean).join(', ');
+      reasons.push(`In ${v.area} (${who})`);
     }
 
     const matched = v.tags.filter((t) => wantedTags.has(norm(t)));

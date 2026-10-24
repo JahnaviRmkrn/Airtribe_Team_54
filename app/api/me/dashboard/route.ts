@@ -1,3 +1,4 @@
+import { isOverdue } from '@/lib/due';
 import { dbError, handle, ok, requireUser } from '@/lib/http';
 
 const CATS = ['personal', 'professional', 'community'] as const;
@@ -35,7 +36,6 @@ export const GET = handle(async (req: Request) => {
   const count = (c: string) => list.filter((x) => x.category === c).length;
   const acts = (interactions.data ?? []) as unknown as { contact: { category: string } | null }[];
   const actCount = (c: string) => acts.filter((i) => i.contact?.category === c).length;
-  const iso = now.toISOString();
 
   return ok({
     goals: goals.data?.length ? Object.fromEntries(goals.data.map((g) => [g.category, g.target_percentage])) : null,
@@ -48,8 +48,8 @@ export const GET = handle(async (req: Request) => {
     },
     contacts_by_category: Object.fromEntries(CATS.map((c) => [c, list.filter((x) => x.category === c)])),
     followups: {
-      overdue: list.filter((c) => c.next_followup_at && c.next_followup_at < iso),
-      upcoming: list.filter((c) => c.next_followup_at && c.next_followup_at >= iso && c.next_followup_at <= horizon),
+      overdue: list.filter((c) => isOverdue(c.next_followup_at, now)),
+      upcoming: list.filter((c) => c.next_followup_at && !isOverdue(c.next_followup_at, now) && c.next_followup_at <= horizon),
     },
     upcoming_meetups: meetups.data ?? [],
     recent_activity: (interactions.data ?? []).slice(0, 10),

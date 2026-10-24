@@ -284,6 +284,10 @@ fieldset legend { font-family: "Newsreader", Georgia, serif; font-size: 15px; pa
 .cal-todaylist { list-style: none; margin: 0 0 12px; padding: 0; font-size: 14px; }
 .cal-todaylist li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
 .cal-todaylist li.late, .cal-item.late { color: #a3271b; }
+.cal-todaylist li.row { padding: 6px 0; border-top: none; flex-wrap: wrap; }
+.cal-todaylist .cal-line { display: flex; align-items: center; gap: 8px; }
+.cal-todaylist .actions button { font-size: 13px; padding: 4px 10px; }
+.cal-todaylist .draft-slot { list-style: none; }
 .cal-today { background: #f6ac0d !important; }
 .cal-today .cal-day { color: #fff; font-weight: 700; }
 .cal-cell { min-width: 0; overflow: hidden; }
@@ -329,6 +333,7 @@ a.button:hover { border-color: #75e4de; }
   .row:not(.spread) { flex-wrap: wrap; }
   .row .actions { flex-shrink: 1; max-width: 100%; }
   .row:not(.spread) .actions { width: 100%; }
+}
 /* --- guide card on the dashboard first page ------------------------------- */
 .guide-card {
   background: linear-gradient(135deg, rgba(246, 172, 13, 0.14), rgba(117, 228, 222, 0.16) 55%, rgba(214, 235, 179, 0.28));

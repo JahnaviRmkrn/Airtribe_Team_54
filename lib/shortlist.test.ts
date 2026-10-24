@@ -42,6 +42,15 @@ describe('shortlist', () => {
     expect(r.find((x) => x.venue.name === 'Pricey Grill')).toBeUndefined();
   });
 
+  it("doesn't count the organiser's area as a guest vote in the reason", () => {
+    const alone = shortlist({ activity: 'dinner', area: 'Indiranagar' }, [], venues);
+    expect(alone[0].reasons).toContain("In Indiranagar (organiser's pick)");
+    const withGuest = shortlist({ activity: 'dinner', area: 'Indiranagar' }, [{ area: 'Indiranagar' }], venues);
+    expect(withGuest[0].reasons).toContain("In Indiranagar (organiser's pick, preferred by 1)");
+    const guestOnly = shortlist({ activity: 'dinner' }, [{ area: 'Koramangala' }], venues);
+    expect(guestOnly[0].reasons).toContain('In Koramangala (preferred by 1)');
+  });
+
   it('respects the organiser budget', () => {
     const r = shortlist({ activity: 'dinner', area: 'Indiranagar', budget: 1000 }, [], venues);
     expect(r.map((x) => x.venue.name)).not.toContain('Pricey Grill');
