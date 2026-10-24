@@ -1,20 +1,41 @@
-/* MUOP brand foundation
-   Palette: sunshine #F6AC0D, lemon #F3E803, aqua #04C1E1,
-   turquoise #75E4DE, lime #D6EBB3 - on warm white with dark espresso text. */
+/* MUOP brand foundation (tokens from the designer's muop-website export).
+   Cream #FFFDF4, ink #2E1F14, soft ink #6B5A48, sun #F6AC0D, teal #0787A1,
+   aqua #75E4DE, line #E9DFCB. Type: DM Sans (UI) + Newsreader (display). */
 :root {
-  --muop-sunshine: #f6ac0d;
+  /* designer tokens */
+  --cream: #fffdf4;
+  --ink: #2e1f14;
+  --soft-ink: #6b5a48;
+  --sun: #f6ac0d;
+  --teal: #0787a1;
+  --aqua: #75e4de;
+  --line: #e9dfcb;
+  --sun-edge: #d99a0b;
+  --gold: #f6c56b;
+  --forest: #31575a;
+  --mint: #dcece4;
+  --sand: #f4eddb;
+  --muted: #f3eee1;
+  --app-font-sans: var(--font-dm-sans), 'DM Sans', sans-serif;
+  --app-font-serif: var(--font-newsreader), 'Newsreader', Georgia, serif;
+  --radius: 1rem;
+
+  /* legacy aliases kept for existing screens */
+  --muop-sunshine: var(--sun);
   --muop-lemon: #f3e803;
   --muop-aqua: #04c1e1;
-  --muop-aqua-deep: #0787a1;
-  --muop-turquoise: #75e4de;
+  --muop-aqua-deep: var(--teal);
+  --muop-turquoise: var(--aqua);
   --muop-lime: #d6ebb3;
   --muop-lime-deep: #7a9a4d;
-  --background: #fffdf4;
-  --foreground: #2e1f14;
-  --muop-espresso-soft: #6b5a48;
+  --background: var(--cream);
+  --foreground: var(--ink);
+  --muop-espresso-soft: var(--soft-ink);
   --muop-card: #ffffff;
-  --muop-line: #efe6d4;
+  --muop-line: var(--line);
 }
+
+html { scroll-behavior: smooth; }
 
 html,
 body {
@@ -23,9 +44,11 @@ body {
 }
 
 body {
+  min-width: 320px;
   color: var(--foreground);
   background: var(--background);
-  font-family: var(--font-inter), Arial, Helvetica, sans-serif;
+  font-family: var(--app-font-sans);
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -36,11 +59,28 @@ body {
   margin: 0;
 }
 
+::selection { color: var(--ink); background: var(--sun); }
+
 a {
   color: var(--muop-aqua-deep);
   text-decoration: none;
 }
 
 h1, h2, h3 {
-  font-family: var(--font-newsreader), Georgia, serif;
+  font-family: var(--app-font-serif);
+}
+
+.serif { font-family: var(--app-font-serif); }
+
+/* Wordmark: three tilted bars + "muop" in Newsreader. */
+.brand-mark { display: inline-flex; align-items: center; gap: 10px; font: 600 26px/1 var(--app-font-serif); letter-spacing: -.045em; text-decoration: none; color: var(--ink); }
+.brand-mark.inverse { color: var(--cream); }
+.brand-symbol { display: inline-flex; align-items: center; gap: 2px; height: 20px; transform: rotate(-18deg); }
+.brand-symbol span { display: block; width: 5px; border-radius: 5px; background: currentColor; }
+.brand-symbol span:nth-child(1) { height: 9px; }
+.brand-symbol span:nth-child(2) { height: 17px; }
+.brand-symbol span:nth-child(3) { height: 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }

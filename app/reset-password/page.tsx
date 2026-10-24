@@ -9,18 +9,10 @@ import { browserClient } from '@/lib/supabase/browser';
 import { safeNext } from '@/lib/urls';
 import '../login/login.css';
 
-// Brand mark: three connected dots (blue / orange / green), same as /login.
+// Brand mark: the muop wordmark symbol (three tilted bars), same as /login.
 function LogoMark() {
   return (
-    <svg className="login-logo-icon" width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
-      <path d="M22 13.5 14.5 28.5M22 13.5l7.5 15M14.5 29h15" stroke="#d9cfb6" strokeWidth="2" strokeLinecap="round"/>
-      <circle cx="22" cy="11" r="6.5" fill="#4a90d9"/>
-      <circle cx="12.5" cy="31" r="6.5" fill="#f2a93b"/>
-      <circle cx="31.5" cy="31" r="6.5" fill="#4caf7d"/>
-      <circle cx="22" cy="11" r="2.2" fill="#ffffff" opacity="0.85"/>
-      <circle cx="12.5" cy="31" r="2.2" fill="#ffffff" opacity="0.85"/>
-      <circle cx="31.5" cy="31" r="2.2" fill="#ffffff" opacity="0.85"/>
-    </svg>
+    <span className="brand-symbol login-logo-icon" aria-hidden="true"><span /><span /><span /></span>
   );
 }
 
