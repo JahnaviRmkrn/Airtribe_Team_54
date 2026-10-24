@@ -32,14 +32,41 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => (
 
 function go(hash) { location.hash = hash; }
 
+async function quickLogin(email = 'alex@example.com') {
+  const r = await api('/login', { method: 'POST', body: JSON.stringify({ email }) });
+  state.token = r.token;
+  state.email = r.email;
+  go(state.onboarded ? '#/dashboard' : '#/onboarding');
+}
+
 function route() {
-  el('nav').classList.toggle('hidden', !state.token);
-  const hash = location.hash || '#/dashboard';
-  if (!state.token && hash !== '#/login') return go('#/login');
-  if (state.token && !state.onboarded && hash !== '#/onboarding') return go('#/onboarding');
-  if (state.token && state.onboarded && (hash === '#/login' || hash === '#/onboarding')) return go('#/dashboard');
+  const isAuth = !!state.token;
+  const navPub = el('nav-public');
+  const navAuth = el('nav-auth');
+  if (navPub) navPub.classList.toggle('hidden', isAuth);
+  if (navAuth) navAuth.classList.toggle('hidden', !isAuth);
+
+  const hash = location.hash || '#/';
+
+  // Public unauthenticated routes
+  if (!isAuth) {
+    if (hash === '#/login') return loginView();
+    return landingView();
+  }
+
+  // Authenticated state machine
+  if (!state.onboarded && hash !== '#/onboarding') return go('#/onboarding');
+  if (state.onboarded && (hash === '#/' || hash === '#/login' || hash === '#/onboarding' || hash === '#/features' || hash === '#/how-it-works')) {
+    return go('#/dashboard');
+  }
+
+  // Update active state in nav
+  ['#nav-dash', '#nav-contacts', '#nav-meetups'].forEach((sel) => {
+    const a = el(sel.replace('#', ''));
+    if (a) a.classList.toggle('active', a.getAttribute('href') === hash);
+  });
+
   const views = {
-    '#/login': loginView,
     '#/onboarding': onboardingView,
     '#/dashboard': dashboardView,
     '#/contacts': contactsView,
@@ -48,32 +75,114 @@ function route() {
   (views[hash] || dashboardView)();
 }
 
+// --- landing page ----------------------------------------------------
+
+function landingView() {
+  el('app').className = 'container wide';
+  el('app').innerHTML = `
+    <section class="landing-hero">
+      <span class="pill accent">⚡ AI Builders Day · Team 54</span>
+      <h1>Stay close to the people who actually matter.</h1>
+      <p class="lead">The personal relationship organizer powered by 30-second AI voice check-ins and frictionless collaborative meetup rooms.</p>
+      <div class="landing-cta-row">
+        <button class="primary" id="hero-demo-btn">Try Interactive Demo</button>
+        <button class="ghost" id="hero-signin-btn">Sign In</button>
+        <a href="#/how-it-works" class="btn ghost">How it works ↓</a>
+      </div>
+    </section>
+
+    <section class="showcase-card" id="how-it-works">
+      <div>
+        <span class="pill accent">🎙️ Voice Calibrated</span>
+        <h2 style="margin-top:10px;">Onboarding at the speed of speech</h2>
+        <p class="muted">No tedious form filling. Tap the glowing mic, speak naturally with our ElevenLabs Conversational AI agent for 30 seconds, and watch your inner circle populate in real-time.</p>
+        <p class="muted"><strong>100% Consent Guarantee:</strong> Extraction is completely stateless. Nothing is saved to your account until you verify and click confirm.</p>
+        <button class="primary sm" id="showcase-try-btn" style="margin-top:10px;">Try Voice Setup</button>
+      </div>
+      <div class="showcase-preview">
+        <div class="preview-bubble agent">
+          "Hi! Who are a few people you'd like to stay closer to this month?"
+        </div>
+        <div class="preview-bubble user">
+          "My sister Priya in Pune, Arjun my college roommate, and Meera my engineering mentor."
+        </div>
+        <div class="row spread" style="margin-top:14px; padding:0;">
+          <span class="tag">Priya · Family</span>
+          <span class="tag">Arjun · Friends</span>
+          <span class="tag">Meera · Mentors</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="features-grid" id="features">
+      <div class="feature-card">
+        <div class="feature-icon">🎙️</div>
+        <h3>ElevenLabs Voice Agent</h3>
+        <p class="muted">Natural spoken dialogue powered by WebSocket streaming. Drop your thoughts in speech, and AI extracts contacts and attention splits effortlessly.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🤝</div>
+        <h3>Collaborative Meetup Rooms</h3>
+        <p class="muted">Create an <code>/m/&lt;token&gt;</code> room with 1 tap. Friends join without passwords, declare budget &amp; availability, and vote on ranked venue shortlists.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <h3>100% Attention Balance</h3>
+        <p class="muted">Proactively divide your focus across Family, Friends, Work, and Mentors so you never let life's most valuable bonds fade into the background.</p>
+      </div>
+    </div>
+
+    <section class="card" style="text-align:center; padding: 40px 20px;">
+      <h2>Ready to organize your inner circle?</h2>
+      <p class="muted">Zero setup required. Try the complete demo right in your browser.</p>
+      <button class="primary" id="footer-demo-btn" style="margin-top:12px;">Launch Demo Workspace</button>
+    </section>
+
+    <footer class="landing-footer">
+      <p>Built with ❤️ by Team 54 for AI Builders Day · Voice, Meetups, and Relational CRM</p>
+    </footer>`;
+
+  el('hero-demo-btn').onclick = () => quickLogin('demo@team54.app');
+  el('hero-signin-btn').onclick = () => go('#/login');
+  el('showcase-try-btn').onclick = () => quickLogin('alex@team54.app');
+  el('footer-demo-btn').onclick = () => quickLogin('demo@team54.app');
+}
+
 // --- login -----------------------------------------------------------
 
 function loginView() {
+  el('app').className = 'container';
   el('app').innerHTML = `
     <section class="card narrow">
       <h1>Sign in</h1>
+      <p class="muted">Enter your email to sign in or access your workspace.</p>
       <form id="login-form">
         <label>Email
-          <input type="email" id="login-email" required placeholder="you@example.com">
+          <input type="email" id="login-email" required placeholder="you@example.com" value="alex@example.com">
         </label>
-        <button class="primary" type="submit">Continue</button>
+        <button class="primary" type="submit" style="width:100%; margin-top:8px;">Continue</button>
       </form>
-      <p class="muted">Hackathon mock sign-in - nothing is sent.</p>
+      <div style="text-align:center; margin: 18px 0; position:relative;">
+        <span class="muted" style="background:var(--panel-solid); padding: 0 10px; position:relative; z-index:1;">or</span>
+        <div style="position:absolute; top:50%; left:0; right:0; height:1px; background:var(--line);"></div>
+      </div>
+      <button class="btn ghost" id="login-quick-demo" type="button" style="width:100%;">⚡ One-Click Instant Demo</button>
+      <p class="muted" style="text-align:center; margin-top:14px;">Demo mode enabled — no password needed.</p>
     </section>`;
+
   el('login-form').onsubmit = async (e) => {
     e.preventDefault();
-    const r = await api('/login', { method: 'POST', body: JSON.stringify({ email: el('login-email').value }) });
-    state.token = r.token;
-    state.email = r.email;
-    go(state.onboarded ? '#/dashboard' : '#/onboarding');
+    await quickLogin(el('login-email').value);
   };
+  el('login-quick-demo').onclick = () => quickLogin('demo@team54.app');
 }
 
 // --- onboarding: editable confirm screen + text fallback -------------
 
 function onboardingView() {
+  el('app').className = 'container';
   const name = state.email.split('@')[0] || '';
   el('app').innerHTML = `
     <section class="card">
@@ -159,6 +268,7 @@ function onboardingView() {
 // --- dashboard ----------------------------------------------------------
 
 async function dashboardView() {
+  el('app').className = 'container';
   const s = await api('/summary');
   const contacts = await api('/contacts');
   const nameOf = (id) => (contacts.find((c) => c.id === id) || {}).name || 'Someone';
@@ -231,6 +341,7 @@ async function markDone(fid) {
 // --- contacts ---------------------------------------------------------
 
 async function contactsView() {
+  el('app').className = 'container';
   const filter = sessionStorage.getItem('org_filter') || '';
   const contacts = await api('/contacts' + (filter ? '?category=' + encodeURIComponent(filter) : ''));
   el('app').innerHTML = `
@@ -307,6 +418,7 @@ function editRow(cid, c) {
 // --- meetups -----------------------------------------------------------
 
 async function meetupsView() {
+  el('app').className = 'container';
   const results = await Promise.all([api('/meetups'), api('/contacts')]);
   const meetups = results[0];
   const contacts = results[1];
@@ -347,10 +459,15 @@ async function meetupsView() {
 
 // --- boot ---------------------------------------------------------------
 
-el('logout').onclick = () => {
-  state.token = null;
-  state.onboarded = false;
-  go('#/login');
-};
+if (el('top-demo-btn')) {
+  el('top-demo-btn').onclick = () => quickLogin('demo@team54.app');
+}
+if (el('logout')) {
+  el('logout').onclick = () => {
+    state.token = null;
+    state.onboarded = false;
+    go('#/');
+  };
+}
 window.onhashchange = route;
 route();
