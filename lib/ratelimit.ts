@@ -14,7 +14,9 @@ export const LIMITS = {
   pay: { max: 10, windowSeconds: 60 },
   extract: { max: 10, windowSeconds: 60 }, // per signed-in user (LLM spend)
   assistant: { max: 30, windowSeconds: 60 }, // per signed-in user (LLM spend, several rounds per command)
-  voice: { max: 5, windowSeconds: 600 }, // per signed-in user (ElevenLabs sessions)
+  voice: { max: 50, windowSeconds: 600 }, // per signed-in user (Gemini Live / transcribe sessions; demo-friendly)
+  draft: { max: 20, windowSeconds: 60 }, // per signed-in user (LLM spend)
+  transcribe: { max: 10, windowSeconds: 60 }, // per signed-in user (Gemini audio)
 } satisfies Record<string, Limit>;
 export type Preset = keyof typeof LIMITS;
 

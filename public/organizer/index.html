@@ -28,12 +28,16 @@
       <a href="#/contacts" data-nav="contacts">Contacts</a>
       <a href="#/meetups" data-nav="meetups">Meetups</a>
       <a href="#/welcome" data-nav="welcome">Guide</a>
+      <form method="post" action="/auth/signout" class="signout">
+        <button type="submit" id="sign-out">Sign out</button>
+      </form>
     </nav>
   </header>
   <main id="app" class="container">
     <div class="card"><p class="muted">Loading...</p></div>
   </main>
   <script src="/organizer/assistant.js"></script>
+  <script src="/organizer/live.js"></script>
   <script src="/organizer/voice.js"></script>
   <script src="/organizer/app.js"></script>
 </body>

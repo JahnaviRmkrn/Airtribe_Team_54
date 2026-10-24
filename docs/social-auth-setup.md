@@ -91,3 +91,26 @@ Caveats to know before demoing with it:
 3. First sign-in also creates the account - no separate sign-up step needed.
 4. Cancel the provider's consent screen -> back at `/login` with a readable
    error, email options still usable.
+
+## Self-hosted demo (local Supabase behind Tailscale Funnel)
+
+The team demo runs the app and a local Supabase on one machine and exposes them
+with Tailscale Funnel, which gives fixed HTTPS URLs that OAuth providers accept:
+
+| What | URL |
+|---|---|
+| App (share this link) | `https://cachyos-x8664.tail389ef0.ts.net:8443` |
+| Supabase API / auth | `https://cachyos-x8664.tail389ef0.ts.net:10000` |
+| OAuth callback to register with each provider | `https://cachyos-x8664.tail389ef0.ts.net:10000/auth/v1/callback` |
+
+- `supabase/config.toml`: `[auth] external_url` must end in `/auth/v1` (otherwise
+  Supabase sends providers `.../callback` and Google answers `redirect_uri_mismatch`);
+  `site_url` and `additional_redirect_urls` include the app URL.
+- Google: OAuth client "Airtribe Team 54 (Supabase)" in the Google Cloud project
+  `electric-armor-388216`, consent screen published (In production, basic
+  `openid email profile` scopes only, so no verification needed).
+- Credentials live in the git-ignored `supabase/.env`
+  (`SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID` / `_SECRET`); `supabase stop && supabase start`
+  after changing them.
+- `app/auth/callback` builds its redirect from the forwarded Host / proto headers, so
+  sign-in returns to the public URL instead of `localhost:3000` behind a proxy.

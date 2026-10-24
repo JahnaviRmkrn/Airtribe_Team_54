@@ -7,9 +7,12 @@
 // Nothing is saved here: the caller pre-fills the editable confirm screen and
 // only the user's explicit Confirm persists anything.
 //
-// Voice needs ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID on the server; the
-// browser only ever sees a short-lived signed URL from /api/voice/signed-url.
-// The typed fallback (POST /api/extract) always works.
+// Voice prefers a live spoken conversation with Gemini Live (live.js, token from
+// /api/voice/live-token) that fills the rows as you talk. Next it uses ElevenLabs when ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID are set
+// (the browser only ever sees a short-lived signed URL from /api/voice/signed-url).
+// Otherwise it records a clip with the mic and POSTs it to /api/voice/transcribe,
+// where Gemini (GEMINI_API_KEY, server-only) transcribes it. Either way the
+// transcript goes through /api/extract. The typed fallback always works.
 
 (() => {
   // Pinned version + Subresource Integrity, loaded only when the mic is tapped.
@@ -48,6 +51,9 @@
   function mount(root, onResult) {
     const lines = []; // { who: 'user' | 'agent', text }
     let convo = null;
+    let rec = null; // Gemini record path: { recorder, stream, chunks, timer }
+    let live = null; // Gemini Live session (live.js)
+    let fillTimer = null;
     let starting = false;
     let extracting = false;
     let left = false; // set once the user leaves this screen; late async work is dropped
@@ -118,6 +124,22 @@
 
     const transcriptText = () => lines.map((l) => (l.who === 'user' ? 'User: ' : 'Agent: ') + l.text).join('\n');
 
+    // While talking live: refresh the rows in the background, without touching the call UI.
+    function scheduleFill() {
+      clearTimeout(fillTimer);
+      fillTimer = setTimeout(async () => {
+        if (left || extracting || !live) return;
+        try {
+          const res = await getJSON('/api/extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transcript: transcriptText() }),
+          });
+          if (!left && live) onResult(res);
+        } catch { /* the final extract on hang-up reports errors */ }
+      }, 1200);
+    }
+
     async function extract(transcript) {
       if (extracting || !transcript.trim()) return;
       extracting = true;
@@ -154,19 +176,53 @@
       $('fallback').open = true;
     }
 
+    const LIVE_INSTRUCTIONS = [
+      "You are muop's onboarding guide, helping the user set up the people they want to stay in touch with.",
+      'Have a short, friendly spoken conversation (about a minute). Ask one brief question at a time.',
+      'Help them name up to 5 people: for each, how they know them (personal, professional or community), one or two interests, and roughly how often to check in.',
+      'Then ask how they want to split their attention across personal, professional and community - it must add up to 100 percent.',
+      'Repeat names back so spelling can be checked. Do not invent people or details.',
+      "When you have enough, give a one-line summary and tell them to tap 'Done talking' to review and confirm. Nothing is saved until they confirm.",
+    ].join('\n');
+
+    async function startLive() {
+      live = await window.LiveVoice.start({
+        instructions: LIVE_INSTRUCTIONS,
+        onUser: (t) => { addLine('user', t); scheduleFill(); },
+        onModel: (t) => addLine('agent', t),
+        onError: (msg) => error('Voice error: ' + msg),
+        onState: (st) => {
+          if (left) return;
+          if (st === 'listening') { status('Listening - tell me about the people who matter.'); setMode('live'); $('end').classList.remove('hidden'); }
+          else if (st === 'speaking') setMode('speaking');
+          else if (st === 'ended') {
+            live = null;
+            clearTimeout(fillTimer);
+            $('end').classList.add('hidden');
+            if (lines.some((l) => l.who === 'user')) extract(transcriptText());
+            else { status('Call ended. Tap the mic to try again.'); setMode('idle'); }
+          }
+        },
+      });
+      if (left) { live.stop(); live = null; }
+    }
+
     async function start() {
-      if (starting || convo) return;
+      if (starting || convo || live || rec) return;
       starting = true;
       error('');
       try {
         status('Connecting...');
         setMode('connecting');
+        if (window.LiveVoice) {
+          try { await startLive(); return; } catch (e) { if (e.status !== 503) throw e; } // 503: no Gemini key -> next option
+        }
         let signed;
         try {
           signed = await getJSON('/api/voice/signed-url');
           if (left) return;
         } catch (e) {
-          if (e.status === 503) return voiceUnavailable();
+          if (e.status === 503) return startRecording(); // no ElevenLabs: record + Gemini
           throw e;
         }
         const sdk = await loadSdk();
@@ -203,8 +259,65 @@
       }
     }
 
+    // --- Gemini path: record a clip, transcribe on the server --------------
+    const RECORD_TYPES = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm'];
+    const MAX_RECORD_MS = 90_000;
+
+    async function startRecording() {
+      if (!window.MediaRecorder || !navigator.mediaDevices) return voiceUnavailable('This browser cannot record audio.');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (left) { stream.getTracks().forEach((t) => t.stop()); return; }
+      const mimeType = RECORD_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const chunks = [];
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      recorder.onstop = () => uploadRecording(chunks, recorder.mimeType || mimeType || 'audio/webm');
+      recorder.start();
+      rec = { recorder, stream, timer: setTimeout(() => stop(), MAX_RECORD_MS) };
+      status('Listening - tell me about the people who matter, then tap "Done talking".');
+      setMode('live');
+      $('end').classList.remove('hidden');
+    }
+
+    function endRecording(upload) {
+      if (!rec) return;
+      const { recorder, stream, timer } = rec;
+      rec = null;
+      clearTimeout(timer);
+      if (!upload) { recorder.ondataavailable = null; recorder.onstop = null; }
+      if (recorder.state !== 'inactive') recorder.stop();
+      stream.getTracks().forEach((t) => t.stop()); // mic light off right away
+    }
+
+    async function uploadRecording(chunks, type) {
+      if (left) return;
+      const blob = new Blob(chunks, { type });
+      status('Transcribing...');
+      setMode('thinking');
+      try {
+        const res = await getJSON('/api/voice/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': type.split(';')[0] },
+          body: blob,
+        });
+        if (left) return;
+        const transcript = (res.transcript || '').trim();
+        if (!transcript) { status("Didn't catch that - tap the mic and try again."); setMode('idle'); return; }
+        addLine('user', transcript);
+        extract(transcript);
+      } catch (e) {
+        if (left) return;
+        if (e.status === 503 && /not configured/i.test(e.message)) return voiceUnavailable();
+        error('Could not transcribe: ' + e.message);
+        status('Tap the mic to try again, or type it instead.');
+        setMode('idle');
+      }
+    }
+
     async function stop() {
       $('end').classList.add('hidden');
+      if (rec) return endRecording(true); // upload -> transcribe -> extract
+      if (live) { const l = live; return l.stop(); } // onState('ended') runs the final extract
       if (convo) {
         const c = convo;
         convo = null;
@@ -217,10 +330,13 @@
     const onLeave = () => {
       left = true;
       if (convo) { const c = convo; convo = null; c.endSession().catch(() => {}); }
+      endRecording(false);
+      clearTimeout(fillTimer);
+      if (live) { const l = live; live = null; l.stop(); }
     };
     window.addEventListener('hashchange', onLeave, { once: true });
 
-    $('orb').onclick = () => (convo ? stop() : start());
+    $('orb').onclick = () => (convo || rec || live ? stop() : start());
     $('end').onclick = stop;
     $('extract').onclick = () => extract($('text').value);
 
