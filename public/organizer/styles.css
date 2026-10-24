@@ -314,6 +314,7 @@ a.button:hover { border-color: #75e4de; }
   border: 1px solid #e6dcc6;
 }
 .draft-label { display: block; font-size: 13px; font-weight: 600; }
+.draft-basis { margin: 0 0 4px; font-size: 12px; line-height: 1.45; }
 .draft-text {
   display: block; width: 100%; margin: 8px 0 10px; padding: 10px 12px;
   font: 400 15px/1.45 "Newsreader", Georgia, serif; color: #2e1f14;

@@ -56,6 +56,22 @@ export function buildDraftPrompt(c: DraftContact, recent: DraftInteraction[], no
   ].join('\n');
 }
 
+// The specific facts the suggestion was based on, shown beside the draft so the
+// user can check the model did not invent anything. The draft is always
+// editable and is never sent for the user.
+export function draftBasis(c: DraftContact, recent: DraftInteraction[], now = new Date()): string[] {
+  const days = daysSince(c.last_interaction_at, now);
+  return [
+    c.interests?.length ? `Interested in ${c.interests.slice(0, 8).join(', ')}` : null,
+    c.notes ? `Your note: ${c.notes.slice(0, 300)}` : null,
+    days === null ? 'No check-in logged yet' : `Last contact: ${days} day${days === 1 ? '' : 's'} ago`,
+    ...recent
+      .slice(0, 3)
+      .filter((i) => i.notes)
+      .map((i) => `Earlier check-in: ${String(i.notes).slice(0, 200)}`),
+  ].filter(Boolean) as string[];
+}
+
 // Strips wrapping quotes / "Message:" preambles and caps the length.
 export function cleanDraft(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;

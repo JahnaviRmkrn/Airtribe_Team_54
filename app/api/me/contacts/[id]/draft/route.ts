@@ -4,7 +4,7 @@ import { limitUser } from '@/lib/ratelimit';
 
 type Ctx = { params: Promise<{ id: string }> };
 
-// POST /api/me/contacts/:id/draft  -> { message, source }
+// POST /api/me/contacts/:id/draft  -> { message, source, basis }
 // Suggests a short check-in text for this contact (DeepSeek first, template as
 // fallback). Stateless and never sends anything: the organizer shows it with
 // Copy / Open in WhatsApp and the user decides. RLS scopes the contact lookup

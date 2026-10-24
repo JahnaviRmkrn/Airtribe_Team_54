@@ -1,5 +1,5 @@
 import 'server-only';
-import { buildDraftPrompt, cleanDraft, templateDraft, type DraftContact, type DraftInteraction } from './draft';
+import { buildDraftPrompt, cleanDraft, draftBasis, templateDraft, type DraftContact, type DraftInteraction } from './draft';
 
 // Same provider order as extract-llm.ts: the user's DeepSeek key first, then any
 // OpenAI-compatible endpoint (OPENAI_API_KEY + OPENAI_BASE_URL), then the
@@ -37,19 +37,20 @@ const PROVIDERS: { name: Exclude<Source, 'template'>; key: () => string | undefi
   },
 ];
 
-export async function draftMessage(contact: DraftContact, recent: DraftInteraction[]): Promise<{ message: string; source: Source }> {
-  const prompt = buildDraftPrompt(contact, recent);
+export async function draftMessage(contact: DraftContact, recent: DraftInteraction[]): Promise<{ message: string; source: Source; basis: string[] }> {
+  const now = new Date();
+  const prompt = buildDraftPrompt(contact, recent, now);
   for (const p of PROVIDERS) {
     const key = p.key();
     if (!key) continue;
     try {
       const message = cleanDraft(await chat(p.base(), key, p.model(), prompt));
-      if (message) return { message, source: p.name };
+      if (message) return { message, source: p.name, basis: draftBasis(contact, recent, now) };
       console.warn(`draft: ${p.name} returned an unusable message, trying next provider`);
     } catch (e) {
       // Never log the prompt: it carries the user's contact notes.
       console.warn(`draft: ${p.name} call failed, trying next provider:`, e instanceof Error ? e.message : e);
     }
   }
-  return { message: templateDraft(contact), source: 'template' };
+  return { message: templateDraft(contact), source: 'template', basis: draftBasis(contact, recent, now) };
 }

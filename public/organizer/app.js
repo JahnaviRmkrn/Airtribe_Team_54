@@ -228,6 +228,7 @@ function draftPanel(container, contactId, name) {
         <label class="draft-label">Suggested message <span class="muted">(${r.source === 'template' ? 'template' : 'drafted by ' + esc(r.source === 'deepseek' ? 'DeepSeek' : 'AI')} - edit before sending)</span>
           <textarea class="draft-text" rows="3">${esc(r.message)}</textarea>
         </label>
+        ${(r.basis || []).length ? `<p class="draft-basis muted">Based on: ${(r.basis).map((b) => esc(b)).join(' · ')}</p>` : ''}
         <div class="actions">
           <button class="primary draft-copy">Copy</button>
           <a class="button-link draft-wa" target="_blank" rel="noopener">Open in WhatsApp</a>
@@ -602,7 +603,7 @@ function goalsComparison(goals, act) {
       </div>`;
   }).join('');
   return `<section class="card"><h2>Goals vs activity</h2>${rows}
-    <p class="muted">Bars show where your recorded activity actually went, against your goals.</p></section>`;
+    <p class="muted">Bars show where your recorded activity actually went, against your goals. This counts check-ins you logged, not the closeness of any relationship - a quiet week with no notes is not a failing friendship.</p></section>`;
 }
 
 // --- mark a follow-up done ------------------------------------------------
@@ -1166,6 +1167,10 @@ function onboardingView() {
       }));
     } catch { /* storage unavailable: pre-fill still applies on screen */ }
     renderRows();
+    const labels = { deepseek: 'DeepSeek', gemini: 'Gemini', openai: 'AI', agenticorg: 'AgenticOrg', rules: 'built-in rules' };
+    const src = res.source && Object.hasOwn(labels, res.source) ? labels[res.source] : null;
+    const obSource = el('ob-source');
+    if (obSource) obSource.textContent = src ? `Filled from what you said (understood by ${src}). Review each person - nothing is saved until you finish.` : '';
     if (merged.length >= 5 && kept.length + added.length > 5) {
       el('ob-error').textContent = 'Only the first 5 people were kept - you can add more from Contacts later.';
     }
@@ -1186,6 +1191,7 @@ function onboardingView() {
         <h2 class="ob-sub">Your people <span class="muted">(up to 5)</span></h2>
         <p class="muted">Anyone I hear or you type appears here. Check them, fix them, make them yours. Nothing is saved until you finish setup.</p>
         <div id="ob-rows"></div>
+        <p class="muted" id="ob-source"></p>
         <p><button class="link-btn" id="ob-add">+ Add another</button></p>
         <p class="error" id="ob-error"></p>
         <div class="quick-actions">
