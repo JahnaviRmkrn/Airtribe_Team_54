@@ -6,7 +6,7 @@ vi.mock('server-only', () => ({}));
 
 import { extract } from './extract-llm';
 
-const ENV_KEYS = ['DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL', 'DEEPSEEK_MODEL', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'EXTRACT_MODEL'];
+const ENV_KEYS = ['DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL', 'DEEPSEEK_MODEL', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'EXTRACT_MODEL', 'GEMINI_MODEL'];
 const saved: Record<string, string | undefined> = {};
 
 const LLM_JSON = JSON.stringify({

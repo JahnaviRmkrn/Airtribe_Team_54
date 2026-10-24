@@ -150,11 +150,12 @@ export function ruleContacts(said: string): RawContact[] {
     .sort((a, b) => b.length - a.length).map(escapeRe).join('|');
   const catOf = (w: string): Category =>
     relToCat.get(w.toLowerCase()) ?? CATEGORIES.find((c) => CAT_WORDS[c].includes(w.toLowerCase())) ?? 'personal';
-  for (const m of said.matchAll(new RegExp(String.raw`(?:^|[.!?;,\n]\s*)(?:(?:[Pp]lease|[Aa]lso|[Oo]kay|[Oo]k|[Nn]ow)\s+)?[Aa]dd\s+${NAME}(?:\s+(?:to|in|under|as)\s+(?:my\s+|a\s+|an\s+)?(${catAlt})\b)?`, 'g'))) {
+  for (const m of said.matchAll(new RegExp(String.raw`(?:^|[.!?;,\n][^\S\n]*)(?:(?:[Pp]lease|[Aa]lso|[Oo]kay|[Oo]k|[Nn]ow)\s+)?[Aa]dd\s+${NAME}(?:\s+(?:to|in|under|as)\s+(?:my\s+|a\s+|an\s+)?(${catAlt})\b)?`, 'g'))) {
     add(m[1], m[2] ? catOf(m[2]) : 'personal', m.index! + m[0].indexOf(m[1]));
   }
-  for (const m of said.matchAll(new RegExp(String.raw`${NAME}\s+(?:in|under)\s+(${CATEGORIES.flatMap((c) => CAT_WORDS[c]).map(escapeRe).join('|')})\b`, 'gi'))) {
-    if (/^[A-Z]/.test(m[1])) add(m[1], catOf(m[2]), m.index!);
+  const catWordAlt = CATEGORIES.flatMap((c) => CAT_WORDS[c]).flatMap((w) => [w, w[0].toUpperCase() + w.slice(1)]).map(escapeRe).join('|');
+  for (const m of said.matchAll(new RegExp(String.raw`${NAME}\s+(?:in|under|In|Under)\s+(${catWordAlt})\b`, 'g'))) {
+    add(m[1], catOf(m[2]), m.index!);
   }
   // Strongest signal first: "my sister Priya" / "my best friend Arjun".
   for (const m of said.matchAll(new RegExp(String.raw`\b[Mm]y\s+(?:\w+\s+)?(${relAlt}),?\s+(?:named\s+|called\s+|is\s+)?${NAME}`, 'g'))) {
