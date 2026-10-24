@@ -709,10 +709,12 @@ function onboardingView() {
         preferred_frequency_days: r.freq,
       }));
       try {
+        // Goals are an idempotent PUT. Save them before creating contacts so a
+        // failed goals request can be retried without duplicating every person.
+        await api('/api/me/goals', { method: 'PUT', body: JSON.stringify(goalBody) });
         if (contacts.length) {
           await api('/api/me/contacts', { method: 'POST', body: JSON.stringify({ contacts }) });
         }
-        await api('/api/me/goals', { method: 'PUT', body: JSON.stringify(goalBody) });
         finish();
       } catch (e) {
         el('ob-confirm').disabled = false;

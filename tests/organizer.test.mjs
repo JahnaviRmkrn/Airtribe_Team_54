@@ -96,3 +96,32 @@ describe('independent follow-up forms', () => {
     expect(rows[0].row.fields.error.textContent).toBe('');
   });
 });
+
+describe('onboarding retries', () => {
+  it('does not create duplicate contacts when saving goals fails then retries', async () => {
+    const calls = [];
+    let failGoals = true;
+    const { context, document } = organizer({
+      window: { ORGANIZER_PREFILL: { contacts: [{ name: 'Alice', category: 'personal' }] } },
+      localStorage: { setItem() {} },
+      sessionStorage: { removeItem() {} },
+      fetch: async (path) => {
+        calls.push(path);
+        if (path === '/api/me/goals' && failGoals) {
+          failGoals = false;
+          return { ok: false, status: 503, json: async () => ({ error: 'Retry goals' }) };
+        }
+        return { ok: true, status: 200, json: async () => ({}) };
+      },
+    });
+    const goals = ['personal', 'professional', 'community'].map((category, index) => ({ dataset: { cat: category }, value: ['50', '30', '20'][index] }));
+    document.querySelectorAll = (selector) => selector === '.goal-input' ? goals : [];
+    vm.runInContext('onboardingView()', context);
+    document.getElementById('ob-next').onclick();
+    await document.getElementById('ob-confirm').onclick();
+    expect(document.getElementById('ob-error').textContent).toBe('Retry goals');
+    await document.getElementById('ob-confirm').onclick();
+    expect(calls.filter((path) => path === '/api/me/contacts')).toHaveLength(1);
+    expect(context.location.hash).toBe('#/dashboard');
+  });
+});
