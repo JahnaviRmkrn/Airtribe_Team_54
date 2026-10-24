@@ -161,3 +161,14 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 .how-steps li::before { content: counter(s); grid-row: span 2; width: 28px; height: 28px; border-radius: 50%; background: #f6ac0d; color: #3b2a1a; font-weight: 700; display: grid; place-items: center; font-size: 14px; }
 .how-steps strong { font-size: 14px; }
 .how-steps span { font-size: 13px; color: #6b5a48; }
+
+/* --- meet in the middle ---------------------------------------------------- */
+.meet-headline { font-family: "Newsreader", Georgia, serif; font-size: 20px; margin: 0 0 4px; }
+.meet-best { margin: 8px 0 4px; }
+.small { font-size: 12px; }
+.meet-map { height: 300px; border-radius: 14px; overflow: hidden; margin-top: 10px; border: 1px solid var(--line); }
+.loc-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mm-pin { background: #04c1e1; color: #fff; border: 2px solid #fff; border-radius: 50%; display: grid !important; place-items: center; font: 600 11px/1 Inter, system-ui, sans-serif; box-shadow: 0 2px 6px rgba(46, 31, 20, 0.3); }
+.mm-venue { background: #fffdf4; color: #2e1f14; border: 2px solid #2e1f14; border-radius: 50%; display: grid !important; place-items: center; font: 700 11px/1 Inter, system-ui, sans-serif; }
+.mm-venue.best { background: #f6ac0d; }
+.mm-mid { color: #b3382e; font-size: 30px; line-height: 34px; text-align: center; text-shadow: 0 0 3px #fff, 0 0 6px #fff; }

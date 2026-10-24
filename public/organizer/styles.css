@@ -321,3 +321,12 @@ a.button:hover { border-color: #75e4de; }
   color: #0b5d57; background: rgba(117, 228, 222, 0.35); text-decoration: none;
 }
 .button-link:hover { background: rgba(117, 228, 222, 0.55); }
+
+/* Narrow phones: a row's buttons (e.g. Draft message + Mark done) drop below its
+   text and wrap instead of pushing the page sideways. */
+.row > :first-child { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+  .row:not(.spread) { flex-wrap: wrap; }
+  .row .actions { flex-shrink: 1; max-width: 100%; }
+  .row:not(.spread) .actions { width: 100%; }
+}
