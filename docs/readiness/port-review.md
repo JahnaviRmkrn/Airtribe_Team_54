@@ -28,3 +28,7 @@ There is both a React room at `app/m/[token]` and a static room rewrite. Verify 
 - Confirm zero budgets survive an edit and no private notes or organizer secret appear to guests.
 
 The three UI fixes have been incorporated from #10 and inspected. C's product acceptance and a real phone rehearsal remain required; neither is fabricated by this report.
+
+## Acceptance owner
+
+The coordinating Team 54 agent identified C as Arindom Chetia (`arindomchetia12`), author of #3, and confirmed it cannot accept on his behalf. There is no known C agent session. C's acceptance must be recorded by him on the port PR; the current review is not that sign-off.
