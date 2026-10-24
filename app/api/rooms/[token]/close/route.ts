@@ -1,5 +1,6 @@
 import { handle, HttpError, ok, requireUser } from '@/lib/http';
 import { getRoom, roomView } from '@/lib/room';
+import { limitRoom } from '@/lib/ratelimit';
 
 type Ctx = { params: Promise<{ token: string }> };
 
@@ -7,6 +8,7 @@ type Ctx = { params: Promise<{ token: string }> };
 // until expires_at but accepts no more joins, edits or votes.
 export const POST = handle(async (req: Request, { params }: Ctx) => {
   const { token } = await params;
+  await limitRoom(req, 'organizer', token);
   const { supabase, user } = await requireUser(req);
   const room = await getRoom(token);
   if (room.organizer_id !== user.id) throw new HttpError(403, 'Only the organiser can close this room');

@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 import { handle, HttpError, requireUser } from '@/lib/http';
+import { limitUser } from '@/lib/ratelimit';
 
 // GET /api/voice/signed-url  (signed-in user) -> { signed_url }
 // Mints a short-lived ElevenLabs conversation URL for the onboarding agent.
 // ELEVENLABS_API_KEY stays on the server; the browser only gets the signed URL.
 // 503 when ElevenLabs isn't configured, so the UI can fall back to typing.
 export const GET = handle(async (req: Request) => {
-  await requireUser(req);
+  const { user } = await requireUser(req);
+  await limitUser('voice', user.id);
   const agentId = process.env.ELEVENLABS_AGENT_ID;
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!agentId || !apiKey) throw new HttpError(503, 'Voice is not configured');

@@ -11,13 +11,12 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [msg, setMsg] = useState('');
-  const supabase = browserClient();
   // Untrusted query value: only same-origin paths survive.
   const next = typeof window === 'undefined' ? '/' : safeNext(new URLSearchParams(location.search).get('next'), location.origin);
 
   async function magicLink(e: React.FormEvent) {
     e.preventDefault();
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await browserClient().auth.signInWithOtp({
       email,
       options: { emailRedirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
     });
@@ -26,11 +25,11 @@ export default function LoginPage() {
 
   async function withPassword() {
     const { error } = password
-      ? await supabase.auth.signInWithPassword({ email, password })
+      ? await browserClient().auth.signInWithPassword({ email, password })
       : { error: { message: 'Enter a password' } };
     if (error) {
       // First time: create the account (email confirmation is off for the prototype).
-      const { data, error: e2 } = await supabase.auth.signUp({ email, password });
+      const { data, error: e2 } = await browserClient().auth.signUp({ email, password });
       if (e2) return setMsg(e2.message);
       // Supabase returns an empty identities list for an existing account.
       if (data.user?.identities?.length && Date.now() - Date.parse(data.user.created_at) < 60_000) {

@@ -1,12 +1,14 @@
 import { confirmBody } from '@/lib/schemas';
 import { handle, HttpError, ok, parseBody, requireUser } from '@/lib/http';
 import { getRoom, requireOpen, roomView } from '@/lib/room';
+import { limitRoom } from '@/lib/ratelimit';
 
 type Ctx = { params: Promise<{ token: string }> };
 
 // POST /api/rooms/:token/confirm  body: { venue_id }  (organizer only)
 export const POST = handle(async (req: Request, { params }: Ctx) => {
   const { token } = await params;
+  await limitRoom(req, 'organizer', token);
   const { supabase, user } = await requireUser(req);
   const room = await getRoom(token);
   if (room.organizer_id !== user.id) throw new HttpError(403, 'Only the organiser can confirm a venue');

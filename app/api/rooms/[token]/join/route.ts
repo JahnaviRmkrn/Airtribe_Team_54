@@ -3,6 +3,7 @@ import { handle, HttpError, ok, parseBody } from '@/lib/http';
 import { currentGuest, getRoom, hashSecret, newSecret, requireOpen, roomView, roomWriteError, setGuestCookie } from '@/lib/room';
 import { adminClient } from '@/lib/supabase/admin';
 import { trackProductEvent } from '@/lib/product-analytics';
+import { LIMITS, limitRoom, rateLimit } from '@/lib/ratelimit';
 
 type Ctx = { params: Promise<{ token: string }> };
 
@@ -11,6 +12,7 @@ type Ctx = { params: Promise<{ token: string }> };
 // can keep it (e.g. to test several guests from one browser via X-Guest-Secret).
 export const POST = handle(async (req: Request, { params }: Ctx) => {
   const { token } = await params;
+  await Promise.all([limitRoom(req, 'join', token), rateLimit(req, 'joinHourly', LIMITS.joinHourly)]);
   const room = await getRoom(token);
   requireOpen(room);
   if (await currentGuest(req, room)) throw new HttpError(409, 'Already joined. Use PATCH /me to update.');

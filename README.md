@@ -15,9 +15,8 @@ pnpm test                      # shortlist unit tests
 node scripts/smoke.mjs         # end-to-end API check (needs dev server running)
 ```
 
-Hosted Supabase: create a project, run `supabase link` then `supabase db push`,
-run `supabase/seed.sql` in the SQL editor, and turn off "Confirm email" in
-Auth settings for the demo. Put the project URL/keys in the deployment env.
+Deploying (Vercel + hosted Supabase): see [DEPLOY.md](DEPLOY.md).
+`pnpm check-env` validates the env (`--prod` for production values).
 
 ## Auth
 
@@ -77,6 +76,8 @@ last_interaction_at, next_followup_at` (ISO timestamps with offset).
 | POST / DELETE | `/api/rooms/:token/vote` | `{ venue_id }` | guest; one vote each, re-vote moves it; must be shortlisted |
 | POST | `/api/rooms/:token/confirm` | `{ venue_id }` | organiser (signed in) |
 | POST | `/api/rooms/:token/close` | | organiser (signed in) |
+| POST | `/api/rooms/:token/pay` | | guest; needs a confirmed venue with a price (409/400). Starts a Pine Labs order for the venue's `price_per_person` (computed server-side). Idempotent: returns the existing pending/paid payment. Returns `{ payment: { status, amount_paise, redirect_url } }`; send the guest to `redirect_url`, they come back to `/m/:token?payment=done` |
+| GET | `/api/rooms/:token/pay` | | guest; own payment (or `null`), status refreshed from Pine Labs while pending |
 
 Room page route for the frontend: `/m/:token`.
 
@@ -113,6 +114,8 @@ Room view shape:
   "shortlist": [{ "venue": { "id", "name", "area", "tags", "price_per_person", "details" }, "score", "reasons": [], "label": "Sample suggestion" }],
   "shortlist_note": "...",
   "votes": { "<venue_id>": 2 },
+  "payments": { "<attendee_id>": "pending" | "paid" | "failed" | "cancelled" },
+  "amount_due_paise": 45000 | null,
   "leading_venue_id": "...",
   "me": { "attendee_id", "voted_venue_id" } | null,
   "is_organizer": false
@@ -123,7 +126,42 @@ To test several guests from one browser, send `X-Guest-Secret: <guest_secret>`
 instead of relying on the cookie.
 
 Errors are `{ "error": "message" }` with 400 (validation), 401 (not signed in /
-not joined), 403, 404 (unknown or expired room), 409, 410 (room closed).
+not joined), 403, 404 (unknown or expired room), 409, 410 (room closed),
+429 (rate limited, or room full), 502 (payment provider error), 503 (payments
+not configured).
+
+### Rate limits
+
+Every room route is limited per client IP (first `x-forwarded-for` entry) and
+room token, in fixed windows counted in Postgres (`rate_limits` table,
+`hit_rate_limit()` RPC, service role only), so limits hold across Vercel
+instances. Over the limit returns 429 `Too many requests, slow down`.
+
+| Route | Limit |
+|---|---|
+| GET `/api/rooms/:token`, GET `/me` | 120/min each (enough for a 3 s poll) |
+| POST `/join` | 10/min per room, and 60/hour across all rooms |
+| POST / DELETE `/vote`, PATCH `/me` | 30/min (shared) |
+| POST `/confirm`, `/close` | 30/min (shared) |
+| GET / POST `/pay` | 10/min |
+| POST `/api/extract` | 10/min per signed-in user |
+| GET `/api/voice/signed-url` | 5 per 10 min per signed-in user |
+
+Presets live in `lib/ratelimit.ts`; a new room route adds one line, e.g.
+`await limitRoom(req, 'pay', token)`. If the limiter RPC fails the request is
+allowed (fail open) and the error is logged.
+
+## Payments (Pine Labs Online)
+
+Uses the Pine Labs Agent Toolkit (`@plural_pinelabs/agent-toolkit`) tools
+`createOrder` / `getOrder` called directly on the server (no LLM), in
+`lib/pinelabs.ts`. Set `PINE_CLIENT_ID`, `PINE_CLIENT_SECRET` and `PINE_ENV`
+(`uat` default, or `production`); without them the pay routes return 503.
+`amount_due_paise` is the confirmed venue's `price_per_person` x 100 (`null`
+when there is no confirmed venue or no price). Payment status is only ever
+taken from `getOrder`, never from the return URL. The room view shows each
+guest's status only (no order ids or checkout links); it refreshes when the
+guest calls `GET /pay`.
 
 ## Privacy and access rules
 
@@ -137,6 +175,8 @@ not joined), 403, 404 (unknown or expired room), 409, 410 (room closed).
 - Venues are seeded **sample** data and always labelled "Sample suggestion".
   The shortlist returns `[]` instead of inventing results when nothing matches.
 - `SUPABASE_SERVICE_ROLE_KEY` is server-only (`lib/supabase/admin.ts` imports `server-only`).
+- `meetup_payments` has no anon policies; organisers can read their own meetups'
+  payments. `PINE_CLIENT_SECRET` is server-only (`lib/pinelabs.ts` imports `server-only`).
 
 ---
 
