@@ -33,6 +33,13 @@ h1, h2, h3, .brand { font-family: "Newsreader", Georgia, serif; }
 }
 .nav a:hover { background: rgba(117, 228, 222, 0.3); }
 .nav a.active { background: rgba(246, 172, 13, 0.25); font-weight: 600; }
+.nav { display: flex; align-items: center; flex-wrap: wrap; }
+.nav .signout { display: inline; margin: 0 0 0 10px; }
+.nav .signout button {
+  font: inherit; font-size: 14px; color: #6b5a4b; background: transparent;
+  border: 1px solid #e3d8c4; border-radius: 999px; padding: 6px 13px; cursor: pointer;
+}
+.nav .signout button:hover { background: rgba(46, 31, 20, 0.06); color: #2e1f14; }
 
 .container { max-width: 780px; margin: 26px auto; padding: 0 16px 44px; }
 
@@ -294,3 +301,23 @@ fieldset legend { font-family: "Newsreader", Georgia, serif; font-size: 15px; pa
 /* Link styled as a button (mailto hand-offs) */
 a.button { display: inline-flex; align-items: center; padding: 9px 16px; border: 1px solid #e5dcc8; border-radius: 999px; background: #fff; color: #2e1f14; font-size: 14px; font-weight: 500; text-decoration: none; font-family: inherit; transition: border-color 0.15s ease; }
 a.button:hover { border-color: #75e4de; }
+
+/* --- draft a check-in message --------------------------------------------- */
+.draft-slot { padding: 0 0 12px; }
+.draft-box {
+  margin-top: 10px; padding: 14px; border-radius: 14px;
+  background: linear-gradient(135deg, rgba(117, 228, 222, 0.16), rgba(246, 172, 13, 0.10));
+  border: 1px solid #e6dcc6;
+}
+.draft-label { display: block; font-size: 13px; font-weight: 600; }
+.draft-text {
+  display: block; width: 100%; margin: 8px 0 10px; padding: 10px 12px;
+  font: 400 15px/1.45 "Newsreader", Georgia, serif; color: #2e1f14;
+  background: #fffdf8; border: 1px solid #e3d8c4; border-radius: 10px; resize: vertical;
+}
+.draft-box .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.button-link {
+  display: inline-block; padding: 8px 14px; border-radius: 999px; font-size: 14px; font-weight: 500;
+  color: #0b5d57; background: rgba(117, 228, 222, 0.35); text-decoration: none;
+}
+.button-link:hover { background: rgba(117, 228, 222, 0.55); }

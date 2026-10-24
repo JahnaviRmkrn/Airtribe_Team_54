@@ -131,6 +131,54 @@ function copyText(text, btn, label) {
 
 const roomUrl = (token) => location.origin + '/m/' + token;
 
+// --- draft a check-in message ------------------------------------------
+// "Then you send the message": asks the server (DeepSeek, template fallback)
+// for a short check-in text. Shown editable with Copy / Open in WhatsApp -
+// nothing is ever sent for the user.
+
+function rowSlot(btn) {
+  const row = btn.closest('.row');
+  const next = row.nextElementSibling;
+  if (next && next.classList.contains('draft-slot')) return next;
+  const slot = document.createElement('div');
+  slot.className = 'draft-slot';
+  return slot;
+}
+
+function draftPanel(container, contactId, name) {
+  const existing = container.querySelector('.draft-box');
+  if (existing) { existing.remove(); return; }
+  const box = document.createElement('div');
+  box.className = 'draft-box';
+  container.appendChild(box);
+  const load = async () => {
+    box.innerHTML = '<p class="muted">Drafting a message for ' + esc(name || 'them') + '...</p>';
+    try {
+      const r = await api('/api/me/contacts/' + encodeURIComponent(contactId) + '/draft', { method: 'POST' });
+      box.innerHTML = `
+        <label class="draft-label">Suggested message <span class="muted">(${r.source === 'template' ? 'template' : 'drafted by ' + esc(r.source === 'deepseek' ? 'DeepSeek' : 'AI')} - edit before sending)</span>
+          <textarea class="draft-text" rows="3">${esc(r.message)}</textarea>
+        </label>
+        <div class="actions">
+          <button class="primary draft-copy">Copy</button>
+          <a class="button-link draft-wa" target="_blank" rel="noopener">Open in WhatsApp</a>
+          <button class="draft-again">Try another</button>
+        </div>`;
+      const text = box.querySelector('.draft-text');
+      const wa = box.querySelector('.draft-wa');
+      const syncWa = () => { wa.href = 'https://wa.me/?text=' + encodeURIComponent(text.value); };
+      syncWa();
+      text.oninput = syncWa;
+      box.querySelector('.draft-copy').onclick = (e) => copyText(text.value, e.currentTarget, 'Copy');
+      box.querySelector('.draft-again').onclick = load;
+    } catch (e) {
+      if (e instanceof AuthError) return;
+      box.innerHTML = '<p class="error">' + esc(e.message) + '</p>';
+    }
+  };
+  load();
+}
+
 // --- dashboard -----------------------------------------------------------
 
 // "Your people": every contact, soonest check-in first, with a due badge.
@@ -206,7 +254,10 @@ async function dashboardView() {
         ${f.category ? `<span class="tag">${esc(catLabel(f.category))}</span>` : ''}${overdue ? ' <span class="tag overdue">Overdue</span>' : ''}
         <div class="muted">${overdue ? 'Was due' : 'Due'} ${esc(fmtDay(f.next_followup_at))}</div>
       </div>
-      <div class="actions"><button data-done="${esc(f.id || f.contact_id || '')}" data-name="${esc(f.name || '')}">Mark done</button></div>
+      <div class="actions">
+        <button data-draft="${esc(f.id || f.contact_id || '')}" data-name="${esc(f.name || '')}">Draft message</button>
+        <button data-done="${esc(f.id || f.contact_id || '')}" data-name="${esc(f.name || '')}">Mark done</button>
+      </div>
     </div>`;
 
   if (stale(nav)) return;
@@ -295,6 +346,9 @@ async function dashboardView() {
   wireCalendar();
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
   document.querySelectorAll('[data-done]').forEach((b) => { b.onclick = () => markDoneForm(b); });
+  document.querySelectorAll('[data-draft]').forEach((b) => {
+    b.onclick = () => draftPanel(b.closest('.row').parentElement.insertBefore(rowSlot(b), b.closest('.row').nextSibling), b.dataset.draft, b.dataset.name);
+  });
   document.querySelectorAll('[data-gcontact]').forEach((n) => {
     const pick = () => {
       document.querySelectorAll('.g-dot.sel').forEach((x) => x.classList.remove('sel'));
@@ -674,7 +728,8 @@ async function contactDetailView(id) {
           <span class="muted"> · ${esc(fmtDate(i.occurred_at))}</span>
           ${i.notes ? `<div>${esc(i.notes)}</div>` : ''}</div></li>`).join('')}</ol>` : '<p class="muted empty">No check-ins yet. Log the first one above.</p>'}
     </section>
-    <div class="manage"><button class="primary" id="c-meetup">Plan a meetup with ${esc(String(contact.name || '').split(/\s+/)[0])}</button> <a class="button" id="c-email-link" href="${esc(checkInEmail(contact))}">Email</a> <button id="c-edit">Edit details</button> <button class="danger" id="c-del">Delete contact</button></div>`;
+    <div id="c-draft-slot"></div>
+    <div class="manage"><button class="primary" id="c-draft">Draft message</button> <button id="c-meetup">Plan a meetup with ${esc(String(contact.name || '').split(/\s+/)[0])}</button> <a class="button" id="c-email-link" href="${esc(checkInEmail(contact))}">Email</a> <button id="c-edit">Edit details</button> <button class="danger" id="c-del">Delete contact</button></div>`;
 
   el('back').onclick = () => go('#/contacts');
   el('c-meetup').onclick = () => { sessionStorage.setItem('org_meetup_title', 'Catch-up with ' + String(contact.name || '').split(/\s+/)[0]); go('#/meetups'); };
@@ -686,6 +741,7 @@ async function contactDetailView(id) {
     } catch (e) { alert(e.message); }
   };
   el('c-edit').onclick = () => editContactForm(id, contact);
+  el('c-draft').onclick = () => draftPanel(el('c-draft-slot'), id, contact.name);
   el('log-form').onsubmit = async (e) => {
     e.preventDefault();
     el('log-error').textContent = '';
