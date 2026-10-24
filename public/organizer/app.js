@@ -767,6 +767,9 @@ function onboardingView() {
     if (merged.length >= 5 && kept.length + added.length > 5) {
       el('ob-error').textContent = 'Only the first 5 people were kept - you can add more from Contacts later.';
     }
+    // "That's everyone, save it": move on to the goals step. Saving still needs
+    // the explicit Confirm there, so a misheard command can't write anything.
+    if (res.action === 'confirm' && merged.some((r) => r.name)) el('ob-next').click();
   }
 
   function renderStep1() {
