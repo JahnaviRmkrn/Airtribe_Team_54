@@ -33,6 +33,7 @@ export const DELETE = handle(async (req: Request, { params }: Ctx) => {
   await limitRoom(req, 'write', token);
   const room = await getRoom(token);
   requireOpen(room);
+  if (room.final_venue_id) throw new HttpError(409, 'The organiser has already confirmed a venue');
   const me = await requireGuest(req, room);
   const { error } = await adminClient().from('venue_votes').delete().eq('meetup_id', room.id).eq('attendee_id', me.id);
   roomWriteError(error, 'Could not withdraw vote');

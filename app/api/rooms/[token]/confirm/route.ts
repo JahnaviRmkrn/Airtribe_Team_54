@@ -1,5 +1,5 @@
 import { confirmBody } from '@/lib/schemas';
-import { handle, HttpError, ok, parseBody, requireUser } from '@/lib/http';
+import { dbError, handle, HttpError, ok, parseBody, requireUser } from '@/lib/http';
 import { getRoom, requireOpen, roomView } from '@/lib/room';
 import { limitRoom } from '@/lib/ratelimit';
 
@@ -25,6 +25,7 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
     .eq('id', room.id)
     .select('final_venue_id')
     .single();
-  if (error || !data) throw new HttpError(403, 'Could not confirm');
+  dbError(error);
+  if (!data) throw new HttpError(403, 'Could not confirm');
   return ok(await roomView(req, { ...room, final_venue_id: venue_id }, true));
 });
