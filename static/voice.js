@@ -46,6 +46,23 @@
     const status = (t) => { $('vx-status').textContent = t; };
     const setMode = (m) => { root.querySelector('.vx').dataset.mode = m; };
 
+    let liveTimer = null;
+    function scheduleLiveExtract() {
+      if (liveTimer) clearTimeout(liveTimer);
+      liveTimer = setTimeout(async () => {
+        const text = transcriptText();
+        if (!text.trim()) return;
+        try {
+          const res = await getJSON('/api/extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transcript: text }),
+          });
+          if (res) onResult(res);
+        } catch (_) {}
+      }, 350);
+    }
+
     function addLine(who, text) {
       if (!text) return;
       lines.push({ who, text });
@@ -53,20 +70,22 @@
       log.classList.remove('hidden');
       log.insertAdjacentHTML('beforeend', `<div class="vx-msg ${who}"><span>${esc(text)}</span></div>`);
       log.scrollTop = log.scrollHeight;
+      scheduleLiveExtract();
     }
 
     async function extract(transcript) {
       if (extracting || !transcript.trim()) return;
       extracting = true;
+      if (liveTimer) clearTimeout(liveTimer);
       $('vx-err').textContent = '';
-      status('Pulling out your people and goals…');
+      status('Finalizing your people and goals…');
       setMode('thinking');
       try {
         const res = await getJSON('/api/extract', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ transcript }),
         });
-        status(`Found ${res.contacts.length} ${res.contacts.length === 1 ? 'person' : 'people'} - review below, nothing is saved yet.`);
+        status(`Filled ${res.contacts.length} ${res.contacts.length === 1 ? 'person' : 'people'} in the form below.`);
         setMode('done');
         onResult(res);
       } catch (e) {

@@ -243,10 +243,28 @@ function onboardingView() {
   };
   if (window.Voice) {
     window.Voice.mount(el('voice-mount'), (res) => {
-      inputs.forEach((i) => { i.value = res.goals[i.dataset.cat] ?? 0; });
-      refresh();
-      el('ob-source').textContent = res.source === 'rules' ? 'auto-detected' : 'from voice';
-      renderExtracted(res.contacts);
+      if (res.name && el('ob-name')) {
+        el('ob-name').value = res.name;
+      }
+      if (res.goals) {
+        inputs.forEach((i) => {
+          if (res.goals[i.dataset.cat] !== undefined) i.value = res.goals[i.dataset.cat];
+        });
+        refresh();
+      }
+      el('ob-source').textContent = res.source === 'rules' ? 'live voice' : 'voice AI';
+      if (res.contacts && res.contacts.length) {
+        renderExtracted(res.contacts);
+      }
+      if (res.action === 'confirm') {
+        const btn = el('ob-save');
+        btn.scrollIntoView({ behavior: 'smooth' });
+        if (total() === 100) {
+          btn.click();
+        } else {
+          el('ob-error').textContent = 'Please make sure goals total 100% before confirming.';
+        }
+      }
     });
   }
   el('ob-save').onclick = async () => {

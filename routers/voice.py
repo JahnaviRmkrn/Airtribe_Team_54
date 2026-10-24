@@ -66,18 +66,22 @@ class ExtractIn(BaseModel):
     transcript: str
 
 
-EXTRACT_PROMPT = """You extract structured onboarding data from a conversation transcript
+EXTRACT_PROMPT = """You extract structured onboarding form data from a conversation transcript
 between a user and a voice assistant for Moup, a relationship management app.
 
 Return ONLY JSON of this exact shape:
-{"contacts": [{"name": str, "category": "Family"|"Friends"|"Work"|"Mentors", "notes": str}],
- "goals": {"Family": int, "Friends": int, "Work": int, "Mentors": int}}
+{"name": str | null,
+ "contacts": [{"name": str, "category": "Family"|"Friends"|"Work"|"Mentors", "notes": str}],
+ "goals": {"Family": int, "Friends": int, "Work": int, "Mentors": int},
+ "action": "confirm" | null}
 
 Rules:
+- name: the user's name if they said "my name is ...", "I'm ...", "call me ...", otherwise null.
 - contacts: at most 5 real people the USER mentioned (not the assistant). Use first
-  names as said. notes = one short phrase of context (relationship, what they discussed).
-- goals: how the user wants to split attention across the 4 categories, integers
+  names as said. notes = one short phrase of context (relationship, role, or notes).
+- goals: how the user wants to split attention across Family, Friends, Work, Mentors, integers
   summing to 100. If they gave numbers, use them. Otherwise infer from emphasis.
+- action: set to "confirm" ONLY if the user explicitly commanded to save, confirm, submit, or finish.
 - Never invent people. If none were mentioned, return an empty list.
 
 Transcript:
@@ -165,12 +169,27 @@ def _user_lines(text: str) -> str:
     return "\n".join(re.sub(r"^\s*\w+\s*:\s*", "", l) for l in lines if re.match(r"^\s*(user|you|me)\s*:", l, re.I))
 
 
+ALL_STOP = {
+    w.lower() for w in STOP
+} | {
+    "my", "a", "an", "the", "please", "to", "also", "and", "under", "in", "for", "with", "add", "sister", "brother",
+    "friend", "colleague", "mentor", "coworker", "manager", "boss", "mom", "dad", "father", "mother"
+}
+
+
 def _name(raw: str) -> str | None:
-    """Drop leading filler ("And Arjun" -> "Arjun"); None if nothing real is left."""
+    """Drop leading filler ("And Arjun", "sister Priya" -> "Priya"); None if nothing real is left."""
     words = raw.split()
-    while words and words[0] in STOP:
+    while words and words[0].lower() in ALL_STOP:
         words.pop(0)
-    return " ".join(words) if words and all(w not in STOP for w in words) else None
+    # Strip any trailing filler
+    while words and words[-1].lower() in ALL_STOP:
+        words.pop()
+    if not words:
+        return None
+    cleaned = " ".join(words)
+    return cleaned.title() if len(cleaned) >= 2 else None
+
 
 
 def _rules(text: str) -> dict:
@@ -179,23 +198,46 @@ def _rules(text: str) -> dict:
     rel_to_cat = {r: c for c, rs in RELATIONS.items() for r in rs}
     rel_alt = "|".join(sorted(map(re.escape, rel_to_cat), key=len, reverse=True))
 
+    # Detect user's own name
+    user_name = None
+    m_name = re.search(r"\b(?:my name is|i'm|i am|call me|name's)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", said, re.I)
+    if m_name:
+        candidate = m_name.group(1).strip()
+        if candidate not in STOP:
+            user_name = candidate
+
     def add(name_raw: str, cat: str, notes: str, pos: int) -> None:
         name = _name(name_raw.strip())
-        if name and name.lower() not in found:
+        if name and name.lower() not in found and (not user_name or name.lower() != user_name.lower()):
             found[name.lower()] = {"name": name, "category": cat, "notes": notes, "_pos": pos}
 
-    # Strongest signal first: "my sister Priya" / "my best friend Arjun".
+    # Command forms: "add Priya in family", "add Priya to friends", "add Arjun under mentors"
+    for m in re.finditer(rf"\badd\s+{NAME}(?:\s+(?:to|in|under|as)\s+({rel_alt}|family|friends|work|mentors))?", said, re.I):
+        c_name = m.group(1)
+        raw_cat = (m.group(2) or "friends").lower()
+        cat = rel_to_cat.get(raw_cat, raw_cat.title() if raw_cat.title() in CATEGORIES else "Friends")
+        add(c_name, cat, "added via voice", m.start(1))
+
+    # Strongest signal: "my sister Priya" / "my best friend Arjun".
     for m in re.finditer(rf"\b[Mm]y\s+(?:\w+\s+)?({rel_alt})(?:,)?\s+(?:named\s+|called\s+|is\s+)?{NAME}", said):
         add(m.group(2), rel_to_cat[m.group(1).lower()], m.group(1).lower(), m.start(2))
     # Then "Arjun, my best friend".
     for m in re.finditer(rf"{NAME},?\s+(?:who's|who is|is)?\s*[Mm]y\s+(?:\w+\s+)?({rel_alt})\b", said):
         add(m.group(1), rel_to_cat[m.group(2).lower()], m.group(2).lower(), m.start(1))
+    # Direct "Name in Category": e.g. "Sneha in friends", "Meera in mentors"
+    for m in re.finditer(rf"{NAME}\s+(?:in|for|under)\s+(family|friends|work|mentors)\b", said, re.I):
+        add(m.group(1), m.group(2).title(), "mentioned", m.start(1))
     # Loose mentions ("catch up with Arjun").
     for m in re.finditer(rf"\b(?:with|call|meet|see|text|ping)\s+{NAME}", said):
         add(m.group(1), "Friends", "mentioned", m.start(1))
 
+    # Check for confirmation command
+    action = None
+    if re.search(r"\b(?:confirm|submit|save details|looks good|all good|go ahead|looks great)\b", said, re.I):
+        action = "confirm"
+
     contacts = sorted(found.values(), key=lambda c: c.pop("_pos") if "_pos" in c else 0)
-    return {"contacts": contacts, "goals": _rule_goals(said)}
+    return {"name": user_name, "contacts": contacts, "goals": _rule_goals(said), "action": action}
 
 
 def _rule_goals(said: str) -> dict:
@@ -232,7 +274,14 @@ def _clean(raw: dict, transcript: str) -> dict:
         })
         if len(contacts) == MAX_CONTACTS:
             break
-    return {"contacts": contacts, "goals": normalize_goals(raw.get("goals") or {})}
+    name = raw.get("name")
+    action = raw.get("action")
+    return {
+        "name": str(name).strip()[:60] if name else None,
+        "contacts": contacts,
+        "goals": normalize_goals(raw.get("goals") or {}),
+        "action": "confirm" if action == "confirm" else None,
+    }
 
 
 def normalize_goals(goals: dict) -> dict:
