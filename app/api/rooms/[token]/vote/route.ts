@@ -2,6 +2,7 @@ import { voteBody } from '@/lib/schemas';
 import { handle, HttpError, ok, parseBody } from '@/lib/http';
 import { getRoom, requireGuest, requireOpen, roomView, roomWriteError } from '@/lib/room';
 import { adminClient } from '@/lib/supabase/admin';
+import { limitRoom } from '@/lib/ratelimit';
 
 type Ctx = { params: Promise<{ token: string }> };
 
@@ -9,6 +10,7 @@ type Ctx = { params: Promise<{ token: string }> };
 // One vote per guest; voting again moves the vote. Must be a shortlisted venue.
 export const POST = handle(async (req: Request, { params }: Ctx) => {
   const { token } = await params;
+  await limitRoom(req, 'write', token);
   const room = await getRoom(token);
   requireOpen(room);
   if (room.final_venue_id) throw new HttpError(409, 'The organiser has already confirmed a venue');
@@ -28,6 +30,7 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
 // DELETE /api/rooms/:token/vote -> withdraw own vote
 export const DELETE = handle(async (req: Request, { params }: Ctx) => {
   const { token } = await params;
+  await limitRoom(req, 'write', token);
   const room = await getRoom(token);
   requireOpen(room);
   const me = await requireGuest(req, room);

@@ -1,5 +1,6 @@
 import { handle, HttpError, ok } from '@/lib/http';
 import { amountPaise, cancelOrder, createOrder, getOrderStatus, isConfigured } from '@/lib/pinelabs';
+import { limitRoom } from '@/lib/ratelimit';
 import { getRoom, requireGuest, requireOpen, type MeetupRow } from '@/lib/room';
 import { adminClient } from '@/lib/supabase/admin';
 import { roomUrl } from '@/lib/urls';
@@ -63,6 +64,7 @@ async function refresh(p: PaymentRow): Promise<PaymentRow> {
 // GET /api/rooms/:token/pay -> the current guest's own payment (or null)
 export const GET = handle(async (req: Request, { params }: Ctx) => {
   const { token } = await params;
+  await limitRoom(req, 'pay', token);
   const { room, me } = await setup(req, token);
   const p = await findPayment(room, me.id);
   return ok({ payment: p ? view(await refresh(p)) : null });
@@ -72,6 +74,7 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
 // the confirmed venue. The amount is computed here, never taken from the body.
 export const POST = handle(async (req: Request, { params }: Ctx) => {
   const { token } = await params;
+  await limitRoom(req, 'pay', token);
   const { room, me } = await setup(req, token);
   requireOpen(room);
   if (!room.final_venue_id) throw new HttpError(409, 'The organiser has not confirmed a venue yet');
