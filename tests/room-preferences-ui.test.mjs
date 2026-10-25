@@ -90,6 +90,13 @@ describe('shipped guest preference form boundaries', () => {
     expect(app.requests[0].body.preferences).toEqual({ budget_min: 0, budget_max: 0, area: 'Indiranagar' });
   });
 
+  it('shows an activities-only guest what they selected instead of an empty summary', () => {
+    const app = room(view({ activities: ['board-games', 'walk'] }));
+    app.run('renderPrefs()');
+    expect(app.node('prefs-details').open).toBe(false);
+    expect(app.node('prefs-summary').textContent).toBe('board-games, walk');
+  });
+
   it.each([
     ['unavailable', {}, 'cannot share location'],
     ['denied', { geolocation: { getCurrentPosition: (_ok, fail) => fail({ code: 1 }) } }, 'permission was denied'],

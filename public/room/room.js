@@ -431,7 +431,7 @@ function renderPrefs() {
   pendingLocation = undefined;
   const hasPrefs = !!(p.area || p.budget_max != null || p.budget_min != null || (p.food || []).length || (p.activities || []).length || (mine.availability || []).length);
   $('prefs-details').open = !hasPrefs;
-  $('prefs-summary').textContent = hasPrefs ? [p.area, p.budget_max != null ? 'up to ₹' + p.budget_max : p.budget_min != null ? 'from ₹' + p.budget_min : '', (p.food || []).join(', '), (mine.availability || []).length ? mine.availability.length + ' time slots' : ''].filter(Boolean).join(' · ') : 'Tell us your area, budget and when you are free so the shortlist fits everyone.';
+  $('prefs-summary').textContent = hasPrefs ? [p.area, p.budget_max != null ? 'up to ₹' + p.budget_max : p.budget_min != null ? 'from ₹' + p.budget_min : '', (p.food || []).join(', '), (p.activities || []).join(', '), (mine.availability || []).length ? mine.availability.length + ' time slots' : ''].filter(Boolean).join(' · ') : 'Tell us your area, budget and when you are free so the shortlist fits everyone.';
   const areas = [...new Set([view.meetup.area, ...view.shortlist.map((s) => s.venue.area)].filter(Boolean))];
   $('prefs-form').innerHTML = `
     <label class="field"><span class="field-label">Your name</span>
