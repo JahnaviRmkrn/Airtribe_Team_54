@@ -22,7 +22,6 @@ NEXT_PUBLIC_SUPABASE_URL=https://mbqnrnlebzdflmizsbca.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<dashboard: Project Settings > API Keys>
 SUPABASE_SERVICE_ROLE_KEY=<same page - server only>
 NEXT_PUBLIC_SITE_URL=https://airtribe-team-54.vercel.app
-DEEPSEEK_API_KEY=<server only, powers /api/extract; without it the rule-based parser runs>
 NEXT_PUBLIC_* values are inlined at build time - redeploy after changing them.
 
 ## Verified end-to-end
