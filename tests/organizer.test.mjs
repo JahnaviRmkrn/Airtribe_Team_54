@@ -71,6 +71,24 @@ describe('contact history and search recovery', () => {
 });
 
 describe('organizer meetup rendering', () => {
+  it.each([['', undefined], ['0', 0], ['500', 500]])('creates a meetup with budget input %j without treating zero as empty', async (input, expected) => {
+    let saved;
+    const { context, document } = organizer({
+      fetch: async (_path, opts = {}) => {
+        if (opts.method === 'POST') saved = JSON.parse(opts.body);
+        return { ok: true, status: opts.method === 'POST' ? 201 : 200, json: async () => ({ meetups: [] }) };
+      },
+    });
+    await vm.runInContext('meetupsView()', context);
+    document.getElementById('m-title').value = 'Synthetic coffee';
+    document.getElementById('m-activity').value = 'coffee';
+    document.getElementById('m-budget').value = input;
+    await document.getElementById('m-form').onsubmit({ preventDefault() {} });
+    expect(saved).toMatchObject({ title: 'Synthetic coffee', activity: 'coffee' });
+    if (expected === undefined) expect(saved).not.toHaveProperty('budget');
+    else expect(saved.budget).toBe(expected);
+  });
+
   it('escapes stored meetup areas in the planned list', () => {
     const { context } = organizer();
     context.meetup = { id: 'one', title: 'Coffee', area: attack };

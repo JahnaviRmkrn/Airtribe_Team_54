@@ -1113,7 +1113,7 @@ async function meetupsView(created) {
     const when = el('m-when').value;
     if (when) body.starts_at = toISO(when);
     const budget = parseInt(el('m-budget').value, 10);
-    if (budget > 0) body.budget = budget;
+    if (budget >= 0) body.budget = budget;
     const r = await api('/api/me/meetups', { method: 'POST', body: JSON.stringify(body) });
     if (!stale(nav)) meetupsView(r);
   });
