@@ -143,6 +143,9 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 
 @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
 @media (max-width: 480px) {
+  /* Keep the full room status visible beside or below the brand on narrow screens. */
+  .r-top { flex-wrap: wrap; }
+  .r-top > .pill { margin-left: auto; max-width: 100%; white-space: normal; text-align: center; overflow-wrap: anywhere; }
   .join-form { flex-direction: column; }
   .hero { padding: 18px; }
   .shortlist { grid-template-columns: 1fr; }
