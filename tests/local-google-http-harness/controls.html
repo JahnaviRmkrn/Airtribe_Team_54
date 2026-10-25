@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Google real-route local fixture</title><link rel="stylesheet" href="/__harness/sheets.css"><script src="/__harness/controls.js" defer></script></head><body><main class="sheets-page">
+<h1>Google real-route local fixture</h1>
+<p>Only synthetic local data. The unchanged organizer assets and unchanged Sheets React component call actual application routes and in-memory PostgreSQL, with real encrypted sessions, RLS, import functions and action receipts. Every provider request is checked and answered in memory. No network provider, Supabase Auth, PostgREST, Next routing/middleware or real delivery is tested.</p>
+<p>Never enter real data, credentials, or payment details. Do not click Google authorization buttons or external spreadsheet links. Browser authorization is blocked; use these explicit synthetic controls instead. Installing a test connection runs the actual start/callback exports with a fake code and fake provider response. This is NOT real Google consent or an OAuth grant.</p>
+<h2>Synthetic identity</h2>
+<button data-role="owner">Alice fixture owner</button><button data-role="other">Bob fixture owner</button><button data-role="observer">Signed-out observer</button>
+<p>Normal browser tabs share cookies. Role changes preserve Google purpose cookies intentionally, so owner binding can be tested. Reset clears this browser's fixture cookies and all server state. Reload app tabs after a reset.</p>
+<h2>Install one synthetic connection</h2>
+<button data-connect="contacts">Synthetic Contacts connection</button><button data-connect="sheets-import">Synthetic Sheets import connection</button><button data-connect="sheets-export">Synthetic Sheets export connection</button><button data-connect="gmail">Synthetic Gmail connection</button><button data-connect="calendar">Synthetic Calendar connection</button>
+<p><a href="/organizer/#/google-contacts">Contacts import</a> · <a href="/integrations/google-sheets">Sheets import/export</a> · <a href="/organizer/#/gmail">Gmail</a> · <a href="/organizer/#/calendar">Calendar</a> · <a href="/organizer/#/contacts">Saved contacts</a></p>
+<h2>Fixed input values</h2>
+<p>Spreadsheet ID: synthetic_spreadsheet_00000001. Worksheet: People. Columns: Name, Email, Notes. Row 2 duplicates Alice; rows 3 and 4 are new synthetic people. Map Email to B. Notes are read only if explicitly mapped and selected in the application preview.</p>
+<p>Gmail sender: sender@example.test. Recipient: recipient@example.test. Subject/body can be synthetic test text. Calendar attendee: recipient@example.test (or no attendees). Use a synthetic event and UTC time. Provider writes must match the saved, encrypted preview exactly.</p>
+<h2>One-shot faults</h2>
+<p>Arm one fault, then perform that exact action. Other purposes do not consume it. A lost import receipt commits real local SQL first. A lost provider response records one synthetic write first. Nothing reaches Google. Status/retry/reconcile must not repeat that write.</p>
+<button data-fault="contacts-import">Lose next Contacts import receipt</button><button data-fault="sheets-import">Lose next Sheets import receipt</button><button data-fault="sheets-create">Lose next Sheets create response</button><button data-fault="sheets-write">Lose next Sheets values response</button><button data-fault="gmail">Lose next Gmail send response</button><button data-fault="calendar">Lose next Calendar insert response</button>
+<h2>Lifecycle and evidence</h2>
+<button id="refresh">Refresh status</button><button id="reset">Reset all synthetic state</button><button id="stop">Stop local fixture</button>
+<p>Fixed 127.0.0.1:4323 listener, 30-minute lifetime, no port fallback. Closing discards the in-memory database and bundle. Status contains aggregate counters and source hashes, never session handles, tokens, OAuth state or encrypted content.</p>
+<pre id="status" role="status" aria-live="polite">Loading…</pre>
+</main></body></html>
