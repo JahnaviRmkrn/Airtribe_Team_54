@@ -18,6 +18,7 @@ From the checkout root, using already-installed dependencies:
 
 ```sh
 ./tests/local-auth-harness/run.sh smoke
+./tests/local-auth-harness/run.sh proxy-smoke
 ```
 
 The launcher starts Node under `env -i` with PATH and NODE_ENV only. The smoke
@@ -40,14 +41,16 @@ worktree with no `.env`, `.env.local`, `.env.production` or other Next-loaded en
 files. `env -i` removes inherited secrets but **does not stop Next loading local
 env files**. Do not copy or inspect any existing env/credential files.
 
-Use a clean browser context without real app sessions. Fixture session cookies
-use the actual SDK namespace (`sb-127-auth-token`), so existing localhost
-Supabase sessions must not be mixed into this context.
+The browser owner must ensure existing localhost auth sessions are synthetic.
+The harness does not create a browser context or inspect real credentials.
+Fixture sessions use the actual SDK namespace (`sb-127-auth-token`); do not mix
+real localhost Supabase sessions into this exercise.
 
 Fixed origins, with no automatic port fallback:
 
 - Fixture: `http://127.0.0.1:4318`
-- Actual Next app: `http://127.0.0.1:4320`
+- Browser-facing guarded proxy: `http://127.0.0.1:4320`
+- Actual Next app, internal only: `http://127.0.0.1:4321`
 - Callback: `http://127.0.0.1:4320/auth/callback`
 
 Start the fixture in the same native environment/network namespace as Chrome:
@@ -63,7 +66,7 @@ magic/confirmation/recovery link; click the generated synthetic callback there.
 No mail is sent. Controls also expire pending links or reset all fixture state.
 
 The build owner must compile the app with this exact synthetic configuration,
-then start that same build at 127.0.0.1:4320. For example, after verifying the
+then start that same build internally at 127.0.0.1:4321. For example, after verifying the
 isolated checkout is free of Next-loaded env files:
 
 ```sh
@@ -78,14 +81,45 @@ env -i PATH=/usr/bin:/bin NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 \
   NEXT_PUBLIC_SITE_URL=http://127.0.0.1:4320 \
   NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:4318 \
   NEXT_PUBLIC_SUPABASE_ANON_KEY=synthetic-auth-fixture-anon-key \
-  "$node_bin" node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 4320
+  "$node_bin" node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 4321
 ```
 
 Do not reuse a build compiled for port 9: browsers block that port. Changing only
 runtime env does not rewrite Next's inlined public URLs or compiled CSP. Do not
 disable browser security or modify production config to accommodate this test.
-Block unrelated external traffic using the browser owner's supported test setup;
-never navigate a real provider/login page. No real user input, secrets or claims.
+Start the bounded response proxy in a separate native terminal after the build:
+
+```sh
+./tests/local-auth-harness/run.sh proxy-serve
+```
+
+Wait for `LOCAL_AUTH_PROXY_READY`, then open only `http://127.0.0.1:4320/login`
+in Chrome, never the internal 4321 listener. The proxy reads exact built static
+asset filenames from `.next/static`, preserves the original CSP headers, and
+adds a second, stricter policy. That policy blocks external scripts, styles,
+fonts, images and connections; only same-origin and synthetic 4318 auth fetches
+are allowed. Frames/media/workers/objects are disabled, forms stay same-origin,
+and a restrictive Permissions-Policy disables device features. This is test-only
+response infrastructure, not a production/browser security setting change.
+
+Only root/login/reset/callback GET/HEAD, exact enumerated Next static assets, and
+JSON POST `/api/me/password` reach the one fixed 4321 upstream. Organizer, data,
+provider, analytics, arbitrary Next routes/assets and unexpected query keys are
+blocked. Requests require exact loopback Host/Origin. Caller forwarding and
+hop-by-hop headers are stripped; Host and trusted forwarded-host/proto are set
+to the fixed public 4320/http origin. All original Set-Cookie headers are passed
+through separately and are never logged. No response Location is rewritten or
+followed: only public 4320 or synthetic auth 4318 destinations may reach Chrome.
+
+The proxy has five-second I/O deadlines, an 8 KiB request limit, 4 MiB response
+limit, loopback-only listeners and a 30-minute stop. It emits only startup text
+and final aggregate counters, never query codes, bodies or cookie values.
+On stop, require `LOCAL_AUTH_PROXY_COUNTS` to show `blockedRedirects: 0` and
+`acceptance_failed: false`. An off-origin redirect returns a visible
+`AUTH_PROXY_BLOCKED_REDIRECT` error and fails acceptance; it must **not** be
+reported as proof that safeNext worked. Expected blocked analytics/favicon
+routes are distinct from blocked redirects. Never navigate a real provider/login
+page. No real user input, secrets or claims.
 
 ## Fixed synthetic inputs
 
@@ -122,7 +156,7 @@ synthetic test state, not an account operation outside the fixture.
 7. Open Alice's reset form, then sign Bob in in another normal tab on the same
    app origin. The form must not update Bob or display an obsolete success after
    the account change. Reloading both tabs is not an equivalent stale-form test.
-8. Stop both servers and close the clean browser context. Record actual hydrated
+8. Stop Next, the auth fixture and proxy and close the clean browser context. Record actual hydrated
    observations separately from HTTP/SDK smoke results; neither implies the other.
 
 The fixture does not implement organizer/data APIs. A default post-login redirect
