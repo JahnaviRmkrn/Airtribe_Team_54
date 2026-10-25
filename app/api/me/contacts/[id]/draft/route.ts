@@ -1,6 +1,6 @@
 import { draftMessage } from '@/lib/draft-llm';
 import { dbError, handle, ok, requireUser } from '@/lib/http';
-import { limitUser } from '@/lib/ratelimit';
+import { limitLlm } from '@/lib/ratelimit';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const POST = handle(async (req: Request, { params }: Ctx) => {
   const { id } = await params;
   const { user, supabase } = await requireUser(req);
-  await limitUser('draft', user.id);
+  await limitLlm(req, 'draft', user.id);
   const { data: contact, error } = await supabase
     .from('contacts')
     .select('name, category, interests, notes, last_interaction_at')

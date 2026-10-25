@@ -3,9 +3,10 @@ import { HttpError } from './http';
 
 // Mints a single-use Gemini Live ephemeral token so a browser can talk to the
 // Live API directly without ever seeing GEMINI_API_KEY. The token must open
-// its session within 60 s, expires after 30 min, and only works for our Live
+// its session within 60 s, expires after `ttlMinutes` (30 for signed-in
+// organisers, less for anonymous room guests), and only works for our Live
 // model with audio output.
-export async function mintLiveToken(): Promise<{ token: string; model: string; voice: string }> {
+export async function mintLiveToken(ttlMinutes = 30): Promise<{ token: string; model: string; voice: string }> {
   const key = process.env.GEMINI_API_KEY;
   const model = process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live';
   const voice = process.env.GEMINI_LIVE_VOICE || 'Aoede';
@@ -18,7 +19,7 @@ export async function mintLiveToken(): Promise<{ token: string; model: string; v
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify({
         uses: 1,
-        expireTime: new Date(now + 30 * 60_000).toISOString(),
+        expireTime: new Date(now + ttlMinutes * 60_000).toISOString(),
         newSessionExpireTime: new Date(now + 60_000).toISOString(),
         // Lock the token to our Live model and audio output: without this a
         // holder could open any model/config on our key for 30 minutes.

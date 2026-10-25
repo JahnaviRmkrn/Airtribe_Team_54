@@ -22,10 +22,38 @@ export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response
   };
 }
 
-export async function parseBody<T>(req: Request, schema: ZodType<T>): Promise<T> {
+// Reads a request body but gives up (413) once it passes `max` bytes, even for
+// chunked uploads that send no Content-Length.
+export async function readBodyLimited(req: Request, max: number): Promise<Uint8Array> {
+  const declared = Number(req.headers.get('content-length') ?? 0);
+  if (declared > max) throw new HttpError(413, 'Request is too large');
+  if (!req.body) return new Uint8Array();
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => undefined);
+      throw new HttpError(413, 'Request is too large');
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.byteLength; }
+  return out;
+}
+
+export const DEFAULT_BODY_MAX = 64_000;
+
+export async function parseBody<T>(req: Request, schema: ZodType<T>, maxBytes = DEFAULT_BODY_MAX): Promise<T> {
   let raw: unknown;
+  const bytes = await readBodyLimited(req, maxBytes);
   try {
-    raw = await req.json();
+    raw = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     throw new HttpError(400, 'Invalid JSON body');
   }

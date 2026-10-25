@@ -1,7 +1,7 @@
 import 'server-only';
 import { assistantBody, fromChatResponse, toChatRequest } from '@/lib/assistant';
 import { handle, HttpError, ok, parseBody, requireUser } from '@/lib/http';
-import { limitUser } from '@/lib/ratelimit';
+import { limitLlm } from '@/lib/ratelimit';
 
 // POST /api/assistant  body: { messages, context, tools, instructions }  (signed-in user)
 // -> { reply, tool_calls: [{ id, name, arguments }] }
@@ -10,9 +10,8 @@ import { limitUser } from '@/lib/ratelimit';
 // the results back as role "tool" messages. Never touches the database.
 export const POST = handle(async (req: Request) => {
   const { user } = await requireUser(req);
-  await limitUser('assistant', user.id);
-  if (Number(req.headers.get('content-length') ?? 0) > 200_000) throw new HttpError(413, 'Request is too large');
-  const body = await parseBody(req, assistantBody);
+  await limitLlm(req, 'assistant', user.id);
+  const body = await parseBody(req, assistantBody, 200_000);
   const key = process.env.DEEPSEEK_API_KEY;
   if (!key) throw new HttpError(503, 'Assistant is not configured');
   const base = (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '');

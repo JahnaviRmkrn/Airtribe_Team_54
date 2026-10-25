@@ -386,7 +386,7 @@ async function dashboardView() {
         <div class="row">
           <div><strong>${esc(m.title)}</strong>
             ${m.activity ? `<span class="tag">${esc(m.activity)}</span>` : ''}
-            <div class="muted">${[m.area, fmtDate(m.starts_at)].filter(Boolean).join(' · ')}</div>
+            <div class="muted">${esc([m.area, fmtDate(m.starts_at)].filter(Boolean).join(' · '))}</div>
           </div>
           ${m.room_token ? `<div class="actions"><a class="button" href="${esc(roomUrl(m.room_token))}" target="_blank" rel="noopener">Open room</a><button data-copy="${esc(roomUrl(m.room_token))}">Copy link</button><button data-qr="${esc(roomUrl(m.room_token))}">QR code</button></div>` : ''}
         </div>`).join('') : '<p class="muted">No meetups planned yet. Plan one to get people together.</p>'}
@@ -949,7 +949,7 @@ function meetupRow(m) {
       <div><strong>${esc(m.title)}</strong>
         ${m.activity ? `<span class="tag">${esc(m.activity)}</span>` : ''}
         <span class="tag ${closed ? 'status-closed' : 'status-open'}">${esc(m.status || 'open')}</span>
-        <div class="muted">${[m.area, fmtDate(m.starts_at), m.budget ? '₹' + m.budget + ' per person' : ''].filter(Boolean).join(' · ')}</div>
+        <div class="muted">${esc([m.area, fmtDate(m.starts_at), m.budget ? '₹' + m.budget + ' per person' : ''].filter(Boolean).join(' · '))}</div>
       </div>
       <div class="actions">
         ${url ? `<button data-copy="${esc(url)}">Copy link</button>` : ''}

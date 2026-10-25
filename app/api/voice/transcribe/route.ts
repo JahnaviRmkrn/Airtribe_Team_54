@@ -1,5 +1,5 @@
-import { handle, HttpError, ok, requireUser } from '@/lib/http';
-import { limitUser } from '@/lib/ratelimit';
+import { handle, HttpError, ok, readBodyLimited, requireUser } from '@/lib/http';
+import { limitLlm } from '@/lib/ratelimit';
 import { audioMime, MAX_AUDIO_BYTES, transcribe, TranscribeError } from '@/lib/transcribe';
 
 // GET  /api/voice/transcribe -> { available }  (is Gemini voice configured?)
@@ -14,12 +14,12 @@ export const GET = handle(async (req: Request) => {
 
 export const POST = handle(async (req: Request) => {
   const { user } = await requireUser(req);
-  await limitUser('transcribe', user.id);
+  await limitLlm(req, 'transcribe', user.id);
   const mime = audioMime(req.headers.get('content-type'));
   if (!mime) throw new HttpError(415, 'Send the recording as audio (webm, ogg or mp4)');
-  if (Number(req.headers.get('content-length') ?? 0) > MAX_AUDIO_BYTES) throw new HttpError(413, 'Recording is too long');
-  const audio = await req.arrayBuffer();
-  if (audio.byteLength > MAX_AUDIO_BYTES) throw new HttpError(413, 'Recording is too long');
+  // Capped while streaming: a chunked upload can't skip the Content-Length check.
+  const bytes = await readBodyLimited(req, MAX_AUDIO_BYTES);
+  const audio = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   if (audio.byteLength < 1000) throw new HttpError(400, 'Recording is empty - hold on a little longer');
   try {
     return ok({ transcript: await transcribe(audio, mime) });

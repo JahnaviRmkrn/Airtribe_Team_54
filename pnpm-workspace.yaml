@@ -1,3 +1,7 @@
 allowBuilds:
   # eslint-config-next's native resolver; its install script fetches the platform binary
   unrs-resolver: true
+overrides:
+  # next@15.5 pins postcss 8.4.31, which has open advisories (GHSA-qx2v-qp2m-jg93
+  # and others); same-major bump, build-time only.
+  postcss: 8.5.31

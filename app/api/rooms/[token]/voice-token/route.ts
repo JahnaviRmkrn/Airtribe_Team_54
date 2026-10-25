@@ -4,6 +4,9 @@ import { mintLiveToken } from '@/lib/live-token';
 import { limitRoom, limitUser } from '@/lib/ratelimit';
 import { getRoom, requireGuest, requireOpen } from '@/lib/room';
 
+// Anonymous guests get short-lived tokens: a token is paid Gemini time on our key.
+const GUEST_TOKEN_TTL_MIN = 10;
+
 type Ctx = { params: Promise<{ token: string }> };
 
 // GET /api/rooms/:token/voice-token  (joined guest only) -> { token, model, voice }
@@ -20,5 +23,5 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
   // The guest secret works from any IP, so also cap per guest and per room.
   await limitUser('guestVoiceGuest', `attendee:${me.id}`);
   await limitUser('guestVoiceRoom', `room:${room.id}`);
-  return NextResponse.json(await mintLiveToken(), { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json(await mintLiveToken(GUEST_TOKEN_TTL_MIN), { headers: { 'Cache-Control': 'no-store' } });
 });

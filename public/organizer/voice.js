@@ -11,7 +11,7 @@
 // /api/voice/live-token) that fills the rows as you talk. Next it uses ElevenLabs when ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID are set
 // (the browser only ever sees a short-lived signed URL from /api/voice/signed-url).
 // Otherwise it records a clip with the mic and POSTs it to /api/voice/transcribe,
-// where Gemini (GEMINI_API_KEY, server-only) transcribes it. Either way the
+// where Gemini (key held server-side only) transcribes it. Either way the
 // transcript goes through /api/extract. The typed fallback always works.
 
 (() => {

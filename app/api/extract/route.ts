@@ -1,7 +1,7 @@
 import { extractBody } from '@/lib/extract';
 import { extract } from '@/lib/extract-llm';
-import { handle, HttpError, ok, parseBody, requireUser } from '@/lib/http';
-import { limitUser } from '@/lib/ratelimit';
+import { handle, ok, parseBody, requireUser } from '@/lib/http';
+import { limitLlm } from '@/lib/ratelimit';
 
 // POST /api/extract  body: { transcript }  (signed-in user)
 // -> { contacts: [<=5 {name, category, interests, preferred_frequency_days?}],
@@ -11,8 +11,7 @@ import { limitUser } from '@/lib/ratelimit';
 // Sign-in is required so this can't be used as a free LLM proxy.
 export const POST = handle(async (req: Request) => {
   const { user } = await requireUser(req);
-  await limitUser('extract', user.id);
-  if (Number(req.headers.get('content-length') ?? 0) > 100_000) throw new HttpError(413, 'Transcript is too long');
-  const { transcript } = await parseBody(req, extractBody);
+  await limitLlm(req, 'extract', user.id);
+  const { transcript } = await parseBody(req, extractBody, 100_000);
   return ok({ ...(await extract(transcript)), saved: false });
 });

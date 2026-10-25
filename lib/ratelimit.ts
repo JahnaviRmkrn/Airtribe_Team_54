@@ -16,19 +16,42 @@ export const LIMITS = {
   assistant: { max: 30, windowSeconds: 60 }, // per signed-in user (LLM spend, several rounds per command)
   guestVoice: { max: 20, windowSeconds: 600 }, // per IP per room: cheap pre-auth filter for the room voice helper
   guestVoiceGuest: { max: 5, windowSeconds: 600 }, // per joined guest (the secret is portable across IPs)
-  guestVoiceRoom: { max: 60, windowSeconds: 600 }, // per room across everyone
+  guestVoiceRoom: { max: 30, windowSeconds: 600 }, // per room across everyone
   voice: { max: 50, windowSeconds: 600 }, // per signed-in user (Gemini Live / transcribe sessions; demo-friendly)
   draft: { max: 20, windowSeconds: 60 }, // per signed-in user (LLM spend)
   transcribe: { max: 10, windowSeconds: 60 }, // per signed-in user (Gemini audio)
+  // Per client IP across ALL rooms / tokens: random-token probing and signup-farmed accounts
+  // can't dodge the per-token and per-user buckets by spreading out. Generous for shared NATs.
+  roomIp: { max: 300, windowSeconds: 60 },
+  llmIp: { max: 300, windowSeconds: 600 },
 } satisfies Record<string, Limit>;
 export type Preset = keyof typeof LIMITS;
 
-// WARNING: x-forwarded-for is client-controlled unless a proxy overwrites it.
-// Vercel sets it to the real client IP; behind another host, check that the
-// proxy strips incoming values, or limits can be dodged by spoofing the header.
+// Real client IP, from the header the platform's edge sets rather than one the
+// client can send. A client can put anything in the FIRST x-forwarded-for entry
+// (Cloudflare and most proxies append to it), so it is never trusted:
+//  - Vercel overwrites x-real-ip / x-vercel-forwarded-for;
+//  - Cloudflare (tunnel) sets cf-connecting-ip and overwrites any client value;
+//  - otherwise the LAST x-forwarded-for entry, the one our nearest proxy added.
+// IPv6 clients are bucketed by /64 so one host can't rotate through its whole prefix.
 export function clientIp(req: Request): string {
-  const xff = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return xff || req.headers.get('x-real-ip')?.trim() || 'unknown';
+  const h = (name: string) => req.headers.get(name)?.trim() || undefined;
+  const xff = h('x-forwarded-for')?.split(',').map((s) => s.trim()).filter(Boolean);
+  const ip = process.env.VERCEL
+    ? h('x-vercel-forwarded-for')?.split(',')[0]?.trim() || h('x-real-ip') || xff?.at(-1)
+    : h('cf-connecting-ip') || xff?.at(-1) || h('x-real-ip');
+  return ip ? ipBucket(ip) : 'unknown';
+}
+
+export function ipBucket(ip: string): string {
+  if (!ip.includes(':')) return ip.slice(0, 45);
+  const v4 = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  if (v4) return v4[1];
+  const [head, tail = ''] = ip.toLowerCase().split('::');
+  const a = head ? head.split(':') : [];
+  const b = tail ? tail.split(':') : [];
+  const groups = ip.includes('::') ? [...a, ...Array(Math.max(0, 8 - a.length - b.length)).fill('0'), ...b] : a;
+  return groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, '')).join(':') + '::/64';
 }
 
 export function rateLimitKey(req: Request, bucket: string, extraKey?: string): string {
@@ -52,7 +75,8 @@ export async function rateLimit(req: Request, bucket: string, { max, windowSecon
 }
 
 // One-liner for room routes, e.g. `await limitRoom(req, 'pay', token);`
-export const limitRoom = (req: Request, preset: Preset, token: string) => rateLimit(req, preset, LIMITS[preset], token);
+export const limitRoom = (req: Request, preset: Preset, token: string) =>
+  Promise.all([rateLimit(req, preset, LIMITS[preset], token), rateLimit(req, 'roomIp', LIMITS.roomIp)]).then(() => undefined);
 
 // Per signed-in user (any IP), for routes that spend paid API credit.
 export async function limitUser(preset: Preset, userId: string) {
@@ -68,3 +92,8 @@ export async function limitUser(preset: Preset, userId: string) {
   }
   if (data === false) throw new HttpError(429, 'Too many requests, slow down');
 }
+
+// LLM / voice routes: per signed-in user AND per client IP, so free accounts
+// created in bulk from one address can't multiply the spend.
+export const limitLlm = (req: Request, preset: Preset, userId: string) =>
+  Promise.all([limitUser(preset, userId), rateLimit(req, 'llmIp', LIMITS.llmIp)]).then(() => undefined);

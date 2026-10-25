@@ -5,7 +5,6 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
-    "build:static": "tsc -p tsconfig.static.json",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",

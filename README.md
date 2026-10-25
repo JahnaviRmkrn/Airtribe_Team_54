@@ -1,6 +1,6 @@
 # Moup (Airtribe Team 54): Personal Relationship Manager
 
-Next.js 15 (App Router) + Supabase (Postgres, Auth, RLS) unified platform, alongside the FastAPI prototype backend and static runner.
+Next.js 15 (App Router) + Supabase (Postgres, Auth, RLS) unified platform.
 
 ## Run locally
 
@@ -16,14 +16,6 @@ node scripts/smoke.mjs         # end-to-end API check (needs dev server running)
 
 Deploying (Vercel + hosted Supabase): see [DEPLOY.md](DEPLOY.md).
 `pnpm check-env` validates the env (`--prod` for production values).
-
-### 2. FastAPI Prototype Runner
-```bash
-pip install -r requirements.txt
-python -m uvicorn main:app --reload --port 8000
-```
-Open http://127.0.0.1:8000 - API docs at http://127.0.0.1:8000/docs
-
 
 ## Auth
 
@@ -58,7 +50,7 @@ Open http://127.0.0.1:8000 - API docs at http://127.0.0.1:8000/docs
 
 ### Voice onboarding and extraction
 
-Ported from Arindom Chetia's PR #3 (FastAPI `routers/voice.py`, `static/voice.*`).
+Ported from Arindom Chetia's PR #3 (the old FastAPI prototype, since removed).
 
 - `POST /api/extract` returns
   `{ contacts: [<=5 { name, category, interests[], preferred_frequency_days? }], goals: { personal, professional, community }, source: "deepseek"|"gemini"|"openai"|"rules", saved: false }`.
@@ -241,4 +233,10 @@ http://localhost:3000/organizer/ . Any 401 from `/api/me/*` redirects to
 - Errors render the API's `{ "error": "message" }`; every list has loading,
   empty and error states; everything survives a refresh and works at phone and
   desktop widths.
+
+## Security notes
+
+- Security headers (CSP, HSTS, frame-ancestors, Permissions-Policy and more) live in `lib/security-headers.ts` and are applied by `next.config.ts`. The static organizer and room pages get a strict CSP with no inline scripts; the Next-rendered pages need `'unsafe-inline'` for Next's bootstrap. New third-party scripts or connect targets must be added there.
+- Client IPs for rate limiting come from `cf-connecting-ip` (Cloudflare) or the last `x-forwarded-for` entry, never the first; on Vercel from the platform header. `X-Forwarded-Host` is ignored; redirects use the `Host` header checked against `NEXT_PUBLIC_SITE_URL` (plus `ALLOWED_HOSTS`).
+- `supabase/tests/rls.sql` checks RLS and grants against a throwaway Postgres (see its header). Never run it on a database with real data.
 
