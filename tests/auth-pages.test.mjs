@@ -218,16 +218,17 @@ describe('reconciled login design and authentication', () => {
     },
   );
 
-  it('keeps magic-link sign-in available in the redesigned form', async () => {
+  it.each([['signin', false], ['signup', true]])('keeps magic-link account creation explicit in %s mode', async (mode, shouldCreateUser) => {
     const auth = { signInWithOtp: vi.fn().mockResolvedValue({ error: null }) };
     const view = page('login', auth, '?next=%2Forganizer');
     const tree = view.render();
+    if (mode === 'signup') button(tree, 'Create account').props.onClick();
     find(tree, (node) => node.props.className === 'magic-toggle').props.onClick();
     field(tree, 'login-email', 'user@example.test');
     await submit(view.render());
     expect(auth.signInWithOtp).toHaveBeenCalledWith({
       email: 'user@example.test',
-      options: { emailRedirectTo: 'https://example.test/auth/callback?next=%2Forganizer' },
+      options: { emailRedirectTo: 'https://example.test/auth/callback?next=%2Forganizer', shouldCreateUser },
     });
     expect(text(view.render())).toContain('Check your email for a sign-in link.');
   });

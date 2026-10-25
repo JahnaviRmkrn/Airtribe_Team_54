@@ -232,7 +232,11 @@ export default function LoginPage() {
     try {
       const { error } = await browserClient().auth.signInWithOtp({
         email: email.trim(),
-        options: { emailRedirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
+        options: {
+          emailRedirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+          // A login request must not silently create a new account.
+          shouldCreateUser: mode === 'signup',
+        },
       });
       if (error) throw error;
       setMsg('Check your email for a sign-in link.');
