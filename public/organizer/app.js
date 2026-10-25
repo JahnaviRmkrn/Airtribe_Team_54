@@ -711,6 +711,7 @@ async function contactsView() {
       </div>
       <div id="contact-list"></div>
     </section>
+    <p><a href="/integrations/google-sheets">Import or export with Google Sheets</a></p>
     <details class="card add-card" id="add-details" ${openForm ? 'open' : ''}>
       <summary>Add a person</summary>
       <form id="add-form">
