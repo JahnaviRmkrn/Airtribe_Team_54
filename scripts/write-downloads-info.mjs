@@ -19,9 +19,12 @@ const files = readdirSync(dir)
   .map((name) => {
     const data = readFileSync(join(dir, name));
     const ext = name.slice(name.lastIndexOf('.'));
+    let label = ext === '.exe' && name.includes('Setup') ? 'Windows (installer)' : LABELS[ext] || name;
+    if (name.includes('-mac') || ext === '.dmg') label = ext === '.dmg' ? 'macOS (.dmg)' : 'macOS (.zip)';
+    if (name.includes('arm64')) label += ' · Apple Silicon';
     return {
       name,
-      label: LABELS[ext] || name,
+      label,
       bytes: statSync(join(dir, name)).size,
       sha256: createHash('sha256').update(data).digest('hex'),
     };
