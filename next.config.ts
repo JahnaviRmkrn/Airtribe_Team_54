@@ -16,10 +16,15 @@ const nextConfig: NextConfig = {
   // 4h max-age, a deploy could pair new app.js with a stale styles.css (seen on
   // the dashboard guide card). no-cache keeps them cached but revalidated by ETag.
   async headers() {
-    return ["/organizer", "/organizer/:path*", "/room/:path*", "/m/:token"].map((source) => ({
-      source,
-      headers: [{ key: "Cache-Control", value: "no-cache" }],
-    }));
+    return [
+      ...["/organizer", "/organizer/:path*", "/room/:path*", "/m/:token"].map((source) => ({
+        source,
+        headers: [{ key: "Cache-Control", value: "no-cache" }],
+      })),
+      // Browsers (and the desktop shell) remember to use HTTPS only, so a
+      // hostile network can't serve the app over plain http. Ignored on http.
+      { source: "/:path*", headers: [{ key: "Strict-Transport-Security", value: "max-age=15552000" }] },
+    ];
   },
 };
 

@@ -12,6 +12,9 @@ const LABELS = { '.zip': 'Windows (.zip)', '.AppImage': 'Linux (AppImage)', '.ap
 
 const files = readdirSync(dir)
   .filter((name) => /\.(zip|AppImage|apk|dmg|exe)$/.test(name))
+  // Debug Android builds are debuggable and signed with the shared debug key
+  // (session cookies readable over adb): never list them for download.
+  .filter((name) => !/debug/i.test(name))
   .sort()
   .map((name) => {
     const data = readFileSync(join(dir, name));
