@@ -69,6 +69,8 @@ jobs:
           # 'tools' package; name only what the build needs.
           packages: platform-tools platforms;android-35 build-tools;35.0.0
       - run: npm ci
+      - name: Generate the Android Gradle project files
+        run: npx cap sync android
       - name: Point Gradle at the CI Android SDK
         run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
       - name: Build debug APK
