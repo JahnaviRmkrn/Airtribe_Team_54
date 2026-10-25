@@ -1,0 +1,28 @@
+#!/usr/bin/env node
+// Write public/downloads/downloads.json describing the installer files
+// actually present, so the landing page shows true sizes/checksums.
+// Usage: node scripts/write-downloads-info.mjs [downloads-dir]
+import { createHash } from 'node:crypto';
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const dir = process.argv[2] || join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'downloads');
+const LABELS = { '.zip': 'Windows (.zip)', '.AppImage': 'Linux (AppImage)', '.apk': 'Android (.apk)', '.dmg': 'macOS (.dmg)', '.exe': 'Windows (.exe)' };
+
+const files = readdirSync(dir)
+  .filter((name) => /\.(zip|AppImage|apk|dmg|exe)$/.test(name))
+  .sort()
+  .map((name) => {
+    const data = readFileSync(join(dir, name));
+    const ext = name.slice(name.lastIndexOf('.'));
+    return {
+      name,
+      label: LABELS[ext] || name,
+      bytes: statSync(join(dir, name)).size,
+      sha256: createHash('sha256').update(data).digest('hex'),
+    };
+  });
+
+writeFileSync(join(dir, 'downloads.json'), JSON.stringify({ generatedAt: new Date().toISOString(), files }, null, 2) + '\n');
+console.log(`downloads.json: ${files.length} file(s) in ${dir}`);

@@ -51,6 +51,10 @@ npm run dist       # all of the above, on macOS (Windows targets also build ther
 On a Linux host without Wine, `npx electron-builder --win zip` produces
 `release/Muop-<version>-win.zip` instead: unzip anywhere and run `Muop.exe`.
 
+To publish builds on the site: copy them into `../public/downloads/`, then run
+`node ../scripts/write-downloads-info.mjs` so the landing page shows the true
+sizes and SHA-256 checksums from `downloads.json`.
+
 Notes:
 
 - Builds are unsigned (`identity: null`, `signAndEditExecutable: false`). macOS Gatekeeper
