@@ -116,6 +116,10 @@ function route() {
   else if (currentHash && currentHash !== hash) navStack.push(currentHash);
   if (navStack.length > 50) navStack = navStack.slice(-50);
   currentHash = hash;
+  if (hash === '#/gmail' || hash === '#/calendar') {
+    const token = navGen;
+    return window.GoogleActions.render(hash.slice(2), { api, esc, isCurrent: () => !stale(token) });
+  }
   const contactMatch = hash.match(/^#\/contacts\/(.+)$/);
   if (contactMatch) return contactDetailView(decodeURIComponent(contactMatch[1]));
   const views = {

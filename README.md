@@ -255,3 +255,11 @@ http://localhost:3000/organizer/ . Any 401 from `/api/me/*` redirects to
   empty and error states; everything survives a refresh and works at phone and
   desktop widths.
 
+
+## Optional Gmail and Google Calendar actions
+
+The organizer's Gmail and Calendar tabs provide explicit compose → saved preview
+→ confirm flows. They are disabled until separately approved operator setup.
+Gmail uses send-only access; Calendar targets the selected account's primary
+calendar. Unknown outcomes never trigger automatic resend/recreation.
+See [setup, scopes, replay protection and verification limits](docs/google-actions-setup.md).
