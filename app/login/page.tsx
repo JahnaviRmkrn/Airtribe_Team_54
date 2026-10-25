@@ -5,8 +5,9 @@
 // Auth's signInWithOAuth; the email magic link and password calls are unchanged.
 // Provider setup (developer apps, client IDs, callback URLs) is documented in
 // docs/social-auth-setup.md. Only providers the Supabase project reports as
-// enabled (GET /auth/v1/settings) get a button, so unconfigured ones never show.
-import { useEffect, useState } from 'react';
+// enabled (GET /auth/v1/settings) get a button after discovery; Google is the
+// initial/failure fallback and its visibility does not establish readiness.
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Provider } from '@supabase/supabase-js';
 import { browserClient } from '@/lib/supabase/browser';
@@ -146,7 +147,10 @@ export default function LoginPage() {
   const [isError, setIsError] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [initialError, setInitialError] = useState('');
-  // Google is the configured default; the rest appear once the project says
+  // State disables rendered controls; the ref also blocks repeated/stale
+  // handlers before React has committed the disabled state.
+  const requestInFlight = useRef(false);
+  // Google is the initial fallback; the rest appear once the project says
   // they're enabled. If the settings call fails, Google stays the only one.
   const [enabledProviders, setEnabledProviders] = useState<string[]>(['google']);
 
@@ -179,10 +183,29 @@ export default function LoginPage() {
     return () => window.removeEventListener('popstate', syncMode);
   }, []);
 
-  function selectMode(nextMode: Mode) {
-    setMode(nextMode);
+  function clearMessage() {
     setMsg('');
     setIsError(false);
+    setInitialError('');
+  }
+
+  function startRequest(kind: string) {
+    if (requestInFlight.current) return false;
+    requestInFlight.current = true;
+    setBusy(kind);
+    clearMessage();
+    return true;
+  }
+
+  function finishRequest() {
+    requestInFlight.current = false;
+    setBusy(null);
+  }
+
+  function selectMode(nextMode: Mode) {
+    if (requestInFlight.current) return;
+    setMode(nextMode);
+    clearMessage();
     const url = new URL(location.pathname + location.search + location.hash, location.origin);
     if (nextMode === 'signup') url.searchParams.set('mode', 'signup');
     else url.searchParams.delete('mode');
@@ -206,9 +229,7 @@ export default function LoginPage() {
   }, []);
 
   async function oauthSignIn(provider: SocialProvider) {
-    setBusy(provider.id);
-    setMsg('');
-    setIsError(false);
+    if (!startRequest(provider.id)) return;
     try {
       const { error } = await browserClient().auth.signInWithOAuth({
         provider: provider.id as Provider,
@@ -217,7 +238,7 @@ export default function LoginPage() {
       if (error) throw error;
       // Keep the form disabled while the browser leaves for the provider.
     } catch (error) {
-      setBusy(null);
+      finishRequest();
       setIsError(true);
       const message = error instanceof Error ? error.message : 'Please try again.';
       setMsg(`${provider.label.replace('Continue with ', '')} sign-in is not available yet: ${message}`);
@@ -226,9 +247,7 @@ export default function LoginPage() {
 
   async function magicLink(e: React.FormEvent) {
     e.preventDefault();
-    setBusy('email');
-    setMsg('');
-    setIsError(false);
+    if (!startRequest('email')) return;
     try {
       const { error } = await browserClient().auth.signInWithOtp({
         email: email.trim(),
@@ -239,16 +258,17 @@ export default function LoginPage() {
         },
       });
       if (error) throw error;
-      setMsg('Check your email for a sign-in link.');
+      setMsg('Check your email for a sign-in link. Open the latest link in this browser. If it fails, request a new one.');
     } catch (error) {
       setIsError(true);
       setMsg(error instanceof Error ? error.message : 'Could not send a sign-in link. Please try again.');
     } finally {
-      setBusy(null);
+      finishRequest();
     }
   }
 
   async function withPassword() {
+    if (requestInFlight.current) return;
     const authMode: PasswordMode = mode === 'signup' ? 'sign_up' : 'sign_in';
     setMsg('');
     setIsError(false);
@@ -257,7 +277,7 @@ export default function LoginPage() {
       setMsg('Enter your email and password.');
       return;
     }
-    setBusy('password');
+    if (!startRequest('password')) return;
     try {
       const { signedIn, newAccount } = await passwordAuth(
         browserClient().auth, authMode, email.trim(), password,
@@ -278,20 +298,19 @@ export default function LoginPage() {
       setIsError(true);
       setMsg(error instanceof Error ? error.message : 'Sign-in did not complete. Please try again.');
     } finally {
-      setBusy(null);
+      finishRequest();
     }
   }
 
   // Recovery link lands on /reset-password (via the auth callback's code
   // exchange) so the user sets a new password instead of being signed in directly.
   async function forgotPassword() {
+    if (requestInFlight.current) return;
     if (!email.trim()) {
       setIsError(true);
       return setMsg('Enter your email address first.');
     }
-    setBusy('forgot');
-    setMsg('');
-    setIsError(false);
+    if (!startRequest('forgot')) return;
     try {
       const { error } = await browserClient().auth.resetPasswordForEmail(email.trim(), {
         redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent('/reset-password')}`,
@@ -302,7 +321,7 @@ export default function LoginPage() {
       setIsError(true);
       setMsg(error instanceof Error ? error.message : 'Could not send a reset link. Please try again.');
     } finally {
-      setBusy(null);
+      finishRequest();
     }
   }
 
@@ -367,9 +386,9 @@ export default function LoginPage() {
             className="magic-toggle"
             disabled={busy !== null}
             onClick={() => {
+              if (requestInFlight.current) return;
               setUseMagic(!useMagic);
-              setMsg('');
-              setIsError(false);
+              clearMessage();
             }}
           >
             <SparkleIcon /> {useMagic ? 'Use Password' : 'Use Magic Link'}
@@ -386,10 +405,15 @@ export default function LoginPage() {
               id="login-email"
               type="email"
               autoComplete="email"
+              disabled={busy !== null}
               required
               placeholder="you@example.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                if (requestInFlight.current) return;
+                setEmail(e.target.value);
+                clearMessage();
+              }}
             />
           </div>
 
@@ -409,10 +433,15 @@ export default function LoginPage() {
                   id="login-password"
                   type={showPassword ? 'text' : 'password'}
                   autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  disabled={busy !== null}
                   required
                   placeholder={mode === 'signup' ? 'Create a password' : 'Enter your password'}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    if (requestInFlight.current) return;
+                    setPassword(e.target.value);
+                    clearMessage();
+                  }}
                 />
                 <button
                   type="button"

@@ -28,13 +28,14 @@ Open http://127.0.0.1:8000 - API docs at http://127.0.0.1:8000/docs
 ## Auth
 
 - `/login` has a minimal page (magic link, or email+password sign-in/sign-up).
-- Social sign-in: `/login` also has **Google, Facebook, LinkedIn and
-  Instagram** buttons via Supabase Auth OAuth. Each one needs a developer app
-  on the provider's side and its client ID/secret entered in the Supabase
-  project - per-provider steps and callback URLs are in
-  [docs/social-auth-setup.md](docs/social-auth-setup.md). Instagram is wired as
-  a custom OAuth2 provider (`custom:instagram`) because Supabase has no
-  built-in Instagram provider.
+- Social sign-in candidates are **Google, Facebook, LinkedIn and Instagram**
+  through Supabase Auth OAuth, but buttons are filtered by the project's provider
+  settings. Google is the initial/failure fallback, not proof it is configured.
+  The custom Instagram recipe remains unverified. See
+  [provider setup and readiness boundaries](docs/social-auth-setup.md).
+- Magic links require the requesting browser's PKCE cookie. Use the latest link;
+  if it fails, request a fresh one. See
+  [magic-link retry and account-switch boundaries](docs/magic-link-boundaries.md).
 - In the browser the session lives in cookies, so `fetch('/api/me/...')` just works.
 - From scripts/curl: `Authorization: Bearer <supabase access_token>`.
 

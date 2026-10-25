@@ -242,6 +242,84 @@ describe('reconciled login design and authentication', () => {
     expect(text(view.render())).toContain('Check your email for a sign-in link.');
   });
 
+  it('sends only one magic link for repeated submissions before React rerenders', async () => {
+    let resolve;
+    const auth = { signInWithOtp: vi.fn(() => new Promise((done) => { resolve = done; })) };
+    const view = page('login', auth);
+    find(view.render(), (node) => node.props.className === 'magic-toggle').props.onClick();
+    field(view.render(), 'login-email', 'alice@example.test');
+    const form = view.render();
+    const first = submit(form);
+    const repeated = submit(form);
+    expect(auth.signInWithOtp).toHaveBeenCalledOnce();
+    expect(find(view.render(), (node) => node.props.id === 'login-email').props.disabled).toBe(true);
+    field(form, 'login-email', 'bob@example.test');
+    button(form, 'Create account').props.onClick();
+    find(form, (node) => node.props.className === 'magic-toggle').props.onClick();
+    expect(find(view.render(), (node) => node.props.id === 'login-email').props.value).toBe('alice@example.test');
+    expect(button(view.render(), 'Log in').props['aria-pressed']).toBe(true);
+    expect(text(view.render())).toContain('MAGIC LINK');
+    resolve({ error: null });
+    await Promise.all([first, repeated]);
+    expect(find(view.render(), (node) => node.props.id === 'login-email').props.disabled).toBe(false);
+    expect(text(view.render())).toContain('latest link in this browser');
+  });
+
+  it('does not start another auth method from a stale control while a magic link is pending', async () => {
+    let resolve;
+    const auth = {
+      signInWithOtp: vi.fn(() => new Promise((done) => { resolve = done; })),
+      signInWithOAuth: vi.fn().mockResolvedValue({ error: null }),
+      resetPasswordForEmail: vi.fn().mockResolvedValue({ error: null }),
+      signInWithPassword: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
+    };
+    const view = page('login', auth);
+    field(view.render(), 'login-email', 'alice@example.test');
+    field(view.render(), 'login-password', 'fixture-password');
+    const passwordForm = view.render();
+    find(passwordForm, (node) => node.props.className === 'magic-toggle').props.onClick();
+    const magicForm = view.render();
+    const pending = submit(magicForm);
+    await submit(passwordForm);
+    await button(passwordForm, 'Forgot password?').props.onClick();
+    await find(magicForm, (node) => node.props['data-provider'] === 'google').props.onClick();
+    expect(auth.signInWithOtp).toHaveBeenCalledOnce();
+    expect(auth.signInWithPassword).not.toHaveBeenCalled();
+    expect(auth.resetPasswordForEmail).not.toHaveBeenCalled();
+    expect(auth.signInWithOAuth).not.toHaveBeenCalled();
+    resolve({ error: null });
+    await pending;
+  });
+
+  it('replaces an expired callback error with a success status when a new magic link is requested', async () => {
+    const auth = { signInWithOtp: vi.fn().mockResolvedValue({ error: null }) };
+    const view = page('login', auth, '?error=auth');
+    view.render();
+    view.effects[2]();
+    expect(find(view.render(), (node) => node.props.role === 'alert')).toBeDefined();
+    find(view.render(), (node) => node.props.className === 'magic-toggle').props.onClick();
+    field(view.render(), 'login-email', 'alice@example.test');
+    await submit(view.render());
+    expect(find(view.render(), (node) => node.props.role === 'status').props.className).toBe('login-msg info');
+    expect(nodes(view.render()).some((node) => node.props.role === 'alert')).toBe(false);
+  });
+
+  it('clears a sent-link notice before changing the email or choosing another sign-in method', async () => {
+    const auth = { signInWithOtp: vi.fn().mockResolvedValue({ error: null }) };
+    const view = page('login', auth);
+    find(view.render(), (node) => node.props.className === 'magic-toggle').props.onClick();
+    field(view.render(), 'login-email', 'alice@example.test');
+    await submit(view.render());
+    field(view.render(), 'login-email', 'bob@example.test');
+    expect(text(view.render())).not.toContain('Check your email');
+    expect(view.location.href).toBe('');
+    await submit(view.render());
+    expect(auth.signInWithOtp.mock.calls[1][0].email).toBe('bob@example.test');
+    find(view.render(), (node) => node.props.className === 'magic-toggle').props.onClick();
+    expect(text(view.render())).not.toContain('Check your email');
+    expect(auth.signInWithOtp).toHaveBeenCalledTimes(2);
+  });
+
   it('sends forgotten-password recovery through the new reset page', async () => {
     const auth = { resetPasswordForEmail: vi.fn().mockResolvedValue({ error: null }) };
     const view = page('login', auth);
@@ -261,7 +339,7 @@ describe('reconciled login design and authentication', () => {
     field(view.render(), 'login-password', 'password');
     const pending = submit(view.render());
     const tree = view.render();
-    for (const node of nodes(tree).filter((node) => typeof node.props['aria-pressed'] === 'boolean' || node.props.className === 'magic-toggle')) {
+    for (const node of nodes(tree).filter((node) => node.type === 'input' || typeof node.props['aria-pressed'] === 'boolean' || node.props.className === 'magic-toggle')) {
       expect(node.props.disabled).toBe(true);
     }
     resolve({ data: { session: null }, error: null });

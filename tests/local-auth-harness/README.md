@@ -34,6 +34,22 @@ on completion. They do not read `.env` files or start Next/a browser. They cover
 - Expired links, missing codes, verifier mismatch, and one-time code replay.
 - Local-only OAuth error return, never a provider connection.
 
+The separate `tests/magic-link-callback.test.mjs` Vitest suite imports the actual
+app callback and uses this fixture plus real SDK cookie adapters. It covers
+magic-link session creation, restored-verifier replay, expiry/fresh retry,
+abandonment, another browser, repeated requests, account switching, and explicit
+signup. Run it with one worker from a secret-excluded checkout:
+
+```sh
+node_bin=$(command -v node)
+env -i PATH=/usr/bin:/bin NODE_ENV=test "$node_bin" node_modules/vitest/vitest.mjs \
+  run tests/magic-link-callback.test.mjs tests/auth-pages.test.mjs --maxWorkers=1
+```
+
+See [magic-link boundaries](../../docs/magic-link-boundaries.md) for the shipped
+legacy-verifier limitation. These tests do not enable experimental SDK flow IDs
+or assert that multiple outstanding email links remain independently usable.
+
 ## Coordinated browser run
 
 Only the browser/build owner should run these steps. Use a dedicated clean
