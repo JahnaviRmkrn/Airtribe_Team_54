@@ -186,7 +186,14 @@ export default function LoginPage() {
     setIsError(false);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: provider.id as Provider,
-      options: { redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
+      options: {
+        redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}${provider.id === 'facebook' ? '&import=facebook' : ''}`,
+        // Facebook only: friends who also use the app can be offered for import.
+        // Set NEXT_PUBLIC_FACEBOOK_FRIENDS=0 if Meta rejects user_friends for this app.
+        ...(provider.id === 'facebook' && process.env.NEXT_PUBLIC_FACEBOOK_FRIENDS !== '0'
+          ? { scopes: 'email public_profile user_friends' }
+          : {}),
+      },
     });
     // On success the browser is already leaving for the provider; only failures come back here.
     if (error) {

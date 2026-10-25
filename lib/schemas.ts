@@ -88,3 +88,38 @@ export const guestUpdate = guestBase.partial();
 
 export const voteBody = z.object({ venue_id: z.uuid() });
 export const confirmBody = z.object({ venue_id: z.uuid() });
+
+// --- contact import (LinkedIn / Facebook / vCard / Google / Android / WhatsApp) ---
+export const importSource = z.enum(['linkedin', 'facebook', 'whatsapp', 'vcard', 'google', 'android']);
+const importStagedSource = z.enum(['facebook', 'google']);
+
+// Preview: parse an uploaded file's text, the Android Contact Picker result, or
+// the rows staged at sign-in. Never writes contacts.
+export const importPreview = z.union([
+  z.object({ source: importSource, content: z.string().min(1) }),
+  z.object({ source: importStagedSource, staged: z.literal(true) }),
+  z.object({
+    source: z.literal('android'),
+    picks: z
+      .array(z.object({ name: z.array(z.string().max(300)).max(5).optional(), email: z.array(z.string().max(300)).max(10).optional(), tel: z.array(z.string().max(60)).max(10).optional() }))
+      .min(1)
+      .max(5000),
+  }),
+]);
+
+export const importRowSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  email: z.email().max(254).nullable(),
+  phone: z.string().regex(/^\+[1-9][0-9]{6,14}$/).nullable(),
+  source_ref: z.string().max(300).nullable(),
+  company: z.string().max(200).nullable(),
+  position: z.string().max(200).nullable(),
+  notes: z.string().max(500).nullable(),
+});
+
+export const importConfirm = z.object({
+  source: importSource,
+  category,
+  contacts: z.array(importRowSchema).min(1).max(5000),
+  clear_staged: importStagedSource.optional(),
+});

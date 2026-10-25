@@ -416,3 +416,8 @@ a.button:hover { border-color: #75e4de; }
 .qr-slot { padding: 4px 0 14px; }
 .qr-box { width: 200px; max-width: 70vw; background: #fff; border: 1px solid #f3ecdc; border-radius: 12px; padding: 8px; }
 .qr-box svg { display: block; width: 100%; height: auto; }
+
+/* contact import preview */
+.import-list { max-height: 360px; overflow-y: auto; margin: 8px 0; }
+.import-row { justify-content: flex-start; cursor: pointer; }
+.import-row input { margin-right: 8px; }

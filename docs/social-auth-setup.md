@@ -41,6 +41,11 @@ page; nothing else breaks.
    developers and testers listed under App Roles can sign in until the app is
    switched to Live.
 
+Contact import: the Facebook button also requests `user_friends` (plus `email`, `public_profile`) so
+friends who use the app can be offered for import. Meta only returns those friends, and `user_friends`
+needs app review for anyone who is not an admin/developer/tester on the app. If Meta refuses the scope,
+set `NEXT_PUBLIC_FACEBOOK_FRIENDS=0` and redeploy; the Facebook friends-file upload keeps working.
+
 ## LinkedIn (provider id: `linkedin_oidc`)
 
 1. developer.linkedin.com -> **Create app** (needs a LinkedIn Page; any page
@@ -114,3 +119,11 @@ with Tailscale Funnel, which gives fixed HTTPS URLs that OAuth providers accept:
   after changing them.
 - `app/auth/callback` builds its redirect from the forwarded Host / proto headers, so
   sign-in returns to the public URL instead of `localhost:3000` behind a proxy.
+
+## Google Contacts import (scope `contacts.readonly`)
+
+The organizer's **Import from Google Contacts** button (`/connect/google`) re-runs Google sign-in with
+`https://www.googleapis.com/auth/contacts.readonly`; normal Google sign-in never requests it. Requirements:
+enable the **People API** in the GCP project, and add the scope on the OAuth consent screen. It is a Google
+"sensitive" scope, so users see an "unverified app" warning until Google verifies the app. The token is used
+once in `/auth/callback?import=google` to list connections and is not stored.

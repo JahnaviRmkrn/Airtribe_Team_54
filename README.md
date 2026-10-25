@@ -45,6 +45,9 @@ Open http://127.0.0.1:8000 - API docs at http://127.0.0.1:8000/docs
 | GET | `/api/me/dashboard` | | goals, contact_counts, recorded_activity (separate measures), contacts_by_category, followups, upcoming_meetups, recent_activity, is_empty |
 | GET | `/api/me/contacts` | `?category=personal\|professional\|community` | |
 | POST | `/api/me/contacts` | one contact, or `{ contacts: [...] }` (max 5, onboarding confirm) | |
+| POST | `/api/me/contacts/import/preview` | `{ source, content }` (file text), `{ source: 'android', picks }`, or `{ source: 'facebook'\|'google', staged: true }` | parse + dedupe only, writes nothing. `source` = linkedin, facebook, vcard, google, android. Files <= 5 MB (15 MB for .vcf), <= 5,000 rows. Each row gets `verdict` new / update / duplicate |
+| POST | `/api/me/contacts/import` | `{ source, category, contacts: [<=5000 rows from the preview], clear_staged? }` | bulk insert in batches of 500 via `import_contacts()`; re-imports of the same `source_ref` refresh instead of duplicating. `{ inserted, updated, skipped }` |
+| GET / DELETE | `/api/me/contacts/import/staged` | `?source=` (DELETE) | friends/contacts fetched at Facebook / Google sign-in, waiting for review (kept 7 days) |
 | GET | `/api/me/contacts/:id` | | contact + interaction history |
 | PATCH / DELETE | `/api/me/contacts/:id` | partial contact | |
 | GET / PUT | `/api/me/goals` | `{ personal, professional, community }` | must total 100 |
@@ -242,3 +245,22 @@ http://localhost:3000/organizer/ . Any 401 from `/api/me/*` redirects to
   empty and error states; everything survives a refresh and works at phone and
   desktop widths.
 
+
+
+### Importing contacts
+
+Contacts page -> **Import contacts**: upload, review the preview (duplicates are matched by email, phone or
+normalised name and left unticked), pick a category, confirm.
+
+| Source | How the user gets the data |
+|---|---|
+| LinkedIn | Settings -> Data privacy -> Get a copy of your data -> Connections (`Connections.csv`) |
+| Facebook | Download your information -> Friends and followers, JSON (`connections/friends/your_friends.json`; HTML also works). Signing in with Facebook also stages friends who use the app (Graph API `/me/friends`) |
+| iPhone / vCard | iCloud.com -> Contacts -> select all -> Export vCard, or share contacts from the Contacts app (`.vcf`, 3.0 and 4.0) |
+| Google | contacts.google.com -> Export (Google CSV or vCard), or the **Import from Google Contacts** button (People API, read-only scope requested only for that button) |
+| Android | **Pick from this phone** (Contact Picker API, Chrome on Android only) |
+
+Config: `NEXT_PUBLIC_FACEBOOK_FRIENDS=0` stops the Facebook button asking for `user_friends` (set it if Meta
+rejects the scope for your app). Provider tokens are used once at the OAuth callback and never stored; only the
+fetched names are parked in `contact_import_stage`. Migration: `20261025090000_contact_sources.sql`.
+Parsers/dedupe: `lib/import*.ts`; fixtures: `fixtures/import/`.

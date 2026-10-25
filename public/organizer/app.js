@@ -653,7 +653,7 @@ async function contactsView() {
   if (stale(nav)) return;
   const openForm = !!sessionStorage.getItem('org_new_contact') || !contacts.length;
   el('app').innerHTML = `
-    <div class="page-head"><div><h1>Contacts</h1><p class="muted lede">${contacts.length} ${contacts.length === 1 ? 'person' : 'people'}${filter ? ' in ' + esc(filter) : ''}</p></div></div>
+    <div class="page-head"><div><h1>Contacts</h1><p class="muted lede">${contacts.length} ${contacts.length === 1 ? 'person' : 'people'}${filter ? ' in ' + esc(filter) : ''}</p></div><button type="button" id="imp-open">Import contacts</button></div>
     <section class="card">
       <div class="toolbar">
         <input id="c-search" type="search" placeholder="Search by name or interest" aria-label="Search contacts">
@@ -680,6 +680,22 @@ async function contactsView() {
         <p class="error" id="add-error"></p>
         <button class="primary" type="submit">Add</button>
       </form>
+    </details>
+    <details class="card add-card" id="imp-details">
+      <summary>Import contacts</summary>
+      <p class="muted">Bring in your people from LinkedIn, Facebook, your phone or Google. You review the list before anything is saved.</p>
+      <div id="imp-staged"></div>
+      <div class="form-grid">
+        <label>Where from <select id="imp-src">${IMPORT_SOURCES.map((s) => `<option value="${s.id}">${esc(s.label)}</option>`).join('')}</select></label>
+        <label>File <input id="imp-file" type="file"></label>
+        <p class="muted full" id="imp-help"></p>
+      </div>
+      <div class="actions">
+        <button type="button" id="imp-google">Import from Google Contacts</button>
+        <span id="imp-pick-wrap" class="hidden"><button type="button" id="imp-pick">Pick from this phone</button></span>
+      </div>
+      <p id="imp-msg" class="muted" role="status"></p>
+      <div id="imp-preview"></div>
     </details>`;
 
   const sorted = contacts.slice().sort((x, y) => {
@@ -718,11 +734,136 @@ async function contactsView() {
       contactsView();
     } catch (err) { el('add-error').textContent = err.message; }
   };
+  wireImport();
   if (sessionStorage.getItem('org_new_contact')) {
     sessionStorage.removeItem('org_new_contact');
     el('add-details').scrollIntoView({ block: 'center' });
     el('c-name').focus();
   }
+}
+
+// --- import contacts (LinkedIn, Facebook, iPhone/vCard, Google, Android) ---------
+
+const IMPORT_CAP = { vcard: 15, google: 15 }; // MB; everything else 5
+const IMPORT_SOURCES = [
+  { id: 'linkedin', label: 'LinkedIn Connections.csv', accept: '.csv,text/csv', cat: 'professional',
+    help: 'On LinkedIn: Settings, Data privacy, Get a copy of your data, Connections. Upload the Connections.csv you receive.' },
+  { id: 'facebook', label: 'Facebook friends file', accept: '.json,.html,application/json', cat: 'personal',
+    help: 'On Facebook: Settings, Download your information, Friends and followers (JSON). Upload connections/friends/your_friends.json.' },
+  { id: 'vcard', label: 'iPhone contacts (.vcf)', accept: '.vcf,.vcard,text/vcard', cat: 'personal',
+    help: 'On iCloud.com: Contacts, select all, Export vCard. Or in the iPhone Contacts app, select contacts and share them as a .vcf file.' },
+  { id: 'google', label: 'Google Contacts export', accept: '.csv,.vcf,text/csv,text/vcard', cat: 'personal',
+    help: 'On contacts.google.com: Export, choose Google CSV (or vCard), then upload the file.' },
+];
+// Photos are the bulk of a big .vcf and are never used: drop them before upload.
+const stripVcardPhotos = (t) => t.replace(/^((?:item\d+\.)?(?:PHOTO|LOGO|SOUND|KEY)[^:\r\n]*:[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*)(\r?\n|$)/gim, '');
+
+function wireImport() {
+  let rows = [];
+  let current = null; // { source, staged? }
+  const status = (msg, isErr) => { el('imp-msg').textContent = msg || ''; el('imp-msg').className = isErr ? 'error' : 'muted'; };
+  const srcOf = () => IMPORT_SOURCES.find((s) => s.id === el('imp-src').value);
+  const syncSource = () => { const s = srcOf(); el('imp-help').textContent = s.help; el('imp-file').accept = s.accept; };
+
+  el('imp-open').onclick = () => { el('imp-details').open = true; el('imp-details').scrollIntoView({ block: 'center' }); };
+  el('imp-src').onchange = syncSource;
+  syncSource();
+  el('imp-google').onclick = () => { location.href = '/connect/google'; };
+  if (navigator.contacts && navigator.contacts.select) {
+    el('imp-pick-wrap').classList.remove('hidden');
+    el('imp-pick').onclick = async () => {
+      try {
+        const picks = await navigator.contacts.select(['name', 'email', 'tel'], { multiple: true });
+        if (!picks.length) return;
+        await preview({ source: 'android', picks: picks.map((p) => ({ name: p.name, email: p.email, tel: p.tel })) }, { source: 'android' });
+      } catch (e) { status(e.message, true); }
+    };
+  }
+
+  el('imp-file').onchange = async () => {
+    const f = el('imp-file').files[0];
+    if (!f) return;
+    const s = srcOf();
+    if (f.size > (IMPORT_CAP[s.id] || 5) * 1024 * 1024) return status('That file is over ' + (IMPORT_CAP[s.id] || 5) + ' MB.', true);
+    let content = await f.text();
+    if (/BEGIN:VCARD/i.test(content)) content = stripVcardPhotos(content);
+    await preview({ source: s.id, content }, { source: s.id });
+    el('imp-file').value = '';
+  };
+
+  async function preview(body, ctx) {
+    status('Reading your contacts...');
+    el('imp-preview').innerHTML = '';
+    try {
+      const r = await api('/api/me/contacts/import/preview', { method: 'POST', body: JSON.stringify(body) });
+      rows = r.rows || [];
+      current = ctx;
+      status('');
+      renderPreview(!!r.truncated);
+    } catch (e) { status(e.message, true); }
+  }
+
+  function renderPreview(truncated) {
+    const src = current.source;
+    const cat0 = (IMPORT_SOURCES.find((s) => s.id === src) || {}).cat || 'personal';
+    const fresh = rows.filter((r) => r.verdict === 'new').length;
+    if (!rows.length) { el('imp-preview').innerHTML = '<p class="muted empty">No people found in that file.</p>'; return; }
+    el('imp-preview').innerHTML = `
+      <p>${rows.length} ${rows.length === 1 ? 'person' : 'people'} found, ${fresh} new${rows.length - fresh ? ', ' + (rows.length - fresh) + ' already in your contacts' : ''}.${truncated ? ' Only the first 5,000 were read.' : ''}</p>
+      <div class="toolbar">
+        <label>Add as <select id="imp-cat">${CATEGORIES.map((c) => `<option value="${c}"${c === cat0 ? ' selected' : ''}>${catLabel(c)}</option>`).join('')}</select></label>
+        <label><input type="checkbox" id="imp-all" ${fresh ? 'checked' : ''}> Select all new</label>
+      </div>
+      <div id="imp-list" class="import-list">${rows.map((r, i) => `
+        <label class="row import-row">
+          <span><input type="checkbox" data-i="${i}" ${r.verdict === 'new' ? 'checked' : ''} ${r.verdict === 'duplicate' ? 'disabled' : ''}>
+            <strong>${esc(r.name)}</strong>
+            ${r.verdict === 'duplicate' ? '<span class="tag">Already in contacts</span>' : r.verdict === 'update' ? '<span class="tag">Imported before, will refresh</span>' : ''}
+            <span class="muted">${esc([r.position, r.company].filter(Boolean).join(' at '))}${r.email || r.phone ? ' ' + esc(r.email || r.phone) : ''}</span>
+          </span>
+        </label>`).join('')}
+      </div>
+      <p class="error" id="imp-error"></p>
+      <button class="primary" id="imp-go" type="button">Import selected</button>
+      <button type="button" id="imp-cancel">Cancel</button>`;
+    el('imp-all').onchange = () => document.querySelectorAll('#imp-list input[data-i]:not(:disabled)').forEach((c) => { c.checked = el('imp-all').checked && rows[c.dataset.i].verdict === 'new'; });
+    el('imp-cancel').onclick = () => { rows = []; el('imp-preview').innerHTML = ''; };
+    el('imp-go').onclick = async () => {
+      const picked = [...document.querySelectorAll('#imp-list input[data-i]:checked')].map((c) => rows[c.dataset.i]);
+      if (!picked.length) { el('imp-error').textContent = 'Select at least one person.'; return; }
+      el('imp-go').disabled = true;
+      el('imp-go').textContent = 'Importing...';
+      try {
+        const contacts = picked.map((r) => ({ name: r.name, email: r.email, phone: r.phone, source_ref: r.source_ref, company: r.company, position: r.position, notes: r.notes }));
+        const body = { source: src, category: el('imp-cat').value, contacts };
+        if (current.staged) body.clear_staged = src;
+        const res = await api('/api/me/contacts/import', { method: 'POST', body: JSON.stringify(body) });
+        flash(res.inserted + ' imported' + (res.updated ? ', ' + res.updated + ' refreshed' : '') + (res.skipped ? ', ' + res.skipped + ' skipped as duplicates' : '') + '.');
+        contactsView();
+      } catch (e) {
+        el('imp-error').textContent = e.message;
+        el('imp-go').disabled = false;
+        el('imp-go').textContent = 'Import selected';
+      }
+    };
+  }
+
+  // Friends/contacts fetched at sign-in (Facebook Graph API, Google People API).
+  api('/api/me/contacts/import/staged').then((staged) => {
+    const box = el('imp-staged');
+    if (!box) return;
+    const ready = ['google', 'facebook'].filter((k) => staged[k] > 0);
+    ready.forEach((k) => {
+      const b = document.createElement('div');
+      b.className = 'row';
+      b.innerHTML = `<span>${staged[k]} ${k === 'google' ? 'Google contacts' : 'Facebook friends who use muop'} ready to review.</span>
+        <span class="actions"><button type="button" data-st="${k}" class="primary">Review</button><button type="button" data-dismiss="${k}">Dismiss</button></span>`;
+      box.appendChild(b);
+    });
+    box.querySelectorAll('[data-st]').forEach((b) => { b.onclick = () => preview({ source: b.dataset.st, staged: true }, { source: b.dataset.st, staged: true }); });
+    box.querySelectorAll('[data-dismiss]').forEach((b) => { b.onclick = async () => { await api('/api/me/contacts/import/staged?source=' + b.dataset.dismiss, { method: 'DELETE' }); b.closest('.row').remove(); }; });
+    if (ready.length) el('imp-details').open = true;
+  }).catch(() => {});
 }
 
 function contactRow(c) {
@@ -733,6 +874,7 @@ function contactRow(c) {
   return `
     <div class="row contact-row">
       <div><strong>${esc(c.name)}</strong> <span class="tag">${esc(catLabel(c.category))}</span>${overdue ? ' <span class="tag overdue">Overdue</span>' : ''}
+        ${c.company || c.position ? `<div class="muted">${esc([c.position, c.company].filter(Boolean).join(' at '))}</div>` : ''}
         ${(c.interests || []).length ? `<div class="interest-pills">${c.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}</div>` : ''}
         <div class="muted">${when}</div>
       </div>
