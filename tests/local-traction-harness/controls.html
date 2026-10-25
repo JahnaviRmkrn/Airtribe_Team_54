@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Local Traction SQL fixture controls</title><link rel="stylesheet" href="/globals.css"><link rel="stylesheet" href="/traction.css"><script src="/__harness/controls.js" defer></script></head>
+<body><main class="traction"><h1>Local Traction SQL fixture</h1>
+<p>Actual checked-in server component, reader and ledger over in-memory service-role PostgreSQL. No live Auth/provider, Next cache/runtime or hydration. Only fixed synthetic identities and data. No personal information, credentials or external sends.</p>
+<p><a href="/traction">Open actual Traction SSR page</a></p>
+<section class="tr-card"><h2>Fixed scenarios</h2>
+<p>Resets replace only this in-memory database, clear failures/evidence and require reloading Traction. Caps apply to all three streams. No custom rows, counts, SQL, URLs or timings are accepted.</p>
+<button data-scenario="complete">Five complete genuine visits (cap 2)</button>
+<button data-scenario="mixed">Mixed exclusions (cap 2)</button>
+<button data-scenario="empty">Genuinely empty</button>
+<button data-scenario="zero-cap">Nonempty, zero-row transport cap</button>
+<button data-scenario="lookup-error">Organizer lookup error</button>
+<p>Complete: 5 joined/shared/completed, 5 rooms. Mixed: same five genuine visits, plus 1 test, 2 seeded, 1 team and 1 unverified exclusion. Lookup error: 5 unverified and 0 counted. Zero cap: load error, not zero totals. Empty: genuine successful zero totals.</p></section>
+<section class="tr-card"><h2>One-shot second-page failure</h2>
+<p>Use complete or mixed, arm one stream, then reload Traction. The first page executes real SQL; the second cursor page receives a database-style error. Actual page output shows unavailable numbers without the success headline/funnel (HTTP may remain 200). The next reload succeeds without rearming.</p>
+<button data-failure="attendees">Fail next attendee page 2</button>
+<button data-failure="votes">Fail next vote page 2</button>
+<button data-failure="meetups">Fail next meetup page 2</button></section>
+<button id="refresh">Refresh aggregate status</button><button id="stop">Stop local server</button>
+<p>Fixed loopback port 4324. Stops after 30 minutes; stop discards data. Status shows synthetic counts, bounded query evidence and source hashes, never names/emails/tokens.</p>
+<pre id="status" role="status" aria-live="polite">Loading…</pre></main></body></html>
