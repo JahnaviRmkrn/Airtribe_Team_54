@@ -128,6 +128,19 @@ export async function saveGoogleSession<T>(config: GoogleConfig, session: Sessio
   if (error) throw new HttpError(503, 'Could not save the import preview. Please retry.');
   if (!data?.length) throw new HttpError(410, 'This import expired or was cancelled. Connect Google again.');
 }
+// Durable checkpoint for a bounded action intent/result while retaining the
+// caller's lease. Never use this to retry an uncertain provider-side mutation.
+// The absolute session expiry is not extended; an expired lease cannot revive.
+export async function checkpointGoogleSession<T>(config: GoogleConfig, session: Session<T>) {
+  const now = new Date().toISOString();
+  const { data, error } = await adminClient().from(TABLE).update({
+    encrypted_payload: seal(session.payload, config, session.id, session.owner),
+    locked_until: new Date(Math.min(Date.now() + 30_000, Date.parse(session.expiresAt))).toISOString(),
+  }).eq('id', session.id).eq('user_id', session.owner).eq('purpose', config.purpose).eq('lease', session.lease)
+    .gt('expires_at', now).gt('locked_until', now).select('id');
+  if (error) throw new HttpError(503, 'Could not save the Google action state. No further action will be attempted.');
+  if (!data?.length) throw new HttpError(410, 'This Google action expired or was cancelled.');
+}
 // Make an authorization response one-use before sending the code to Google.
 // Preserve the lease while replacing state/verifier with a harmless marker.
 export async function consumeGoogleAuthorization(config: GoogleConfig, session: Session<unknown>) {

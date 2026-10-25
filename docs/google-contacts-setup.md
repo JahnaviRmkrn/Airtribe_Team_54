@@ -127,6 +127,10 @@ union, cross-purpose token reuse, login change, or refresh operation.
   exchanging a code, without releasing the lease.
 - `saveGoogleSession(config, session)` verifies ID/owner/purpose/lease/expiry,
   stores payload, and unlocks. `releaseGoogleSession` unlocks without rewriting.
+- `checkpointGoogleSession(config, session)` saves a durable mutation intent or
+  result while retaining/renewing an unexpired 30-second lease. It never extends
+  the absolute session lifetime or revives an expired lease. Checkpoint before
+  a side effect, not only afterward; an uncertain action must not be replayed.
 - `discardGoogleSession(config, session)` removes only that session;
   `deleteGoogleSession(config, owner)` is explicit current-purpose cancellation.
 - `googleJson` is for bounded provider requests and never automatically retries.
