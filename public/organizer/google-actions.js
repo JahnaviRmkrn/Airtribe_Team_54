@@ -26,8 +26,14 @@
       function bind(id, callback) {
         const button = field(id); if (!button) return;
         const v = view; let busy = false;
-        button.onclick = async () => {
+        button.onclick = async (event) => {
           if (busy || !live(v) || button.disabled) return;
+          // Browser-generated clicks include native keyboard activation. A model
+          // calling element.click() cannot authorize consent or a saved action.
+          if (['ga-confirm', 'ga-connect'].includes(id) && event?.isTrusted !== true) {
+            showError(new Error('Review this action and activate this button yourself to confirm.'));
+            return;
+          }
           busy = true; button.disabled = true;
           try { await callback(v); } catch (error) { if (live(v)) showError(error); }
           finally { if (live(v)) { busy = false; button.disabled = false; } }

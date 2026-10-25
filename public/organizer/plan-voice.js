@@ -75,6 +75,10 @@
     };
     let session = null;
     let left = false;
+    let starting = false;
+    let generation = 0;
+    let controller = null;
+    let creationUncertain = false;
 
     function showResult(created, plan) {
       const m = created.meetup || {};
@@ -109,7 +113,9 @@
       void links;
     }
 
-    async function save(args) {
+    async function save(args, active) {
+      if (!active()) return { error: 'Voice plan cancelled or ended.', cancelled: true };
+      if (creationUncertain) return { error: 'The previous creation outcome is unknown. Check your meetups before creating another.', uncertain: true };
       const body = { title: String(args.title || '').slice(0, 120) || 'Meetup', activity: ACTIVITIES.includes(args.activity) ? args.activity : 'dinner' };
       if (args.area) body.area = String(args.area).slice(0, 80);
       if (args.starts_at && !isNaN(Date.parse(args.starts_at))) {
@@ -121,42 +127,83 @@
       if (Number(args.budget) > 0) body.budget = Math.round(Number(args.budget));
       const invitees = Array.isArray(args.invitees) ? args.invitees.map(String).slice(0, 20) : [];
       body.notes = [args.summary, invitees.length ? 'Inviting: ' + invitees.join(', ') : ''].filter(Boolean).join('\n').slice(0, 2000);
-      const res = await fetch('/api/me/meetups', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) return { error: data.error || ('Could not create the meetup (' + res.status + ')') };
-      showResult(data, { ...args, invitees });
-      if (onCreated) onCreated(data);
-      return { ok: true, room_url: data.meetup && data.meetup.room_url, title: data.meetup && data.meetup.title };
+      let res, data;
+      try {
+        // Stopping voice cannot undo a request already sent. Do not abort or
+        // repeat this mutation; retain the first outcome for this conversation.
+        res = await fetch('/api/me/meetups', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        data = await res.json();
+        if (res.status >= 500 || (res.ok && !data?.meetup?.room_url)) throw new Error('Missing creation receipt');
+      } catch {
+        creationUncertain = true;
+        const error = 'The creation outcome is unknown. Check your meetups before trying again; it may already exist.';
+        if (active()) { $('err').textContent = error; status('Use the meetup list to check the result.'); }
+        return { error, uncertain: true };
+      }
+      if (!res.ok) return { error: data?.error || ('Could not create the meetup (' + res.status + ')') };
+      if (active()) {
+        showResult(data, { ...args, invitees });
+        if (onCreated) onCreated(data);
+      }
+      return { ok: true, room_url: data.meetup.room_url, title: data.meetup.title };
     }
 
     async function start() {
+      if (left || starting || session || creationUncertain) return;
+      starting = true;
+      const run = ++generation;
+      const attempt = new AbortController();
+      controller = attempt;
+      let ended = false;
+      const current = () => !left && generation === run && !attempt.signal.aborted;
+      const active = () => current() && !ended;
+      let saveAttempt = null;
       $('err').textContent = '';
       try {
-        session = await window.LiveVoice.start({
+        const created = await window.LiveVoice.start({
+          signal: attempt.signal,
           instructions: instructions(),
           tools: [SAVE_TOOL],
-          onToolCall: (name, args) => (name === 'save_meetup_plan' ? save(args) : { error: 'Unknown tool' }),
-          onUser: (t) => line('user', t),
-          onModel: (t) => line('agent', t),
-          onError: (msg) => { $('err').textContent = 'Voice error: ' + msg; },
+          onToolCall: (name, args, context = {}) => {
+            if (!active() || context.signal?.aborted) return { error: 'Voice plan cancelled or ended.', cancelled: true };
+            if (name !== 'save_meetup_plan') return { error: 'Unknown tool' };
+            // Exactly one creation attempt per spoken plan, even if the model
+            // repeats it with a new tool ID or while the first request is pending.
+            if (!saveAttempt) saveAttempt = save(args, () => active() && !context.signal?.aborted);
+            return saveAttempt;
+          },
+          onUser: (t) => { if (active()) line('user', t); },
+          onModel: (t) => { if (active()) line('agent', t); },
+          onError: (msg) => { if (current()) $('err').textContent = 'Voice error: ' + msg; },
           onState: (st) => {
-            if (left) return;
+            if (!active()) return;
             $('mic').dataset.state = st;
             if (st === 'connecting') status('Connecting...');
             else if (st === 'listening') status('Listening - what are you planning? Tap the mic again to finish.');
             else if (st === 'speaking') status('muop is speaking...');
-            else if (st === 'ended') { session = null; status('Done. Tap the mic to plan another.'); }
+            else if (st === 'ended') { session = null; status('Done. Tap the mic to plan another.'); ended = true; }
           },
         });
+        if (!active()) created.stop(); else session = created;
       } catch (e) {
+        if (!active()) return;
         session = null;
         $('err').textContent = e && e.name === 'NotAllowedError' ? 'Microphone permission was denied.' : (e && e.message) || 'Voice failed - use the form below.';
         status('Use the form below instead.');
-      }
+      } finally { if (generation === run) starting = false; }
     }
 
-    $('mic').onclick = () => (session ? session.stop() : start());
-    const leave = () => { left = true; if (session) { session.stop(); session = null; } };
+    function stopSession() {
+      generation++;
+      controller?.abort(); controller = null;
+      const previous = session; session = null; starting = false;
+      if (previous) previous.stop();
+    }
+    $('mic').onclick = () => {
+      if (session) { stopSession(); if (!left) status('Done. Tap the mic to plan another.'); }
+      else return start();
+    };
+    const leave = () => { left = true; stopSession(); };
     window.addEventListener('hashchange', leave, { once: true });
     return { stop: leave };
   }

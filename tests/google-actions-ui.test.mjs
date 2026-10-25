@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
+const humanClick = { isTrusted: true }; // Simulated browser-generated pointer or keyboard activation.
 const source = readFileSync(new URL('../public/organizer/google-actions.js', import.meta.url), 'utf8');
 const escape = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const action = (state = 'preview') => ({ id: '44444444-4444-4444-8444-444444444444', previewHash: 'a'.repeat(64), createdAt: '2026-10-25T04:00:00.000Z', state, preview: { kind: 'gmail', from: 'sender@example.test', to: ['person@example.test'], subject: 'Hello', body: 'Explicit text' } });
@@ -38,6 +39,21 @@ const readyApi = (post) => vi.fn(async (_url, options) => options ? post(JSON.pa
 const submit = (h) => h.node('ga-form').onsubmit({ preventDefault() {} });
 
 describe('shipped explicit Google action UI', () => {
+  it('does not let programmatic click bypass the Calendar confirmation', async () => {
+    const saved = { ...action(), preview: { kind: 'calendar', title: 'Meetup', localStart: '2026-11-01T10:00', endLocal: '2026-11-01T11:00', timeZone: 'UTC', durationMinutes: 60, start: '2026-11-01T10:00:00Z', end: '2026-11-01T11:00:00Z', attendees: [] } };
+    const api = vi.fn(async (_url, options) => options ? { action: saved } : { enabled: true, connected: true, actions: [saved] });
+    const h = harness(api, 'calendar'); await h.render(); await h.node('ga-history-0').onclick();
+    await h.node('ga-confirm').onclick({ isTrusted: false });
+    expect(api.mock.calls.filter(([, o]) => o)).toHaveLength(0);
+    expect(h.node('ga-error').textContent).toMatch(/yourself|manual/i);
+    await h.node('ga-confirm').onclick(humanClick);
+    expect(api.mock.calls.filter(([, o]) => o)).toHaveLength(1);
+  });
+  it('requires a fresh human activation to start Google consent', async () => {
+    const api = vi.fn(async () => ({ enabled: true, connected: false, actions: [] }));
+    const h = harness(api); await h.render(); await h.node('ga-connect').onclick({ isTrusted: false });
+    expect(api).toHaveBeenCalledTimes(1); expect(h.location.assign).not.toHaveBeenCalled();
+  });
   it('shows disabled setup without connect/compose controls', async () => {
     const api = vi.fn(async () => ({ enabled: false, connected: false, actions: [], message: 'Setup pending' }));
     const h = harness(api); await h.render();
@@ -66,21 +82,21 @@ describe('shipped explicit Google action UI', () => {
   });
   it('requires sender acknowledgment before enabling or invoking Gmail confirmation', async () => {
     const api = readyApi(() => ({ action: action() })); const h = await composing(api); await submit(h);
-    expect(h.node('ga-confirm').disabled).toBe(true); await h.node('ga-confirm').onclick();
+    expect(h.node('ga-confirm').disabled).toBe(true); await h.node('ga-confirm').onclick(humanClick);
     expect(api.mock.calls.filter(([, o]) => o && JSON.parse(o.body).operation === 'confirm')).toHaveLength(0);
   });
   it('guards repeated confirms and sends only the saved ID/digest, never mutable draft data', async () => {
     const wait = deferred(); const api = readyApi((body) => body.operation === 'confirm' ? wait.promise : { action: action() });
     const h = await composing(api); await submit(h);
     h.node('ga-sender-check').checked = true; h.node('ga-sender-check').onchange();
-    const button = h.node('ga-confirm'); const first = button.onclick(); const second = button.onclick();
+    const button = h.node('ga-confirm'); const first = button.onclick(humanClick); const second = button.onclick(humanClick);
     expect(button.disabled).toBe(true); const confirmations = api.mock.calls.filter(([, o]) => o && JSON.parse(o.body).operation === 'confirm');
     expect(confirmations).toHaveLength(1); expect(JSON.parse(confirmations[0][1].body)).toEqual({ operation: 'confirm', id: action().id, previewHash: action().previewHash, confirmed: true, senderAcknowledged: true });
     wait.resolve({ action: action('completed') }); await Promise.all([first, second]); expect(h.app.innerHTML).toContain('Google accepted this email');
   });
   it('a lost confirm response removes resend controls and offers status checking only', async () => {
     const api = readyApi((body) => { if (body.operation === 'confirm') throw new Error('Lost response'); return { action: action() }; });
-    const h = await composing(api); await submit(h); h.node('ga-sender-check').checked = true; h.node('ga-sender-check').onchange(); await h.node('ga-confirm').onclick();
+    const h = await composing(api); await submit(h); h.node('ga-sender-check').checked = true; h.node('ga-sender-check').onchange(); await h.node('ga-confirm').onclick(humanClick);
     expect(h.app.innerHTML).toContain('The outcome is unknown'); expect(h.node('ga-confirm')).toBeUndefined(); expect(h.node('ga-check')).toBeDefined(); expect(h.node('ga-reconcile')).toBeUndefined();
   });
   it('ignores delayed preview success after navigation and performs no confirm', async () => {
@@ -104,7 +120,7 @@ describe('shipped explicit Google action UI', () => {
   });
   it('rejects unexpected authorization destinations without navigating', async () => {
     const api = readyApi(() => ({ authorizationUrl: 'https://evil.test/steal' }));
-    const h = harness(api); await h.render(); await h.node('ga-connect').onclick();
+    const h = harness(api); await h.render(); await h.node('ga-connect').onclick(humanClick);
     expect(h.location.assign).not.toHaveBeenCalled(); expect(h.node('ga-error').textContent).toContain('Unexpected Google connection destination');
   });
 });

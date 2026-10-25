@@ -66,13 +66,37 @@ export function toChatRequest(body: AssistantBody, model: string) {
 
 const allowed = (body: AssistantBody) => new Set(body.tools.map((t) => t.name));
 
-// Model output -> { reply, tool_calls } limited to the declared tools.
+const providerResponse = z.object({
+  choices: z.array(z.object({ message: z.object({
+    content: z.string().nullable().optional(),
+    tool_calls: z.array(z.object({
+      id: z.string().min(1).max(100),
+      function: z.object({ name: z.string().min(1).max(40), arguments: z.string().max(4000) }),
+    })).max(5).optional(),
+  }) })).min(1),
+});
+
+// Model output -> { reply, tool_calls } limited to the declared tools. Invalid
+// JSON, truncated arguments and duplicate IDs are errors, never executable
+// empty-argument substitutes or apparently successful empty responses.
 export function fromChatResponse(data: unknown, body: AssistantBody) {
-  const msg = (data as { choices?: { message?: { content?: string; tool_calls?: { id?: string; function?: { name?: string; arguments?: string } }[] } }[] })?.choices?.[0]?.message;
+  const invalid = () => new Error('Assistant model returned an invalid response');
+  const parsed = providerResponse.safeParse(data);
+  if (!parsed.success) throw invalid();
+  const msg = parsed.data.choices[0].message;
   const names = allowed(body);
-  const tool_calls = (msg?.tool_calls ?? [])
-    .filter((t) => t.function?.name && names.has(t.function.name))
-    .slice(0, 5)
-    .map((t, i) => ({ id: String(t.id || `call_${i}`).slice(0, 100), name: t.function!.name!, arguments: String(t.function!.arguments || '{}').slice(0, 4000) }));
-  return { reply: String(msg?.content || '').slice(0, 2000), tool_calls };
+  const ids = new Set<string>();
+  const tool_calls = (msg.tool_calls ?? [])
+    .filter((t) => names.has(t.function.name))
+    .map((t) => {
+      if (ids.has(t.id)) throw invalid();
+      ids.add(t.id);
+      let args: unknown;
+      try { args = JSON.parse(t.function.arguments); } catch { throw invalid(); }
+      if (!args || typeof args !== 'object' || Array.isArray(args)) throw invalid();
+      return { id: t.id, name: t.function.name, arguments: t.function.arguments };
+    });
+  const reply = (msg.content || '').trim().slice(0, 2000);
+  if (!reply && !tool_calls.length) throw invalid();
+  return { reply, tool_calls };
 }

@@ -31,3 +31,18 @@ describe('assistant (DeepSeek tool-calling fallback)', () => {
     expect(assistantBody.safeParse({ ...body, messages: [{ role: 'user', content: 'x'.repeat(5000) }] }).success).toBe(false);
   });
 });
+
+describe('malformed assistant provider output', () => {
+  it.each([null, {}, { choices: [{ message: {} }] }, { choices: [{ message: { content: { fake: true } } }] }, { choices: [{ message: { tool_calls: {} } }] }])('rejects unusable output %#', (data) => {
+    expect(() => fromChatResponse(data, body)).toThrow('Assistant model returned an invalid response');
+  });
+  it.each(['not JSON', '[]', 'null', '{"name":"' + 'a'.repeat(4000) + '"}'])('never truncates or forwards invalid action arguments', (argumentsText) => {
+    expect(() => fromChatResponse({ choices: [{ message: { tool_calls: [{ id: 'a', function: { name: 'add_contact', arguments: argumentsText } }] } }] }, body)).toThrow('Assistant model returned an invalid response');
+  });
+  it('rejects repeated tool IDs instead of executing two actions under one receipt', () => {
+    expect(() => fromChatResponse({ choices: [{ message: { tool_calls: [
+      { id: 'same', function: { name: 'add_contact', arguments: '{"name":"Alice"}' } },
+      { id: 'same', function: { name: 'add_contact', arguments: '{"name":"Bob"}' } },
+    ] } }] }, body)).toThrow('Assistant model returned an invalid response');
+  });
+});

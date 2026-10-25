@@ -102,7 +102,14 @@ window.GoogleContacts = (() => {
           `}
         </section>`;
       const connect = el('gc-connect');
-      if (connect) connect.onclick = () => run(async () => {
+      const humanAction = (event, operation) => {
+        if (stale(nav)) return;
+        // Native pointer and keyboard clicks are trusted; assistant DOM clicks
+        // and synthetic events cannot grant access or confirm an import.
+        if (event?.isTrusted !== true) { errorMessage(new Error('Review this action and activate this button yourself to confirm.')); return; }
+        return run(operation);
+      };
+      if (connect) connect.onclick = (event) => humanAction(event, async () => {
         const result = await api(base + '/start', { method: 'POST' });
         if (stale(nav)) return;
         // Never navigate to a URL outside the expected Google authorization URL.
@@ -134,7 +141,7 @@ window.GoogleContacts = (() => {
         select.onchange = () => { if (selection.has(select.dataset.gcCategory)) selection.set(select.dataset.gcCategory, select.value); };
       });
       const save = el('gc-save');
-      if (save) save.onclick = () => run(async () => {
+      if (save) save.onclick = (event) => humanAction(event, async () => {
         if (!selection.size || selection.size > 5) return;
         const result = await api(base + '/import', { method: 'POST', body: JSON.stringify({ selections: [...selection].map(([id, category]) => ({ id, category })) }) });
         if (stale(nav)) return;

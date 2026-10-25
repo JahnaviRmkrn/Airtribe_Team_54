@@ -30,5 +30,9 @@ export const POST = handle(async (req: Request) => {
     throw new HttpError(502, 'Could not reach the assistant model');
   }
   if (!res.ok) throw new HttpError(502, `Assistant model returned ${res.status}`);
-  return ok(fromChatResponse(await res.json().catch(() => null), body));
+  try {
+    return ok(fromChatResponse(await res.json().catch(() => null), body));
+  } catch {
+    throw new HttpError(502, 'Assistant model returned an invalid response');
+  }
 });

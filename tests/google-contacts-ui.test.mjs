@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
+const humanClick = { isTrusted: true }; // Simulated browser-generated pointer or keyboard activation.
 const source = readFileSync(new URL('../public/organizer/google-contacts.js', import.meta.url), 'utf8');
 const row = (index, extra = {}) => ({ id: `11111111-1111-4111-8111-${String(index).padStart(12, '0')}`, name: `Person ${index}`, email: `person${index}@example.test`, duplicate: false, ...extra });
 const ready = (contacts = [row(1)], extra = {}) => ({ configured: true, ready: true, loaded: true, contacts, has_more: false, skipped: 0, truncated: false, ...extra });
@@ -58,6 +59,14 @@ function browser(initial, handler) {
 }
 
 describe('Google Contacts selection UI', () => {
+  it('rejects programmatic import and consent activation without sending requests', async () => {
+    const app = browser(ready()); await app.view(); app.select(row(1).id);
+    await app.nodes.get('gc-save').onclick({ isTrusted: false });
+    expect(app.calls).toHaveLength(1); expect(app.nodes.get('gc-error').textContent).toMatch(/yourself|manual/i);
+    const disconnected = browser({ configured: true, ready: false }); await disconnected.view();
+    await disconnected.nodes.get('gc-connect').onclick();
+    expect(disconnected.calls).toHaveLength(1); expect(disconnected.context.location.assign).not.toHaveBeenCalled();
+  });
   it.each(['#/google-contacts', '#/gmail', '#/calendar'])('preserves the %s callback route for a new account without an onboarding flag', async (hash) => {
     const appSource = readFileSync(new URL('../public/organizer/app.js', import.meta.url), 'utf8').replace(/\nboot\(\);\s*$/, '');
     const context = vm.createContext({ window: {}, location: { hash }, localStorage: { getItem: () => null }, destination: null });
@@ -92,7 +101,7 @@ describe('Google Contacts selection UI', () => {
     for (let i = 1; i <= 6; i++) app.select(row(i).id);
     expect(app.nodes.get('gc-count').textContent).toBe('5 selected (up to 5 per import)');
     expect(app.selections.get(row(6).id).checked).toBe(false);
-    await app.nodes.get('gc-save').onclick();
+    await app.nodes.get('gc-save').onclick(humanClick);
     expect(imported.selections).toHaveLength(5);
     expect(imported.selections[0]).toEqual({ id: row(1).id, category: 'professional' });
     expect(JSON.stringify(imported)).not.toMatch(/Person|example.test/);
@@ -115,12 +124,12 @@ describe('Google Contacts selection UI', () => {
       return { added: 1, skipped: 0 };
     });
     await app.view(); app.select(row(1).id);
-    const button = app.nodes.get('gc-save'); const first = button.onclick();
-    await button.onclick(); expect(count).toBe(1); expect(button.disabled).toBe(true);
+    const button = app.nodes.get('gc-save'); const first = button.onclick(humanClick);
+    await button.onclick(humanClick); expect(count).toBe(1); expect(button.disabled).toBe(true);
     respond(new Error('Temporary problem')); await first;
     expect(button.disabled).toBe(false); expect(app.nodes.get('gc-error').textContent).toBe('Temporary problem');
     expect(app.selections.get(row(1).id).checked).toBe(true);
-    await button.onclick(); expect(count).toBe(2); expect(app.nodes.get('gc-message').textContent || app.host.innerHTML).toContain('1 imported');
+    await button.onclick(humanClick); expect(count).toBe(2); expect(app.nodes.get('gc-message').textContent || app.host.innerHTML).toContain('1 imported');
   });
   it('cancellation clears preview and selection without deleting imported contacts', async () => {
     const app = browser(ready(), async (path) => path.endsWith('/cancel') ? { disconnected: true } : ready());
@@ -145,7 +154,7 @@ describe('Google Contacts selection UI', () => {
   });
   it('never navigates to an arbitrary authorization URL returned by a bad response', async () => {
     const app = browser({}, async (path) => path.endsWith('/start') ? { authorization_url: 'https://evil.test/steal' } : { configured: true, ready: false });
-    await app.view(); await app.nodes.get('gc-connect').onclick();
+    await app.view(); await app.nodes.get('gc-connect').onclick(humanClick);
     expect(app.context.location.assign).not.toHaveBeenCalled();
     expect(app.nodes.get('gc-error').textContent).toContain('unavailable');
   });
