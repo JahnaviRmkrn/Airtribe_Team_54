@@ -2,6 +2,14 @@
 
 Next.js 15 (App Router) + Supabase (Postgres, Auth, RLS) unified platform, alongside the FastAPI prototype backend and static runner.
 
+## Validation and local setup
+
+For credential-free checks, start with the
+[acceptance evidence and safe reproduction commands](docs/release-acceptance.md).
+The setup below is separate: installing dependencies, starting Supabase and
+applying migrations/seeds require deliberate operator approval and a disposable
+local target. They are not prerequisites for the isolated test fixtures.
+
 ## Run locally
 
 ### 1. Unified App (Next.js 15)
@@ -10,9 +18,16 @@ pnpm install
 supabase start                 # needs Docker; applies migrations + seed.sql
 cp .env.example .env.local     # fill keys from: supabase status
 pnpm dev                       # http://localhost:3000
-pnpm test                      # shortlist unit tests
-node scripts/smoke.mjs         # end-to-end API check (needs dev server running)
+pnpm test                      # test suite; use sanitized commands linked above for isolated validation
 ```
+
+**Legacy live-target smoke is not a safe default gate.** `scripts/smoke.mjs`
+loads `.env.local` for a local target (or an explicitly supplied env file), signs
+up users and writes API data; optional service-role checks also write database
+rows. Run it only after an operator explicitly approves the exact disposable
+target and side effects. Do not run it against a deployment merely to verify
+that deployment, and do not change Auth/security settings just to make it pass.
+It was not used for the credential-free acceptance evidence below.
 
 Deploying (Vercel + hosted Supabase): see [DEPLOY.md](DEPLOY.md).
 `pnpm check-env` validates the env (`--prod` for production values).
