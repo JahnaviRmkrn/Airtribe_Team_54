@@ -13,7 +13,8 @@
     '#muop-desktop .row{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}' +
     '#muop-desktop button{cursor:pointer}' +
     '#muop-desktop pre{white-space:pre-wrap;word-break:break-word;font-size:12px;background:#faf7f2;border-radius:8px;padding:10px;max-height:280px;overflow:auto}' +
-    '#muop-desktop img{max-width:100%;border-radius:8px;border:1px solid #e5ded4}';
+    '#muop-desktop img{max-width:100%;border-radius:8px;border:1px solid #e5ded4}' +
+    '#muop-desktop video{max-width:100%;border-radius:8px;border:1px solid #e5ded4;background:#000}';
   document.head.appendChild(style);
 
   var btn = document.createElement('button');
@@ -24,7 +25,16 @@
   (document.querySelector('.topbar') || document.body).appendChild(btn);
 
   var panel = null;
-  function close() { if (panel) { panel.remove(); panel = null; } }
+  function stopShare() {
+    if (!panel) return;
+    var video = panel.querySelector('video');
+    if (video && video.srcObject) video.srcObject.getTracks().forEach(function (t) { t.stop(); });
+    if (video) { video.srcObject = null; video.hidden = true; }
+    var stop = panel.querySelector('[data-act="stop-share"]');
+    if (stop) stop.hidden = true;
+    show('Screen sharing stopped.');
+  }
+  function close() { if (panel) { stopShare(); panel.remove(); panel = null; } }
   function show(text, imageUrl) {
     var out = panel.querySelector('[data-out]');
     out.textContent = text || '';
@@ -51,13 +61,18 @@
       '<div class="row">' +
       '<button type="button" data-act="files">Open local files…</button>' +
       '<button type="button" data-act="shot">Capture screen</button>' +
+      '<button type="button" data-act="share">Share screen</button>' +
+      '<button type="button" data-act="stop-share" hidden>Stop sharing</button>' +
       (isMac ?
         '<button type="button" data-act="contacts">Mac Contacts</button>' +
         '<button type="button" data-act="notes">Mac Notes</button>' +
         '<button type="button" data-act="reminders">Mac Reminders</button>' +
+        '<button type="button" data-act="new-reminder">New Reminder…</button>' +
         '<button type="button" data-act="chats">Message chats</button>' : '') +
+      '<button type="button" data-act="save">Save result…</button>' +
       '<button type="button" data-act="close">Close</button>' +
       '</div>' +
+      '<video hidden autoplay muted playsinline></video>' +
       '<img hidden alt="Screen capture"><pre data-out>Pick an action above.</pre>';
     document.body.appendChild(panel);
 
@@ -73,6 +88,32 @@
         show(shots[0].name || 'Screen', shots[0].dataUrl);
         return 'Captured: ' + (shots[0].name || 'screen');
       });
+      else if (act === 'share') {
+        show('Starting screen share…');
+        navigator.mediaDevices.getDisplayMedia({ video: true }).then(function (stream) {
+          var video = panel.querySelector('video');
+          video.srcObject = stream;
+          video.hidden = false;
+          panel.querySelector('[data-act="stop-share"]').hidden = false;
+          stream.getVideoTracks()[0].addEventListener('ended', function () { stopShare(); });
+          show('Sharing your screen — preview above. Stop sharing when done.');
+        }).catch(function (err) { show('Screen share failed: ' + (err && err.message ? err.message : err)); });
+      }
+      else if (act === 'stop-share') stopShare();
+      else if (act === 'save') {
+        var text = panel.querySelector('[data-out]').textContent;
+        run('Saving', function () { return bridge.saveTextFile({ suggestedName: 'muop-desktop.txt', text: text }); }, function (saved) {
+          return saved ? 'Saved to ' + saved : 'Save cancelled.';
+        });
+      }
+      else if (act === 'new-reminder') {
+        var name = window.prompt('Reminder name');
+        if (!name) { show('Reminder cancelled.'); return; }
+        var due = window.prompt('Due (optional, e.g. 2026-11-01T19:00)', '');
+        run('Creating reminder', function () {
+          return bridge.createReminder({ name: name, dueDate: due || undefined });
+        }, function (r) { return 'Created reminder "' + r.name + '" in list ' + r.list + '.'; });
+      }
       else if (act === 'contacts') run('Reading Contacts', function () { return bridge.getContacts(); }, function (c) { return names(c, 'name'); });
       else if (act === 'notes') run('Reading Notes', function () { return bridge.getNotes(); }, function (n) { return names(n, 'name'); });
       else if (act === 'reminders') run('Reading Reminders', function () { return bridge.getReminders(); }, function (r) {
