@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { ZodType } from 'zod';
-import { userClient } from './supabase/server';
+import { userClient, type UserClientOptions } from './supabase/server';
 
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -36,8 +36,8 @@ export async function parseBody<T>(req: Request, schema: ZodType<T>): Promise<T>
   return r.data;
 }
 
-export async function requireUser(req: Request) {
-  const supabase = await userClient(req);
+export async function requireUser(req: Request, options?: UserClientOptions) {
+  const supabase = await userClient(req, options);
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) throw new HttpError(401, 'Not signed in');
   // Optional intent binding, also used by legacy contact/goals forms. RLS

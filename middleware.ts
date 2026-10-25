@@ -20,6 +20,12 @@ function httpsRedirect(request: NextRequest) {
 export async function middleware(request: NextRequest) {
   const redirect = httpsRedirect(request);
   if (redirect) return redirect;
+  // This owner-bound mutation authenticates its own request snapshot without
+  // refreshing/persisting cookies. A late middleware cookie would defeat that
+  // guarantee by overwriting an account signed in while the update was pending.
+  if (request.method === 'POST' && request.nextUrl.pathname === '/api/me/password') {
+    return NextResponse.next({ request });
+  }
   let response = NextResponse.next({ request });
   const supabase = createServerClient(supabaseUrl(), supabaseAnonKey(), {
     cookies: {

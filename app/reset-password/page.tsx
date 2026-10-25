@@ -2,9 +2,9 @@
 
 // Set-a-new-password page for the Forgot? flow. The recovery email's link
 // points at /auth/callback?next=/reset-password; the callback exchanges the
-// code for a session and lands here, so updateUser can set the new password.
+// code for a session and lands here; an owner-bound app route sets the password.
 // Styling reuses the muop login design (app/login/login.css).
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { browserClient } from '@/lib/supabase/browser';
 import { safeNext } from '@/lib/urls';
 import '../login/login.css';
@@ -53,7 +53,7 @@ function ShieldIcon() {
   );
 }
 
-type LinkState = 'checking' | 'ready' | 'expired' | 'error';
+type LinkState = 'checking' | 'ready' | 'expired' | 'error' | 'changed' | 'reauth' | 'uncertain' | 'unavailable';
 
 export default function ResetPasswordPage() {
   const [linkState, setLinkState] = useState<LinkState>('checking');
@@ -65,29 +65,52 @@ export default function ResetPasswordPage() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const mounted = useRef(false);
+  const owner = useRef<string | null>(null);
+  const blocked = useRef(false);
+  const submitting = useRef(false);
   const redirectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Untrusted query values: only same-origin paths survive safeNext. Computed
   // after mount so server and client first renders match.
   const next = typeof window === 'undefined' ? '/' : safeNext(new URLSearchParams(location.search).get('next'), location.origin);
 
-  // A session here means the recovery code was exchanged successfully.
-  // PASSWORD_RECOVERY covers clients that detect the token from the URL hash.
+  const invalidate = useCallback((state: 'changed' | 'reauth') => {
+    blocked.current = true;
+    setLinkState(state);
+    setPassword('');
+    setConfirm('');
+    setMsg('');
+    setDone(false);
+    setBusy(false);
+    if (redirectTimer.current !== null) clearTimeout(redirectTimer.current);
+  }, []);
+
+  // Retain the verified account that this form was opened for. A later account
+  // event must never repurpose an existing password draft for another user.
   useEffect(() => {
     mounted.current = true;
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     try {
       const supabase = browserClient();
-      const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-        if (event === 'PASSWORD_RECOVERY' && !cancelled) setLinkState('ready');
+      const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+        if (cancelled || blocked.current) return;
+        const id = session?.user?.id;
+        if (event === 'SIGNED_OUT') return invalidate('reauth');
+        if (owner.current && id && id !== owner.current) return invalidate('changed');
+        if (id && !owner.current) owner.current = id;
+        if (event === 'PASSWORD_RECOVERY' && id) setLinkState('ready');
       });
       unsubscribe = () => sub.subscription.unsubscribe();
       supabase.auth.getUser().then(({ data, error }) => {
-        if (cancelled) return;
+        if (cancelled || blocked.current) return;
+        if (!error && data.user) {
+          if (owner.current && owner.current !== data.user.id) return invalidate('changed');
+          owner.current = data.user.id;
+        }
         setLinkState((s) => (s === 'checking' ? (!error && data.user ? 'ready' : 'expired') : s));
       }).catch(() => {
-        if (!cancelled) setLinkState((s) => s === 'checking' ? 'error' : s);
+        if (!cancelled && !blocked.current) setLinkState((s) => s === 'checking' ? 'error' : s);
       });
     } catch {
       setLinkState('error');
@@ -98,10 +121,12 @@ export default function ResetPasswordPage() {
       unsubscribe?.();
       if (redirectTimer.current !== null) clearTimeout(redirectTimer.current);
     };
-  }, []);
+  }, [invalidate]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const expectedOwner = owner.current;
+    if (blocked.current || submitting.current || linkState !== 'ready' || !expectedOwner) return;
     setMsg('');
     setIsError(false);
     if (password.length < 6) {
@@ -112,19 +137,56 @@ export default function ResetPasswordPage() {
       setIsError(true);
       return setMsg('Passwords do not match.');
     }
+    submitting.current = true;
     setBusy(true);
+    let sent = false;
     try {
-      const { error } = await browserClient().auth.updateUser({ password });
-      if (!mounted.current) return;
-      if (error) throw error;
+      // This catches silent cookie changes; the route's request snapshot and
+      // mandatory owner header close the remaining check-to-update race.
+      const { data, error } = await browserClient().auth.getUser();
+      if (!mounted.current || blocked.current) return;
+      if (error || !data.user) return invalidate('reauth');
+      if (data.user.id !== expectedOwner) return invalidate('changed');
+      sent = true;
+      const response = await fetch('/api/me/password', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-Contact-Owner': expectedOwner },
+        body: JSON.stringify({ password }),
+      });
+      const result = await response.json();
+      if (!mounted.current || blocked.current || owner.current !== expectedOwner) return;
+      if (!response.ok) {
+        if (result.code === 'password_owner_changed') return invalidate('changed');
+        if (result.code === 'password_session_expired') return invalidate('reauth');
+        if (result.code === 'password_update_unavailable') {
+          blocked.current = true;
+          setPassword('');
+          setConfirm('');
+          setMsg(result.error || 'Password reset is temporarily unavailable. Please try again later.');
+          setLinkState('unavailable');
+          return;
+        }
+        if (result.code === 'password_update_rejected' || response.status === 400) {
+          submitting.current = false; // An explicit rejection is safe to correct.
+          setIsError(true);
+          setMsg(result.error || 'The password was rejected. Please try another password.');
+          return;
+        }
+        throw new Error('Unconfirmed password update');
+      }
+      if (result.updated !== true) throw new Error('Unconfirmed password update');
+      setPassword('');
+      setConfirm('');
       setDone(true);
       redirectTimer.current = setTimeout(() => {
-        if (mounted.current) location.href = next;
+        if (mounted.current && !blocked.current && owner.current === expectedOwner) location.href = next;
       }, 1600);
-    } catch (error) {
-      if (mounted.current) {
-        setIsError(true);
-        setMsg(error instanceof Error ? error.message : 'Could not update your password. Please try again.');
+    } catch {
+      if (mounted.current && !blocked.current) {
+        blocked.current = true;
+        setPassword('');
+        setConfirm('');
+        setLinkState(sent ? 'uncertain' : 'error');
       }
     } finally {
       if (mounted.current) setBusy(false);
@@ -136,9 +198,13 @@ export default function ResetPasswordPage() {
       ? done
         ? 'All set!'
         : 'Choose a new password for your account'
-      : linkState === 'expired' || linkState === 'error'
-        ? 'We could not verify your reset link'
-        : 'Hold on a moment';
+      : linkState === 'uncertain'
+        ? 'Check your password before trying again'
+        : linkState === 'unavailable'
+          ? 'Password reset is unavailable'
+          : linkState !== 'checking'
+            ? 'We could not verify your reset link'
+            : 'Hold on a moment';
 
   return (
     <main className="login-page">
@@ -151,12 +217,20 @@ export default function ResetPasswordPage() {
 
         {linkState === 'checking' && <p className="login-msg info">Checking your reset link...</p>}
 
-        {(linkState === 'expired' || linkState === 'error') && (
+        {['expired', 'error', 'changed', 'reauth', 'uncertain', 'unavailable'].includes(linkState) && (
           <>
-            <p className="login-msg error">
-              {linkState === 'error'
-                ? 'We could not check your reset link. Please refresh the page to try again.'
-                : 'This reset link is invalid or has expired. Request a new one from the sign-in page.'}
+            <p role="alert" className="login-msg error">
+              {linkState === 'unavailable'
+                ? msg
+                : linkState === 'changed'
+                ? 'Your signed-in account changed. Request a new reset link before changing a password.'
+                : linkState === 'reauth'
+                  ? 'Your session expired or could not be verified. Sign in again or request a new reset link before trying again.'
+                  : linkState === 'uncertain'
+                    ? 'We could not confirm whether your password changed. Try signing in with the new password before requesting another reset.'
+                    : linkState === 'error'
+                      ? 'We could not check your reset link. Please refresh the page to try again.'
+                      : 'This reset link is invalid or has expired. Request a new one from the sign-in page.'}
             </p>
             <button type="button" className="btn-primary" onClick={() => (location.href = '/login')}>
               Back to Sign In <ArrowIcon />
@@ -216,13 +290,13 @@ export default function ResetPasswordPage() {
           </form>
         )}
 
-        {done && <p className="login-msg info">Password updated - taking you back into the app...</p>}
+        {done && <p role="status" className="login-msg info">Password updated - taking you back into the app...</p>}
 
         <p className="login-footer">
           <ShieldIcon /> Secured with HTTPS
         </p>
 
-        {msg && <p className={`login-msg ${isError ? 'error' : 'info'}`}>{msg}</p>}
+        {msg && linkState !== 'unavailable' && <p role={isError ? 'alert' : 'status'} className={`login-msg ${isError ? 'error' : 'info'}`}>{msg}</p>}
       </div>
     </main>
   );

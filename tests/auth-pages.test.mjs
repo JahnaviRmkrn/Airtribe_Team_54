@@ -33,6 +33,7 @@ function page(name, auth = {}, search = '', env = {}) {
   };
   const modules = {
     react: {
+      useCallback: (fn) => fn,
       useState(initial) {
         const index = cursor++;
         if (!(index in state)) state[index] = initial;
@@ -64,9 +65,17 @@ function page(name, auth = {}, search = '', env = {}) {
     './login.css': {},
     '../login/login.css': {},
   };
+  const request = vi.fn(async (url, options) => {
+    if (url === '/api/me/password') {
+      const result = await auth.updateUser({ password: JSON.parse(options.body).password });
+      return { ok: !result.error, status: result.error ? 400 : 200, json: async () => result.error
+        ? { error: result.error.message, code: 'password_update_rejected' } : { updated: true } };
+    }
+    return { ok: true, json: async () => ({ external: { google: true } }) };
+  });
   const context = vm.createContext({
     exports: {}, window, location, URL, URLSearchParams, Error, setTimeout, clearTimeout,
-    fetch: vi.fn().mockResolvedValue({ ok: true, json: async () => ({ external: { google: true } }) }),
+    fetch: request,
     require(id) {
       if (!(id in modules)) throw new Error(`Unexpected page dependency: ${id}`);
       return modules[id];
@@ -74,7 +83,7 @@ function page(name, auth = {}, search = '', env = {}) {
   });
   vm.runInContext(pages[name], context);
   return {
-    client, location, effects, listeners, history,
+    client, location, effects, listeners, history, request,
     render() {
       cursor = 0;
       effectCursor = 0;
@@ -306,6 +315,23 @@ function resetPage(hasSession = true, search = '') {
 }
 
 describe('preserved reset-password flow', () => {
+  it('does not update a different account after the ready reset form switches owner', async () => {
+    vi.useFakeTimers();
+    const view = resetPage();
+    view.render();
+    const cleanup = view.effects[0]();
+    await tick();
+    field(view.render(), 'reset-password', 'new-password');
+    field(view.render(), 'reset-confirm', 'new-password');
+    const oldForm = view.render();
+    view.auth.getUser.mockResolvedValue({ data: { user: { id: 'different-user' } }, error: null });
+    view.auth.onAuthStateChange.mock.calls[0][0]('SIGNED_IN', { user: { id: 'different-user' } });
+    await submit(oldForm);
+    expect(view.auth.updateUser).not.toHaveBeenCalled();
+    expect(text(view.render())).toContain('account changed');
+    cleanup();
+  });
+
   it('rejects an expired link without offering a password update', async () => {
     const view = resetPage(false);
     view.render();
@@ -368,17 +394,16 @@ describe('preserved reset-password flow', () => {
     view.auth.getUser.mockRejectedValueOnce(new Error('Offline'));
     view.render();
     const cleanup = view.effects[0]();
-    view.auth.onAuthStateChange.mock.calls[0][0]('PASSWORD_RECOVERY');
+    view.auth.onAuthStateChange.mock.calls[0][0]('PASSWORD_RECOVERY', { user: { id: 'test-user' } });
     await tick();
     expect(nodes(view.render()).some((node) => node.type === 'form')).toBe(true);
     cleanup();
   });
 
-  it.each(['returned', 'rejected'])('allows retry after a %s password-update error', async (kind) => {
+  it('allows retry after an explicitly rejected password update', async () => {
     vi.useFakeTimers();
     const view = resetPage();
-    if (kind === 'returned') view.auth.updateUser.mockResolvedValueOnce({ error: new Error('Try again later') });
-    else view.auth.updateUser.mockRejectedValueOnce(new Error('Try again later'));
+    view.auth.updateUser.mockResolvedValueOnce({ error: new Error('Try again later') });
     view.render();
     const cleanup = view.effects[0]();
     await tick();
@@ -406,11 +431,117 @@ describe('preserved reset-password flow', () => {
     field(view.render(), 'reset-password', 'new-password');
     field(view.render(), 'reset-confirm', 'new-password');
     const pending = submit(view.render());
+    await tick();
     cleanup();
     resolve({ error: null });
     await pending;
     await vi.runAllTimersAsync();
     expect(view.location.href).toBe('');
     expect(text(view.render())).not.toContain('Password updated');
+  });
+});
+
+describe('owner-bound reset submission lifecycle', () => {
+  async function ready() {
+    const view = resetPage();
+    view.render();
+    const cleanup = view.effects[0]();
+    await tick();
+    field(view.render(), 'reset-password', 'new-password');
+    field(view.render(), 'reset-confirm', 'new-password');
+    return { view, cleanup };
+  }
+
+  it('sends the owner header to the app route and does not use browser updateUser directly', async () => {
+    vi.useFakeTimers();
+    const { view, cleanup } = await ready();
+    await submit(view.render());
+    expect(view.request).toHaveBeenCalledExactlyOnceWith('/api/me/password', {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Contact-Owner': 'test-user' },
+      body: JSON.stringify({ password: 'new-password' }),
+    });
+    const pageSource = readFileSync(new URL('../app/reset-password/page.tsx', import.meta.url), 'utf8');
+    expect(pageSource).not.toContain('.auth.updateUser(');
+    cleanup();
+  });
+
+  it('rejects a silent cookie-owner change found at preflight', async () => {
+    const { view, cleanup } = await ready();
+    view.auth.getUser.mockResolvedValueOnce({ data: { user: { id: 'bob' } }, error: null });
+    await submit(view.render());
+    expect(view.request).not.toHaveBeenCalled();
+    expect(text(view.render())).toContain('account changed');
+    expect(nodes(view.render()).some((node) => node.type === 'form')).toBe(false);
+    cleanup();
+  });
+
+  it('rejects duplicate submits before preflight and while the update is pending', async () => {
+    vi.useFakeTimers();
+    const { view, cleanup } = await ready();
+    let resolve;
+    view.auth.updateUser.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const form = view.render();
+    const pending = submit(form);
+    await submit(form);
+    await tick();
+    await submit(form);
+    expect(view.request).toHaveBeenCalledOnce();
+    expect(find(view.render(), (node) => node.props.type === 'submit').props.disabled).toBe(true);
+    resolve({ error: null });
+    await pending;
+    await submit(form);
+    expect(view.request).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it.each(['SIGNED_IN', 'SIGNED_OUT'])('ignores late successful updates after %s changes the session', async (event) => {
+    vi.useFakeTimers();
+    const { view, cleanup } = await ready();
+    let resolve;
+    view.auth.updateUser.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const pending = submit(view.render());
+    await tick();
+    view.auth.onAuthStateChange.mock.calls[0][0](event, event === 'SIGNED_OUT' ? null : { user: { id: 'bob' } });
+    resolve({ error: null });
+    await pending;
+    await vi.runAllTimersAsync();
+    expect(text(view.render())).not.toContain('Password updated');
+    expect(view.location.href).toBe('');
+    expect(nodes(view.render()).some((node) => node.type === 'form')).toBe(false);
+    cleanup();
+  });
+
+  it.each(['transport', 'provider'])('locks an uncertain %s result rather than resubmitting automatically', async (kind) => {
+    const { view, cleanup } = await ready();
+    if (kind === 'transport') view.request.mockRejectedValueOnce(new Error('Response lost'));
+    else view.request.mockResolvedValueOnce({ ok: false, status: 502, json: async () => ({ code: 'password_update_uncertain' }) });
+    const form = view.render();
+    await submit(form);
+    expect(text(view.render())).toContain('Try signing in with the new password');
+    await submit(form);
+    expect(view.request).toHaveBeenCalledOnce();
+    expect(nodes(view.render()).some((node) => node.type === 'form')).toBe(false);
+    cleanup();
+  });
+
+  it('shows an explicit setup refusal without claiming an uncertain mutation', async () => {
+    const { view, cleanup } = await ready();
+    view.request.mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({ code: 'password_update_unavailable', error: 'Public URL configuration is unavailable.' }) });
+    await submit(view.render());
+    expect(text(view.render())).toContain('Public URL configuration is unavailable.');
+    expect(text(view.render())).not.toContain('whether your password changed');
+    expect(nodes(view.render()).some((node) => node.type === 'form')).toBe(false);
+    cleanup();
+  });
+
+  it.each(['password_owner_changed', 'password_session_expired'])('requires a fresh sign-in/reset after server %s', async (code) => {
+    const { view, cleanup } = await ready();
+    view.request.mockResolvedValueOnce({ ok: false, status: code === 'password_owner_changed' ? 409 : 401, json: async () => ({ code }) });
+    const form = view.render();
+    await submit(form);
+    await submit(form);
+    expect(view.request).toHaveBeenCalledOnce();
+    expect(text(view.render())).toContain(code === 'password_owner_changed' ? 'account changed' : 'Sign in again');
+    cleanup();
   });
 });
