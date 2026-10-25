@@ -6,6 +6,8 @@
 const CATEGORIES = ['personal', 'professional', 'community'];
 const ACTIVITIES = ['dinner', 'coffee', 'drinks', 'brunch', 'activity'];
 
+// First letter of the first two words; brackets and punctuation are skipped ("Arvind (A)" -> "AA").
+const initials = (name) => (String(name || '').trim().split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean).slice(0, 2).map((w) => [...w][0]).join('') || '?').toUpperCase();
 const catLabel = (c) => (c ? c.charAt(0).toUpperCase() + c.slice(1) : '');
 const el = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
@@ -517,7 +519,6 @@ function peopleCard(contacts) {
   const badge = (n) => n === null ? '' : n < 0 ? '<span class="due due-late">overdue</span>'
     : n === 0 ? '<span class="due due-today">today</span>'
     : n <= 7 ? '<span class="due">soon</span>' : `<span class="due">in ${n} days</span>`;
-  const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
   const people = contacts.slice().sort((a, b) => (due(a) ?? 1e9) - (due(b) ?? 1e9) || String(a.name || '').localeCompare(String(b.name || '')));
   return `
     <section class="card people-card">
@@ -1069,7 +1070,7 @@ async function contactDetailView(id) {
     <p><button class="link-btn" id="back">← All contacts</button></p>
     <section class="card profile" id="profile-card">
       <div class="profile-head">
-        <div class="avatar" aria-hidden="true">${esc(String(contact.name || '?').trim().charAt(0).toUpperCase())}</div>
+        <div class="avatar" aria-hidden="true">${esc(initials(contact.name).charAt(0))}</div>
         <div>
           <h1 class="profile-name">${esc(contact.name)}</h1>
           <span class="tag">${esc(catLabel(contact.category))}</span>${contact.email ? ` <span class="muted">${esc(contact.email)}</span>` : ''}
@@ -1220,6 +1221,11 @@ async function meetupsView(created) {
   if (window.PlanByVoice) window.PlanByVoice.mount(el('plan-voice'));
   const pre = sessionStorage.getItem('org_meetup_title');
   if (pre) { sessionStorage.removeItem('org_meetup_title'); el('m-title').value = pre; el('m-title').focus(); }
+  let activityPicked = false;
+  el('m-activity').onchange = () => { activityPicked = true; };
+  const suggestActivity = () => { if (!activityPicked) el('m-activity').value = suggestedActivity(el('m-title').value, el('m-when').value); };
+  el('m-title').addEventListener('input', suggestActivity);
+  el('m-when').addEventListener('input', suggestActivity);
   wireCreateForm('m-form', 'm', nav, 'Creating meetup...', async () => {
     const body = { title: el('m-title').value.trim(), activity: el('m-activity').value };
     if (el('m-area').value.trim()) body.area = el('m-area').value.trim();
@@ -1232,6 +1238,18 @@ async function meetupsView(created) {
   });
   wireMeetupRows();
   if (el('created-dash')) el('created-dash').onclick = () => go('#/dashboard');
+}
+
+// Default activity for a new meetup: a kind named in the title wins ("Sunday brunch"),
+// else the time of day (morning brunch, afternoon coffee, evening dinner), else dinner.
+function suggestedActivity(title, when) {
+  const t = String(title || '').toLowerCase();
+  const named = ACTIVITIES.find((a) => a !== 'activity' && new RegExp('\\b' + a + '\\b').test(t));
+  if (named) return named;
+  const h = when ? new Date(when).getHours() : NaN;
+  if (h >= 6 && h < 12) return 'brunch';
+  if (h >= 12 && h < 17) return 'coffee';
+  return 'dinner';
 }
 
 function createdCard(r) {

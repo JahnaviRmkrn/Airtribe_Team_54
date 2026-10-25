@@ -89,6 +89,46 @@ describe('organizer meetup rendering', () => {
     else expect(saved.budget).toBe(expected);
   });
 
+  async function meetupForm() {
+    const posts = [];
+    const { context, document } = organizer({
+      fetch: async (_path, opts = {}) => {
+        if (opts.method === 'POST') posts.push(JSON.parse(opts.body));
+        return { ok: true, status: opts.method === 'POST' ? 201 : 200, json: async () => ({ meetups: [] }) };
+      },
+    });
+    // The harness DOM ignores listeners; record the form's input listeners before rendering.
+    const listeners = {};
+    for (const id of ['m-title', 'm-when']) document.getElementById(id).addEventListener = (type, fn) => { listeners[id] = fn; };
+    await vm.runInContext('meetupsView()', context);
+    const activity = document.getElementById('m-activity');
+    activity.value = 'dinner';
+    const type = (id, value) => { document.getElementById(id).value = value; listeners[id](); };
+    const submit = async () => { await document.getElementById('m-form').onsubmit({ preventDefault() {} }); return posts.at(-1); };
+    return { activity, type, submit };
+  }
+
+  it('follows the title, then the time, for the activity', async () => {
+    const { activity, type, submit } = await meetupForm();
+    type('m-title', 'Sunday brunch');
+    expect(activity.value).toBe('brunch');
+    type('m-title', 'Catch-up');
+    type('m-when', '2026-10-27T15:30');
+    expect(activity.value).toBe('coffee');
+    expect(await submit()).toMatchObject({ title: 'Catch-up', activity: 'coffee' });
+  });
+
+  it('keeps an activity the organiser picked through later title and time edits', async () => {
+    const { activity, type, submit } = await meetupForm();
+    type('m-title', 'Friday drinks');
+    activity.value = 'activity';
+    activity.onchange();
+    type('m-title', 'Sunday brunch');
+    type('m-when', '2026-10-27T09:00');
+    expect(activity.value).toBe('activity');
+    expect(await submit()).toMatchObject({ title: 'Sunday brunch', activity: 'activity' });
+  });
+
   it('escapes stored meetup areas in the planned list', () => {
     const { context } = organizer();
     context.meetup = { id: 'one', title: 'Coffee', area: attack };
