@@ -55,6 +55,12 @@ To publish builds on the site: copy them into `../public/downloads/`, then run
 `node ../scripts/write-downloads-info.mjs` so the landing page shows the true
 sizes and SHA-256 checksums from `downloads.json`.
 
+CI: `.github/workflows/desktop.yml` builds all three desktop installers and
+the Android APK on GitHub runners (Actions → "Desktop & Android builds" → Run
+workflow, or push a `desktop-v*` tag) and attaches them as run artifacts. That
+is the supported way to get the macOS `.dmg` and Windows NSIS installer
+without owning those machines.
+
 Notes:
 
 - Builds are unsigned (`identity: null`, `signAndEditExecutable: false`). macOS Gatekeeper

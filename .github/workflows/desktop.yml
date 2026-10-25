@@ -1,0 +1,77 @@
+name: Desktop & Android builds
+
+# Builds the Electron installers (macOS .dmg/.zip, Windows NSIS/portable,
+# Linux AppImage) and the Android debug APK. Run manually, or by pushing a
+# tag like desktop-v0.1.0. Artifacts land under the run's Artifacts section.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            args: --mac dmg zip
+            artifact: macos
+          - os: windows-latest
+            args: --win nsis portable
+            artifact: windows
+          - os: ubuntu-latest
+            args: --linux AppImage
+            artifact: linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - name: Build (${{ matrix.artifact }})
+        run: npx electron-builder ${{ matrix.args }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muop-${{ matrix.artifact }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+            desktop/release/*.AppImage
+          if-no-files-found: error
+
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - run: npm ci
+      - name: Point Gradle at the CI Android SDK
+        run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+      - name: Build debug APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muop-android
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
