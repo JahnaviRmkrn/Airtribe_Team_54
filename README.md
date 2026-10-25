@@ -38,6 +38,19 @@ Open http://127.0.0.1:8000 - API docs at http://127.0.0.1:8000/docs
 - In the browser the session lives in cookies, so `fetch('/api/me/...')` just works.
 - From scripts/curl: `Authorization: Bearer <supabase access_token>`.
 
+## Google Contacts import
+
+Contacts → **Import Google Contacts** offers a separate, read-only Google consent
+flow, an unchecked preview, category selection, duplicate detection, and explicit
+saves in batches of up to five. It never imports automatically or changes Google
+Contacts. Onboarding retains its separate five-person limit.
+
+The connector stays disabled until an authorized operator configures its own
+OAuth client, server-side encryption key, and reviewed database migration. See
+[Google Contacts setup and security notes](docs/google-contacts-setup.md) for exact
+scopes, redirects, retention/cleanup, revocation limitations and mock-test coverage.
+Adding the code does not connect a real Google account.
+
 ## Private API (signed-in user, scoped by RLS)
 
 | Method | Path | Body / query | Notes |

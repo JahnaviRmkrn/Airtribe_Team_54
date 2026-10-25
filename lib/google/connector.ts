@@ -5,7 +5,8 @@ import { NextResponse } from 'next/server';
 import { HttpError } from '../http';
 import { adminClient } from '../supabase/admin';
 
-// Each purpose has its own OAuth client, cookie, callback and scope allowlist.
+// Each purpose has its own cookie, callback and scope allowlist. Connector
+// families have separate client settings (Sheets import/export share theirs).
 // Adding another connector must not silently broaden Contacts authorization.
 export type GooglePurpose = 'contacts' | 'sheets-import' | 'sheets-export' | 'gmail' | 'calendar';
 export const CONTACTS_SCOPE = 'https://www.googleapis.com/auth/contacts.readonly';

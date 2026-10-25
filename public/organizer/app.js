@@ -121,6 +121,7 @@ function route() {
   const views = {
     '#/dashboard': dashboardView,
     '#/contacts': contactsView,
+    '#/google-contacts': () => window.GoogleContacts.view(),
     '#/meetups': meetupsView,
     '#/onboarding': () => onboardingView(),
     '#/welcome': welcomeView,
@@ -696,6 +697,7 @@ async function contactsView() {
   const openForm = !!sessionStorage.getItem('org_new_contact') || !contacts.length;
   el('app').innerHTML = `
     <div class="page-head"><div><h1>Contacts</h1><p class="muted lede">${contacts.length} ${contacts.length === 1 ? 'person' : 'people'}${filter ? ' in ' + esc(filter) : ''}</p></div></div>
+    <p><a class="button" href="#/google-contacts">Import Google Contacts</a></p>
     <section class="card">
       <div class="toolbar">
         <input id="c-search" type="search" placeholder="Search by name or interest" aria-label="Search contacts">
@@ -1548,7 +1550,7 @@ async function boot() {
   const hash = location.hash || '#/dashboard';
   window.onhashchange = route;
   installFlash();
-  if (d.is_empty && !onboarded && hash !== '#/onboarding' && hash !== '#/welcome') {
+  if (d.is_empty && !onboarded && hash !== '#/onboarding' && hash !== '#/welcome' && hash !== '#/google-contacts') {
     go('#/welcome');
   }
   route();
