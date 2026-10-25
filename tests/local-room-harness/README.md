@@ -12,7 +12,7 @@ Use the installed dependencies. Do not install packages, launch Next, load `.env
 files, run secret scripts, or connect a real provider for this test.
 
 ```sh
-cd /workspace/shared/team54-real-route-harness
+# From your repository checkout root:
 ./tests/local-room-harness/run.sh smoke
 ```
 
@@ -20,7 +20,7 @@ For a browser, run this in the **native terminal connected to the browser's
 machine**, not a separate executor namespace:
 
 ```sh
-cd /workspace/shared/team54-real-route-harness
+# From your repository checkout root:
 ./tests/local-room-harness/run.sh serve
 ```
 
