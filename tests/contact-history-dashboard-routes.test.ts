@@ -16,23 +16,26 @@ vi.mock('@/lib/supabase/server', () => ({ userClient: async () => ({
   from(table: string) {
     let rows = table === 'contacts' ? state.contacts : table === 'interactions' ? state.interactions : [];
     let single = false;
+    let limit: number | undefined;
+    let head = false;
     const query = {
-      select: () => query,
+      select(_columns?: string, options?: { head?: boolean }) { head = options?.head === true; return query; },
       eq(key: string, value: unknown) { rows = rows.filter((row) => row[key] === value); return query; },
       gte(key: string, value: string) { rows = rows.filter((row) => Date.parse(String(row[key])) >= Date.parse(value)); return query; },
       lte(key: string, value: string) { rows = rows.filter((row) => Date.parse(String(row[key])) <= Date.parse(value)); return query; },
-      gt: () => query,
+      gt(key: string, value: string) { rows = rows.filter((row) => String(row[key]) > value); return query; },
       or: () => query,
       order(key: string, opts: { ascending?: boolean } = {}) {
         rows = rows.slice().sort((a, b) => String(a[key]).localeCompare(String(b[key])) * (opts.ascending === false ? -1 : 1));
         return query;
       },
-      limit(size: number) { rows = rows.slice(0, size); return query; },
+      limit(size: number) { limit = size; return query; },
+      abortSignal: () => query,
       single() { single = true; return query; },
       then(resolve: (value: unknown) => unknown) {
         const error = table === 'interactions' ? state.historyError
           : single && !rows.length ? { code: 'PGRST116', message: 'Not found' } : null;
-        return Promise.resolve({ data: error ? null : single ? rows[0] : rows, error }).then(resolve);
+        return Promise.resolve({ data: error || head ? null : single ? rows[0] : limit === undefined ? rows : rows.slice(0, limit), error, count: head ? rows.length : null }).then(resolve);
       },
     };
     return query;

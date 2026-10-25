@@ -69,6 +69,11 @@ Adding the code does not connect a real Google account.
 | POST | `/api/extract` | `{ transcript }` (max 20,000 chars) | onboarding pre-fill; see below. Stateless, never writes to the DB |
 | GET | `/api/voice/signed-url` | | `{ signed_url }` for the ElevenLabs onboarding agent; 503 if not configured |
 
+Contacts, follow-ups and dashboard reads return complete results within a shared
+per-request safety budget, or an explicit 503 instead of silently truncated lists
+or counts. See [bounded organizer reads](docs/bounded-organizer-reads.md) for
+limits, keyset/HEAD verification, ordering and concurrency guarantees.
+
 ### Voice onboarding and extraction
 
 Ported from Arindom Chetia's PR #3 (FastAPI `routers/voice.py`, `static/voice.*`).

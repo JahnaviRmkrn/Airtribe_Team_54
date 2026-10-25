@@ -18,6 +18,7 @@ const rpcDefinitions = {
   },
 };
 
+/** @param {string | null} [uid] */
 export function pgliteClient(db, role, uid = null, options = {}) {
   const maxLimit = options.maxLimit ?? 100;
   if (!Number.isInteger(maxLimit) || maxLimit < 1 || maxLimit > 1001) throw new Error('Unsupported test limit ceiling');
@@ -63,7 +64,13 @@ export function pgliteClient(db, role, uid = null, options = {}) {
       const state = { operation: 'select', columns: '*', filters: [], order: [], returning: false, single: null };
       let executed;
       const query = {
-        select(columns = '*') { state.columns = columns; state.returning = true; return query; },
+        select(columns = '*', selectOptions = {}) {
+          if (selectOptions.head || selectOptions.count) {
+            if (selectOptions.head !== true || selectOptions.count !== 'exact') throw new Error('Only exact HEAD counts are supported');
+            state.head = true;
+          }
+          state.columns = columns; state.returning = true; return query;
+        },
         eq(key, value) { state.filters.push([key, value, '=']); return query; },
         in(key, values) {
           advanced();
@@ -103,6 +110,9 @@ export function pgliteClient(db, role, uid = null, options = {}) {
         delete() { state.operation = 'delete'; return query; },
         single() { state.single = 'required'; return query; },
         maybeSingle() { state.single = 'optional'; return query; },
+        // Cancellation is checked at entry/exit; this fixture does not interrupt
+        // a running SQL statement or model PostgREST network cancellation.
+        abortSignal(value) { state.signal = value; return query; },
         then(resolve, reject) { executed ??= execute(); return executed.then(resolve, reject); },
       };
       async function execute() {
@@ -125,7 +135,7 @@ export function pgliteClient(db, role, uid = null, options = {}) {
         } else if (state.operation === 'delete') {
           sql = `delete from ${target}`;
         } else {
-          sql = `select ${projection(state.columns, table)} from ${target}`;
+          sql = `select ${state.head ? 'count(*)::int as exact_count' : projection(state.columns, table)} from ${target}`;
         }
         if (state.filters.length) sql += ' where ' + state.filters.map(([key, value, operator]) => {
           const field = identifier(key);
@@ -135,18 +145,21 @@ export function pgliteClient(db, role, uid = null, options = {}) {
           if (operator === 'null or >=') return `(${field} is null or ${field} >= ${bind(value)})`;
           return `${field} ${operator} ${bind(value)}`;
         }).join(' and ');
-        if (state.operation === 'select' && state.order.length) sql += ' order by ' + state.order.map(([key, asc, nullsFirst]) => `${identifier(key)} ${asc ? 'asc' : 'desc'}${nullsFirst === undefined ? '' : nullsFirst ? ' nulls first' : ' nulls last'}`).join(', ');
-        if (state.limit) sql += ` limit ${bind(state.limit)}`;
+        if (!state.head && state.operation === 'select' && state.order.length) sql += ' order by ' + state.order.map(([key, asc, nullsFirst]) => `${identifier(key)} ${asc ? 'asc' : 'desc'}${nullsFirst === undefined ? '' : nullsFirst ? ' nulls first' : ' nulls last'}`).join(', ');
+        if (!state.head && state.limit) sql += ` limit ${bind(state.limit)}`;
         if (state.operation !== 'select' && state.returning) sql += ` returning ${plainProjection(state.columns)}`;
         // PostgreSQL JSON serialization retains six fractional digits where
         // present. A JS Date would round updated_at to milliseconds and make
         // an unchanged real handler's optimistic-lock token falsely stale.
-        const jsonRows = options.jsonRows && (state.operation === 'select' || state.returning);
+        const jsonRows = !state.head && options.jsonRows && (state.operation === 'select' || state.returning);
         if (jsonRows) sql = state.operation === 'select'
           ? `select to_jsonb(fixture_row) as fixture_row from (${sql}) fixture_row`
           : `with fixture_result as (${sql}) select to_jsonb(fixture_result) as fixture_row from fixture_result`;
         try {
+          state.signal?.throwIfAborted();
           const result = await asRole(db, role, uid, (tx) => tx.query(sql, params));
+          state.signal?.throwIfAborted();
+          if (state.head) return { data: null, error: null, count: result.rows[0].exact_count };
           const rows = jsonRows ? result.rows.map((row) => row.fixture_row) : result.rows;
           if (state.single && (rows.length > 1 || (!rows.length && state.single === 'required'))) {
             return { data: null, error: { code: 'PGRST116', message: 'Expected one row' } };

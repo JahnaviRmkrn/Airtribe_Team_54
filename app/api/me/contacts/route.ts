@@ -1,21 +1,30 @@
 import { contactBulk, contactCreate, category } from '@/lib/schemas';
 import { dbError, handle, HttpError, ok, parseBody, requireUser } from '@/lib/http';
 import { contactCreateRetryConfigured } from '@/lib/contact-create-retry';
+import { withCompleteReads } from '@/lib/complete-read';
 import { z } from 'zod';
 
 // GET /api/me/contacts?category=personal
 export const GET = handle(async (req: Request) => {
   const { supabase } = await requireUser(req);
   const cat = new URL(req.url).searchParams.get('category');
-  let q = supabase.from('contacts').select('*').order('name');
+  let selectedCategory: string | undefined;
   if (cat) {
     const parsed = category.safeParse(cat);
     if (!parsed.success) throw new HttpError(400, 'category must be personal, professional or community');
-    q = q.eq('category', parsed.data);
+    selectedCategory = parsed.data;
   }
-  const { data, error } = await q;
-  dbError(error);
-  return ok({ contacts: data });
+  return ok(await withCompleteReads(req, async (read) => {
+    const contacts = await read((after, signal, pageRows, verifyEmpty) => {
+      let q = supabase.from('contacts').select('*', verifyEmpty ? { count: 'exact', head: true } : undefined)
+        .order('id').limit(pageRows).abortSignal(signal);
+      if (selectedCategory) q = q.eq('category', selectedCategory);
+      if (after) q = q.gt('id', after);
+      return q;
+    }, (row) => row.id);
+    contacts.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    return { contacts };
+  }));
 });
 
 // POST /api/me/contacts: one contact or { contacts: [...] } (max 5).

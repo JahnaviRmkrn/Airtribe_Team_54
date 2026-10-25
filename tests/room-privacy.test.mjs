@@ -73,7 +73,7 @@ beforeEach(async () => {
   deps.admin = pgliteClient(db, 'service_role');
   deps.userClient = (req) => {
     const uid = req.headers.get('x-test-user');
-    return pgliteClient(db, uid ? 'authenticated' : 'anon', uid);
+    return pgliteClient(db, uid ? 'authenticated' : 'anon', uid, { organizerQueries: true });
   };
   deps.cookies = () => requestStorage.getStore();
   // Any accidental external fetch is a test failure, not a provider call.
