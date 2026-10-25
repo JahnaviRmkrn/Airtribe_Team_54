@@ -1185,7 +1185,8 @@ function onboardingView() {
     const merged = [...kept, ...added].slice(0, 5);
     rows.splice(0, rows.length, ...(merged.length ? merged : [emptyRow()]));
     if (res.goals) Object.assign(goals, res.goals);
-    if (added.length && typeof res.source === 'string' && !sources.includes(res.source)) sources.push(res.source);
+    // Credit only providers whose additions survived the five-person limit.
+    if (merged.length > kept.length && typeof res.source === 'string' && !sources.includes(res.source)) sources.push(res.source);
     try {
       sessionStorage.setItem('org_prefill', JSON.stringify({
         contacts: merged.map((r) => ({ name: r.name, category: r.category, interests: r.interests, preferred_frequency_days: r.freq })),

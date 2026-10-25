@@ -133,9 +133,9 @@ describe('onboarding retries', () => {
 });
 
 describe('onboarding extraction source credit', () => {
-  function setup() {
+  function setup(contacts = [{ name: 'Alice', category: 'personal' }]) {
     const storage = new Map([['org_prefill', JSON.stringify({
-      contacts: [{ name: 'Alice', category: 'personal' }],
+      contacts,
       source: 'deepseek',
     })]]);
     const app = organizer({
@@ -161,6 +161,45 @@ describe('onboarding extraction source credit', () => {
     const saved = JSON.parse(storage.get('org_prefill'));
     expect(saved.sources).toEqual(['deepseek']);
     expect(saved.contacts.map((contact) => contact.name)).toEqual(['Alice']);
+  });
+
+  it('does not credit a provider whose person is dropped at the five-person cap, including Back and refresh', () => {
+    const contacts = ['Alice', 'Bob', 'Carol', 'Dan', 'Eve'].map((name) => ({
+      name, category: 'personal', interests: 'hiking', preferred_frequency_days: 7,
+    }));
+    const { context, document, storage } = setup(contacts);
+    const rows = document.getElementById('ob-rows').innerHTML;
+    const attribution = document.getElementById('ob-source').textContent;
+    const goals = { personal: 60, professional: 25, community: 15 };
+    context.window.OrganizerOnboarding.apply({ contacts: [{ name: 'Frank' }], goals, source: 'rules' });
+    expect(document.getElementById('ob-source').textContent).toBe(attribution);
+    expect(attribution).toContain('understood by DeepSeek');
+    expect(attribution).not.toContain('built-in rules');
+    expect(document.getElementById('ob-rows').innerHTML).toBe(rows);
+    expect(document.getElementById('ob-error').textContent).toBe('Only the first 5 people were kept - you can add more from Contacts later.');
+    const saved = JSON.parse(storage.get('org_prefill'));
+    expect(saved.contacts).toEqual(contacts);
+    expect(saved.sources).toEqual(['deepseek']);
+    expect(saved.goals).toEqual(goals);
+    document.getElementById('ob-next').onclick();
+    expect(document.getElementById('app').innerHTML).toContain('data-cat="personal" min="0" max="100" value="60"');
+    document.getElementById('ob-back').onclick();
+    expect(document.getElementById('ob-source').textContent).toBe(attribution);
+    expect(document.getElementById('ob-rows').innerHTML).toBe(rows);
+    vm.runInContext('onboardingView()', context);
+    expect(document.getElementById('ob-source').textContent).toBe(attribution);
+    expect(document.getElementById('ob-rows').innerHTML).toBe(rows);
+  });
+
+  it('credits a provider when one of its people survives the remaining-capacity limit', () => {
+    const contacts = ['Alice', 'Bob', 'Carol', 'Dan'].map((name) => ({ name }));
+    const { context, document, storage } = setup(contacts);
+    context.window.OrganizerOnboarding.apply({ contacts: [{ name: 'Eve' }, { name: 'Frank' }], source: 'rules' });
+    expect(document.getElementById('ob-source').textContent).toContain('understood by DeepSeek + built-in rules');
+    const saved = JSON.parse(storage.get('org_prefill'));
+    expect(saved.sources).toEqual(['deepseek', 'rules']);
+    expect(saved.contacts.map((contact) => contact.name)).toEqual(['Alice', 'Bob', 'Carol', 'Dan', 'Eve']);
+    expect(document.getElementById('ob-error').textContent).toBe('Only the first 5 people were kept - you can add more from Contacts later.');
   });
 
   it('keeps each contributing source once across Back and refresh', () => {
