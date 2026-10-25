@@ -8,6 +8,7 @@
 const match = location.pathname.match(/^\/m\/([A-Za-z0-9_-]{20,100})\/?$/);
 const TOKEN = match ? match[1] : null;
 const POLL_MS = 4000;
+const REFRESH_TIMEOUT_MS = 15_000;
 
 // Suggestion chips. They mirror the sample venue tags so picks affect the shortlist.
 const FOOD = ['veg', 'non-veg', 'vegan', 'south-indian', 'north-indian', 'biryani', 'asian', 'continental', 'cafe', 'desserts', 'healthy', 'budget'];
@@ -24,6 +25,10 @@ const STATUS_MESSAGES = {
 
 let view = null;
 let busy = false;
+let refreshGeneration = 0;
+let activeRefresh = null;
+let pendingSends = 0;
+let roomMissing = false;
 let poll = null;
 let prefsFor = null; // attendee id whose preferences form is on screen
 let paymentBusy = false;
@@ -125,7 +130,18 @@ async function api(path = '', opts = {}) {
   if (res.status === 201 && opts.method === 'POST' && path === '/join') window.team54Track?.('guest_joined');
   return data;
 }
-const send = (method, path, body) => api(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+async function send(method, path, body) {
+  // Voice tools also call send directly, outside act. Neither an earlier poll
+  // nor a visibility refresh may apply a snapshot across a pending mutation.
+  refreshGeneration++;
+  pendingSends++;
+  try {
+    return await api(path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+  } finally {
+    pendingSends--;
+    refreshGeneration++;
+  }
+}
 
 function toast(msg, bad = false) {
   const t = $('toast');
@@ -141,37 +157,75 @@ function stopPolling() {
 }
 
 async function refresh() {
-  try {
-    view = await api('');
-    $('conn').classList.add('hidden');
-    render();
-  } catch (e) {
-    if (e.status === 404) return renderMissing();
-    // Transient (network, 503): keep the last view and retry on the next poll.
-    $('conn').textContent = 'Having trouble reaching the room - retrying…';
-    $('conn').classList.remove('hidden');
-  }
+  if (busy || pendingSends || roomMissing) return;
+  // A 4-second poll must not continually supersede a slower healthy GET.
+  // Coalesce reads within one generation, but allow a new read after a mutation
+  // invalidates the old generation, even if its transport is still pending.
+  if (activeRefresh?.generation === refreshGeneration) return activeRefresh.promise;
+  const generation = ++refreshGeneration;
+  const roomPath = location.pathname;
+  const current = () => generation === refreshGeneration && !busy && !pendingSends && !roomMissing && location.pathname === roomPath;
+  const pending = { generation, promise: null };
+  const controller = new AbortController();
+  let timeout;
+  activeRefresh = pending;
+  pending.promise = (async () => {
+    try {
+      // Bound even a transport that ignores abort. A timed-out GET never
+      // reapplies its result, and a later poll can start a fresh read.
+      const expired = new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          reject(new Error('Room refresh timed out'));
+        }, REFRESH_TIMEOUT_MS);
+      });
+      const data = await Promise.race([api('', { signal: controller.signal }), expired]);
+      if (!current()) return;
+      view = data;
+      $('conn').classList.add('hidden');
+      render();
+    } catch (e) {
+      if (!current()) return;
+      if (e.status === 404) return renderMissing();
+      // Transient (network, 503): keep the last view and retry on the next poll.
+      $('conn').textContent = 'Having trouble reaching the room - retrying…';
+      $('conn').classList.remove('hidden');
+    } finally {
+      clearTimeout(timeout);
+      if (activeRefresh === pending) activeRefresh = null;
+    }
+  })();
+  return pending.promise;
 }
 
 // Runs a mutation. Every room endpoint returns the updated room view; vote/me
 // always report is_organizer=false, so keep the flag from the last GET.
 async function act(fn, okMsg) {
-  if (busy) return false;
+  if (busy || pendingSends || roomMissing) return false;
   busy = true;
+  refreshGeneration++;
+  const roomPath = location.pathname;
+  const current = () => !roomMissing && location.pathname === roomPath;
+  let recover = false;
   try {
     const data = await fn();
+    if (!current()) return false;
     const next = data && data.room ? data.room : data;
     if (next && next.meetup) view = { ...next, is_organizer: next.is_organizer || !!(view && view.is_organizer) };
     if (okMsg) toast(okMsg);
     render();
     return true;
   } catch (e) {
+    if (!current()) return false;
     toast(e.message, true);
     if (e.status === 404) renderMissing();
-    else if ([401, 409, 410, 429].includes(e.status)) refresh();
+    else if ([401, 409, 410, 429].includes(e.status)) recover = true;
     return false;
   } finally {
     busy = false;
+    // Recovery must start after releasing busy, otherwise refresh intentionally
+    // skips it. It remains a GET, never an automatic mutation retry.
+    if (recover && current()) refresh();
   }
 }
 
@@ -215,6 +269,10 @@ function render() {
 }
 
 function renderMissing() {
+  roomMissing = true;
+  refreshGeneration++;
+  paymentGeneration++;
+  view = null;
   stopPolling();
   locationGeneration++;
   pendingLocation = undefined;

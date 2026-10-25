@@ -77,3 +77,28 @@ deterministic committed interleavings, not simultaneous independent PostgreSQL
 connections, lock-wait behavior, PostgREST transport, production clock behavior
 or load safety. Browser tests, live-provider checks, a full suite, a full type
 check and builds are outside this bounded validation.
+
+## Browser request ordering
+
+The room page coalesces polls while a read is pending, so healthy responses
+slower than the polling interval are not continually discarded. It ignores an
+older poll after a mutation starts; a fresh post-mutation read may begin without
+waiting for that obsolete transport. Refresh GETs have a 15-second timeout and
+abort signal; waiting is bounded even if transport ignores abort, and the next
+poll can recover. This timeout never retries a mutation. It does not start refreshes while a manual mutation or direct voice-tool
+send is pending. This includes visibility-triggered refreshes, not just the poll
+timer. Direct voice sends invalidate snapshots on both start and completion;
+the existing voice caller requests a fresh view afterward.
+
+A current 404 makes the room terminal until page reload: polling stops, pending
+reads cannot restore the old page, and stale payment responses are invalidated.
+Stale 404/network errors cannot replace a newer successful view. Recoverable
+401/409/410/429 mutation errors perform a fresh GET only after releasing the
+mutation lock; no mutation is automatically retried. Responses after navigation
+to another path are ignored.
+
+`tests/room-refresh-order.test.mjs` executes the shipped request functions with
+controlled, out-of-order response promises. Rendering, DOM and transport are
+synthetic. This establishes client-side ordering, not multi-connection database
+serialization, live browser/account isolation, or a transaction snapshot. A
+newer authoritative GET may legitimately reflect subsequent changes by others.
