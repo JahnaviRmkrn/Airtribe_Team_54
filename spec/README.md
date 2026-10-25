@@ -1,8 +1,11 @@
 # TLA+ models
 
 Two models of the concurrent parts of the app. TLC checks every interleaving
-within small bounds. They check the design, not the TypeScript itself;
-`scripts/smoke.mjs` checks that the running code behaves the way the models assume.
+within small bounds. They check the design, not the TypeScript itself.
+`scripts/smoke.mjs` checks that the running code behaves the way the room model
+assumes. Nothing checks the running checkout against the payment model:
+`smoke.mjs` never calls the pay route, and `lib/pay-route.test.ts` covers single
+requests, not the concurrent interleavings the model explores.
 
 ```bash
 # needs Java 11+ and tla2tools.jar (github.com/tlaplus/tlaplus/releases)
