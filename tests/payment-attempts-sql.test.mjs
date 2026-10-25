@@ -79,6 +79,56 @@ describe('payment attempts with real PostgreSQL receipts and authorization', () 
     expect(deps.createOrder).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['failed', 'cancelled'])('fences an old-version %s retry before provider invocation, but permits a fresh-reference retry', async status => {
+    expect((await invoke(POST)).status).toBe(201);
+    const original = (await service('select * from meetup_payments')).rows[0];
+    deps.getOrderStatus.mockResolvedValueOnce(status);
+    expect((await invoke()).status).toBe(200);
+    const legacyCreate = vi.fn();
+    const legacyRetry = async () => {
+      // Exact previous-version claim: it clears the order but retains the
+      // reference of terminal order A. If accepted, old code would create B
+      // while new code could recover A's receipt and create C concurrently.
+      await service(`update meetup_payments set status = 'pending', amount_paise = 50000,
+        pine_order_id = null, redirect_url = null where id = $1 returning *`, [original.id]);
+      legacyCreate();
+    };
+    await expect(legacyRetry()).rejects.toThrow('payment_retry_requires_fresh_reference');
+    expect(legacyCreate).not.toHaveBeenCalled();
+    expect((await service('select * from meetup_payments')).rows[0]).toMatchObject({
+      status, pine_order_id: original.pine_order_id, merchant_order_reference: original.merchant_order_reference,
+    });
+    expect((await invoke(POST)).status).toBe(201);
+    const replacement = (await service('select * from meetup_payments')).rows[0];
+    expect(replacement.merchant_order_reference).toMatch(/^[a-f0-9]{32}$/);
+    expect(replacement.merchant_order_reference).not.toBe(original.merchant_order_reference);
+    expect(replacement.pine_order_id).not.toBe(original.pine_order_id);
+    expect((await service('select * from meetup_payment_attempts')).rows).toHaveLength(2);
+    expect(deps.createOrder).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects missing, blank and previously used references for terminal retries', async () => {
+    expect((await invoke(POST)).status).toBe(201);
+    const first = (await service('select * from meetup_payments')).rows[0];
+    deps.getOrderStatus.mockResolvedValueOnce('failed');
+    expect((await invoke(POST)).status).toBe(201);
+    deps.getOrderStatus.mockResolvedValueOnce('cancelled');
+    expect((await invoke()).status).toBe(200);
+    const current = (await service('select * from meetup_payments')).rows[0];
+    for (const reference of [null, '', '   ', first.merchant_order_reference, current.merchant_order_reference]) {
+      await expect(service(`update meetup_payments set status = 'pending', pine_order_id = null,
+        redirect_url = null, merchant_order_reference = $1 where id = $2`, [reference, current.id]))
+        .rejects.toThrow('payment_retry_requires_fresh_reference');
+    }
+    // Legacy terminal rows may have no saved reference at all. Old code must
+    // not be allowed to retry those with another null reference either.
+    await service('update meetup_payments set merchant_order_reference = null where id = $1', [current.id]);
+    await expect(service("update meetup_payments set status = 'pending', pine_order_id = null, redirect_url = null where id = $1", [current.id]))
+      .rejects.toThrow('payment_retry_requires_fresh_reference');
+    expect((await invoke(POST)).status).toBe(201);
+    expect(deps.createOrder).toHaveBeenCalledTimes(3);
+  });
+
   it('never frees an uncertain create, even after arbitrary elapsed time or a price change', async () => {
     deps.createOrder.mockRejectedValue(new Error('Synthetic lost provider response'));
     expect((await invoke(POST)).status).toBe(502);

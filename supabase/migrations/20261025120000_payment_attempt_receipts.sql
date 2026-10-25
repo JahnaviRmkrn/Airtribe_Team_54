@@ -60,6 +60,19 @@ update public.meetup_payments set status = 'pending'
 -- Only attaching the SAME attempt's known provider order can advance the row.
 create function public.guard_unknown_payment_attempt() returns trigger language plpgsql as $$
 begin
+  -- Old versions clear a terminal order's ID without rotating its reference.
+  -- That would make a new worker recover the OLD terminal receipt while the
+  -- old worker creates another order. Require a genuinely unused reference.
+  if old.status in ('failed', 'cancelled') and old.pine_order_id is not null
+     and new.status = 'pending' and new.pine_order_id is null and (
+       new.merchant_order_reference is null
+       or btrim(new.merchant_order_reference) = ''
+       or new.merchant_order_reference is not distinct from old.merchant_order_reference
+       or exists (select 1 from public.meetup_payment_attempts a
+         where a.merchant_order_reference = new.merchant_order_reference)
+     ) then
+    raise exception 'payment_retry_requires_fresh_reference';
+  end if;
   if old.status = 'pending' and old.pine_order_id is null and (
     new.pine_order_id is null
     or new.merchant_order_reference is distinct from old.merchant_order_reference
