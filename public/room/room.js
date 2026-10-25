@@ -235,10 +235,11 @@ function hue(name) {
   for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 360;
   return h;
 }
+// First letter of the first two words; brackets and punctuation are skipped ("Arvind (A)" -> "AA").
+const initials = (name) => (String(name || '').trim().split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean).slice(0, 2).map((w) => [...w][0]).join('') || '?').toUpperCase();
 function avatar(name) {
   const h = hue(name);
-  const initials = String(name).trim().split(/\s+/).map((w) => w[0] || '').slice(0, 2).join('').toUpperCase();
-  return `<span class="avatar" title="${esc(name)}" style="background:hsl(${h} 65% 45%)">${esc(initials)}</span>`;
+  return `<span class="avatar" title="${esc(name)}" style="background:hsl(${h} 65% 45%)">${esc(initials(name))}</span>`;
 }
 
 function renderBanner() {

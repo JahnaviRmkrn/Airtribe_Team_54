@@ -10,7 +10,8 @@
   const JS_SRI = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const initials = (n) => String(n || '?').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+  // First letter of the first two words; brackets and punctuation are skipped ("Arvind (A)" -> "AA").
+  const initials = (name) => (String(name || '').trim().split(/\s+/).map((w) => w.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean).slice(0, 2).map((w) => [...w][0]).join('') || '?').toUpperCase();
 
   let leaflet = null;
   let leafletFailed = false;
