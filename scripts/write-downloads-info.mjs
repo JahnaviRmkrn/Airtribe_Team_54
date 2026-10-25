@@ -22,6 +22,7 @@ const files = readdirSync(dir)
     let label = ext === '.exe' && name.includes('Setup') ? 'Windows (installer)' : LABELS[ext] || name;
     if (name.includes('-mac') || ext === '.dmg') label = ext === '.dmg' ? 'macOS (.dmg)' : 'macOS (.zip)';
     if (name.includes('arm64')) label += ' · Apple Silicon';
+    if (name.includes('universal')) label += ' · Intel + Apple Silicon';
     return {
       name,
       label,
