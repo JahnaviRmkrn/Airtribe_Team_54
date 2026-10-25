@@ -20,4 +20,13 @@ describe('write-downloads-info script', () => {
     expect(file.bytes).toBe(19);
     expect(file.sha256).toBe(createHash('sha256').update('fake-appimage-bytes').digest('hex'));
   });
+
+  it('never lists debug Android builds', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'muop-downloads-'));
+    writeFileSync(join(dir, 'Muop-9.9.9-debug.apk'), 'debug');
+    writeFileSync(join(dir, 'Muop-9.9.9.apk'), 'release');
+    execFileSync(process.execPath, [new URL('../scripts/write-downloads-info.mjs', import.meta.url).pathname, dir]);
+    const manifest = JSON.parse(readFileSync(join(dir, 'downloads.json'), 'utf8'));
+    expect(manifest.files.map((f) => f.name)).toEqual(['Muop-9.9.9.apk']);
+  });
 });
