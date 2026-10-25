@@ -175,11 +175,28 @@ export default function ResetPasswordPage() {
         throw new Error('Unconfirmed password update');
       }
       if (result.updated !== true) throw new Error('Unconfirmed password update');
+      const current = () => mounted.current && !blocked.current && owner.current === expectedOwner;
+      const verifyOwner = async () => {
+        if (!current()) return false;
+        try {
+          const { data, error } = await browserClient().auth.getUser();
+          if (!current()) return false;
+          if (error || !data.user) { invalidate('reauth'); return false; }
+          if (data.user.id !== expectedOwner) { invalidate('changed'); return false; }
+          return true;
+        } catch {
+          if (current()) invalidate('reauth');
+          return false;
+        }
+      };
+      // Another tab can change the cookies without an auth-state event. The
+      // mutation is already owner-bound; these reads only guard stale UI/navigation.
+      if (!await verifyOwner() || !current()) return;
       setPassword('');
       setConfirm('');
       setDone(true);
-      redirectTimer.current = setTimeout(() => {
-        if (mounted.current && !blocked.current && owner.current === expectedOwner) location.href = next;
+      redirectTimer.current = setTimeout(async () => {
+        if (await verifyOwner() && current()) location.href = next;
       }, 1600);
     } catch {
       if (mounted.current && !blocked.current) {

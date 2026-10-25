@@ -3,7 +3,10 @@
 The reset form is bound to the account verified when it opens. An account change
 or sign-out invalidates its password draft and stops any success/redirect from a
 late response. The submit handler has a synchronous pending/finished guard, and
-rechecks the current user before sending one request.
+rechecks the current user before sending one request. It also checks the current
+user after a successful response and immediately before the delayed redirect,
+so silent cookie switches do not rely solely on auth-state events. Failed late
+verification requires sign-in rather than resending the password.
 
 `POST /api/me/password` is the authoritative mutation boundary. It requires:
 

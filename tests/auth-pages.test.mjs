@@ -511,6 +511,71 @@ describe('owner-bound reset submission lifecycle', () => {
     cleanup();
   });
 
+  it('ignores delayed success after a silent cookie owner switch with no auth event', async () => {
+    vi.useFakeTimers();
+    const { view, cleanup } = await ready();
+    let resolve;
+    view.auth.updateUser.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const pending = submit(view.render());
+    await tick();
+    view.auth.getUser.mockResolvedValue({ data: { user: { id: 'bob' } }, error: null });
+    resolve({ error: null });
+    await pending;
+    await vi.runAllTimersAsync();
+    expect(text(view.render())).not.toContain('Password updated');
+    expect(text(view.render())).toContain('account changed');
+    expect(view.location.href).toBe('');
+    expect(view.request).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it('cancels the delayed redirect when cookies silently switch after the success check', async () => {
+    vi.useFakeTimers();
+    const { view, cleanup } = await ready();
+    await submit(view.render());
+    expect(text(view.render())).toContain('Password updated');
+    view.auth.getUser.mockResolvedValue({ data: { user: { id: 'bob' } }, error: null });
+    await vi.runAllTimersAsync();
+    expect(text(view.render())).not.toContain('Password updated');
+    expect(text(view.render())).toContain('account changed');
+    expect(view.location.href).toBe('');
+    expect(view.request).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it.each(['after update', 'before redirect'])('fails closed when owner verification fails %s without resending', async (stage) => {
+    vi.useFakeTimers();
+    const { view, cleanup } = await ready();
+    if (stage === 'after update') {
+      view.auth.getUser.mockResolvedValueOnce({ data: { user: { id: 'test-user' } }, error: null })
+        .mockRejectedValueOnce(new Error('Verification unavailable'));
+    }
+    const form = view.render();
+    await submit(form);
+    if (stage === 'before redirect') view.auth.getUser.mockRejectedValueOnce(new Error('Verification unavailable'));
+    await vi.runAllTimersAsync();
+    expect(text(view.render())).toContain('Sign in again');
+    expect(text(view.render())).not.toContain('Password updated');
+    expect(view.location.href).toBe('');
+    await submit(form);
+    expect(view.request).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
+  it('preserves a same-owner success and redirect with exactly one password update', async () => {
+    vi.useFakeTimers();
+    const { view, cleanup } = await ready();
+    const form = view.render();
+    await submit(form);
+    expect(text(view.render())).toContain('Password updated');
+    await vi.runAllTimersAsync();
+    expect(view.location.href).toBe('/');
+    expect(view.auth.getUser).toHaveBeenCalledTimes(4); // Mount, preflight, success, redirect.
+    await submit(form);
+    expect(view.request).toHaveBeenCalledOnce();
+    cleanup();
+  });
+
   it.each(['transport', 'provider'])('locks an uncertain %s result rather than resubmitting automatically', async (kind) => {
     const { view, cleanup } = await ready();
     if (kind === 'transport') view.request.mockRejectedValueOnce(new Error('Response lost'));
