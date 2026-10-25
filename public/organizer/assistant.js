@@ -212,8 +212,7 @@
     if (['draft-copy', 'draft-again', 'pv-copy'].some((c) => hit.classList?.contains(c))) return true;
     const href = hit.getAttribute('href') || '';
     return /^#\/(?:dashboard|contacts|meetups|onboarding|welcome|profile|gmail|calendar|google-contacts)(?:[/?]|$)/.test(href)
-      || href === '/integrations/google-sheets'
-      || (/^(?:mailto:|sms:|https:\/\/wa\.me\/)/.test(href) && !/[\r\n]/.test(href));
+      || href === '/integrations/google-sheets';
   }
   function chooseControl(all, query, label) {
     const exact = all.filter((item) => norm(label(item)) === query);

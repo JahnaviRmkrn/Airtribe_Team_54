@@ -10,7 +10,8 @@ perform that action. This change does not add Google tools or automatic sending.
 - Deletion/sign-out still require both `confirmed: true` and a real browser
   confirmation dialog. Onboarding Confirm cannot be clicked by the assistant.
 - Generic DOM clicks use a reviewed allowlist of local navigation/edit controls,
-  read-only operations, compose/preview/cancel controls and handoff links. Unknown
+  read-only operations and compose/preview/cancel controls. Communication
+  handoff links remain manual; recipient-resolved email tools remain available. Unknown
   controls require manual activation. Ambiguous labels/names fail instead of
   selecting the first match; permission/confirmation inputs cannot be filled.
 - Google Contacts connect/import and Gmail/Calendar connect/confirm handlers
@@ -39,7 +40,9 @@ call APIs directly is outside this guard's scope.
   A network/receipt/5xx failure on a mutation returns an explicit unknown outcome
   and stops that turn's tool progression, rather than asking the model to retry.
 - Gemini Live serializes tool work and caches tool-call IDs within the connection.
-  Tool cancellation/stop aborts the tool context and drops queued/late work. An
+  Conflicting replays with a changed name or arguments are rejected, not
+  relabelled with an earlier result. Tool cancellation/stop aborts the tool
+  context and drops queued/late work. An
   uncertain result blocks further tool execution for that connection.
 - Voice planning makes one create attempt per spoken plan. Duplicate calls share
   that result; an unknown result stays blocked in the mounted planner and asks

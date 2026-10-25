@@ -81,7 +81,11 @@
     let uncertain = false;
     function runTool(f) {
       if (!f || typeof f.id !== 'string' || !f.id || typeof f.name !== 'string') return Promise.resolve({ error: 'Invalid tool call' });
-      if (calls.has(f.id)) return calls.get(f.id).result;
+      const signature = JSON.stringify({ name: f.name, args: f.args || {} }, (_key, value) => value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]])) : value);
+      if (calls.has(f.id)) {
+        const previous = calls.get(f.id);
+        return previous.signature === signature ? previous.result : Promise.resolve({ error: 'Conflicting replay: this tool ID was already used for different action details.' });
+      }
       if (calls.size >= 256) return Promise.resolve({ error: 'Voice tool limit reached; start a new conversation.' });
       const controller = new AbortController();
       if (cancelledCalls.has(f.id) || closed) controller.abort();
@@ -97,7 +101,7 @@
         }
         return response && typeof response === 'object' ? response : { result: response };
       });
-      calls.set(f.id, { controller, result });
+      calls.set(f.id, { controller, result, signature });
       toolQueue = result.then(() => {});
       return result;
     }
