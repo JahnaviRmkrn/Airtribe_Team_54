@@ -356,12 +356,17 @@ beforeAll(async () => {
   const result = await vite.build({
     configFile: false, root: fileURLToPath(root), envDir: bundleDir, logLevel: 'silent',
     resolve: { alias: { '@': fileURLToPath(root), 'next/link': fileURLToPath(new URL('link-adapter.jsx', import.meta.url)) } },
-    esbuild: { jsx: 'automatic' }, define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+    // The launcher must stay NODE_ENV=test for its safety guards, but the
+    // browser bundle uses production React. Pin OXC's JSX runtime consistently.
+    oxc: { jsx: { runtime: 'automatic', development: false } },
+    define: { 'process.env.NODE_ENV': JSON.stringify('production') },
     build: { write: false, outDir: bundleDir, minify: false, sourcemap: false, lib: { entry: fileURLToPath(new URL('sheets-entry.jsx', import.meta.url)), formats: ['es'], fileName: 'sheets-client' } },
   });
   const output = Array.isArray(result) ? result.flatMap(value => value.output) : result.output;
   expect(output.length).toBe(1); expect(output[0].type).toBe('chunk'); bundle = output[0].code;
   expect(bundle.length).toBeGreaterThan(10000);
+  // Catch a dev JSX transform paired with production React before browser QA.
+  expect(bundle).not.toMatch(/\bjsxDEV\b/);
   expect(digest(readFileSync(new URL('app/integrations/google-sheets/SheetsClient.tsx', root)))).toBe(sourceHashes['app/integrations/google-sheets/SheetsClient.tsx']);
   stopPromise = new Promise(resolve => { resolveStop = resolve; });
   server = createServer({ maxHeaderSize: 8192 }, (req, res) => {
