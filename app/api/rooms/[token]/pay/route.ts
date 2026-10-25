@@ -1,29 +1,43 @@
+import { randomUUID } from 'node:crypto';
 import { handle, HttpError, ok } from '@/lib/http';
-import { amountPaise, cancelOrder, createOrder, getOrderStatus, isConfigured } from '@/lib/pinelabs';
+import { amountPaise, createOrder, getOrderStatus, isConfigured } from '@/lib/pinelabs';
 import { limitRoom } from '@/lib/ratelimit';
 import { getRoom, requireGuest, requireOpen, type MeetupRow } from '@/lib/room';
 import { adminClient } from '@/lib/supabase/admin';
 import { roomUrl } from '@/lib/urls';
 
 type Ctx = { params: Promise<{ token: string }> };
+type CheckoutState = 'ready' | 'creating' | 'reconciliation_required';
 type PaymentRow = {
   id: string;
   amount_paise: number;
   pine_order_id: string | null;
   redirect_url: string | null;
+  merchant_order_reference: string | null;
   status: 'pending' | 'paid' | 'failed' | 'cancelled';
   updated_at: string;
+  checkout_state?: CheckoutState;
+};
+type Order = { orderId: string; redirectUrl: string };
+type Attempt = {
+  state: 'creating' | 'uncertain' | 'received';
+  pine_order_id: string | null;
+  redirect_url: string | null;
+  created_at: string;
 };
 
-const cols = 'id, amount_paise, pine_order_id, redirect_url, status, updated_at';
-// A row stuck in "pending" with no order (crash mid-create) can be retried after this.
-const STALE_CLAIM_MS = 2 * 60_000;
+const cols = 'id, amount_paise, pine_order_id, redirect_url, merchant_order_reference, status, updated_at';
+// This changes the message only. An elapsed timer NEVER releases a claim.
+const CREATION_NOTICE_MS = 2 * 60_000;
+const reconcileMessage = 'Payment creation could not be confirmed. Do not pay again. Check payment status or ask the organiser to reconcile it.';
 
-// Only status, amount and the checkout link go to the guest; never order ids.
+// Only state, amount and this guest's checkout link go to the guest. Provider
+// order IDs, merchant references and recovery receipts stay server-side.
 const view = (p: PaymentRow) => ({
   status: p.status,
   amount_paise: p.amount_paise,
   redirect_url: p.status === 'pending' ? p.redirect_url : null,
+  checkout_state: p.checkout_state ?? (p.pine_order_id || p.status === 'paid' ? 'ready' : 'reconciliation_required'),
 });
 
 async function setup(req: Request, token: string) {
@@ -35,35 +49,87 @@ async function setup(req: Request, token: string) {
 
 async function findPayment(room: MeetupRow, attendeeId: string) {
   const { data, error } = await adminClient()
-    .from('meetup_payments')
-    .select(cols)
-    .eq('meetup_id', room.id)
-    .eq('attendee_id', attendeeId)
-    .maybeSingle();
-  if (error) throw new HttpError(503, 'Could not load payment, please retry');
+    .from('meetup_payments').select(cols)
+    .eq('meetup_id', room.id).eq('attendee_id', attendeeId).maybeSingle();
+  if (error) throw new HttpError(503, 'Could not load payment, please check status again');
   return data as PaymentRow | null;
 }
 
-// Status always comes from Pine Labs (getOrder), never from the return URL,
-// which anyone can open with any query string.
+// Bounded, idempotent DB-only recovery. A lost write acknowledgement may mean
+// the first write COMMITTED. Read before repeating it, and never cancel the
+// provider order or issue another create based on a DB error/empty response.
+async function saveOrder(p: PaymentRow, order: Order): Promise<PaymentRow | null> {
+  const db = adminClient();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { data, error } = await db.from('meetup_payments')
+        .update({ pine_order_id: order.orderId, redirect_url: order.redirectUrl })
+        .eq('id', p.id).eq('merchant_order_reference', p.merchant_order_reference)
+        .eq('status', 'pending').is('pine_order_id', null).select(cols).maybeSingle();
+      if (!error && data) return data as PaymentRow;
+    } catch { /* A transport exception also has an uncertain commit outcome. */ }
+    try {
+      const { data, error } = await db.from('meetup_payments').select(cols)
+        .eq('id', p.id).eq('merchant_order_reference', p.merchant_order_reference).maybeSingle();
+      if (error) return null;
+      if (data?.pine_order_id === order.orderId && data.redirect_url === order.redirectUrl) return data as PaymentRow;
+      if (!data || data.status !== 'pending' || data.pine_order_id) return null;
+    } catch { return null; }
+  }
+  return null;
+}
+
+async function saveReceipt(p: PaymentRow, order: Order) {
+  const db = adminClient();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { data, error } = await db.from('meetup_payment_attempts')
+        .update({ state: 'received', pine_order_id: order.orderId, redirect_url: order.redirectUrl })
+        .eq('merchant_order_reference', p.merchant_order_reference).eq('payment_id', p.id)
+        .is('pine_order_id', null).select('pine_order_id, redirect_url').maybeSingle();
+      if (!error && data) return true;
+    } catch { /* Read back before repeating the same local receipt write. */ }
+    try {
+      const { data, error } = await db.from('meetup_payment_attempts').select('pine_order_id, redirect_url')
+        .eq('merchant_order_reference', p.merchant_order_reference).eq('payment_id', p.id).maybeSingle();
+      if (error || !data) return;
+      if (data.pine_order_id) return data.pine_order_id === order.orderId && data.redirect_url === order.redirectUrl;
+    } catch { return; }
+  }
+}
+
+async function recover(p: PaymentRow): Promise<PaymentRow> {
+  if (p.pine_order_id || p.status === 'paid') return p;
+  if (!p.merchant_order_reference) return { ...p, checkout_state: 'reconciliation_required' };
+  const { data, error } = await adminClient().from('meetup_payment_attempts')
+    .select('state, pine_order_id, redirect_url, created_at')
+    .eq('merchant_order_reference', p.merchant_order_reference).eq('payment_id', p.id)
+    .eq('amount_paise', p.amount_paise).maybeSingle();
+  if (error) throw new HttpError(503, reconcileMessage);
+  const receipt = data as Attempt | null;
+  if (p.status === 'pending' && receipt?.state === 'received' && receipt.pine_order_id && receipt.redirect_url) {
+    const saved = await saveOrder(p, { orderId: receipt.pine_order_id, redirectUrl: receipt.redirect_url });
+    if (!saved) throw new HttpError(503, reconcileMessage);
+    return saved;
+  }
+  const age = receipt ? Date.now() - new Date(receipt.created_at).getTime() : Number.NaN;
+  return { ...p, checkout_state: receipt?.state === 'creating' && age >= 0 && age < CREATION_NOTICE_MS
+    ? 'creating' : 'reconciliation_required' };
+}
+
+// Status always comes from Pine Labs (getOrder), never from the return URL.
 async function refresh(p: PaymentRow): Promise<PaymentRow> {
+  p = await recover(p);
   if (p.status !== 'pending' || !p.pine_order_id) return p;
   const status = await getOrderStatus(p.pine_order_id);
   if (status === p.status) return p;
-  const { data, error } = await adminClient()
-    .from('meetup_payments')
-    .update({ status })
-    .eq('id', p.id)
-    .eq('pine_order_id', p.pine_order_id)
-    .eq('status', 'pending')
-    .select(cols)
-    .maybeSingle();
-  if (error) throw new HttpError(503, 'Could not save payment status, please retry');
+  const { data, error } = await adminClient().from('meetup_payments').update({ status })
+    .eq('id', p.id).eq('pine_order_id', p.pine_order_id).eq('status', 'pending').select(cols).maybeSingle();
+  if (error) throw new HttpError(503, 'Could not save payment status, please check status again');
   if (!data) throw new HttpError(409, 'Payment changed, please check status again');
   return data as PaymentRow;
 }
 
-// GET /api/rooms/:token/pay -> the current guest's own payment (or null)
 export const GET = handle(async (req: Request, { params }: Ctx) => {
   const { token } = await params;
   await limitRoom(req, 'pay', token);
@@ -72,8 +138,6 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
   return ok({ payment: p ? view(await refresh(p)) : null });
 });
 
-// POST /api/rooms/:token/pay -> start (or resume) paying this guest's share of
-// the confirmed venue. The amount is computed here, never taken from the body.
 export const POST = handle(async (req: Request, { params }: Ctx) => {
   const { token } = await params;
   await limitRoom(req, 'pay', token);
@@ -87,73 +151,67 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
   const amount = amountPaise(venue?.price_per_person);
   if (!amount) throw new HttpError(400, 'The confirmed venue has no price to pay');
 
-  // Idempotent: reuse a paid or still-payable pending order for this guest.
   let row = await findPayment(room, me.id);
   if (row) {
     row = await refresh(row);
     if (row.status === 'paid') return ok({ payment: view(row) });
-    if (row.status === 'pending') {
-      if (row.pine_order_id && row.amount_paise === amount) return ok({ payment: view(row) });
-      if (!row.pine_order_id && Date.now() - new Date(row.updated_at).getTime() < STALE_CLAIM_MS) {
-        throw new HttpError(409, 'Payment is already being created, retry in a moment');
-      }
-      // Never replace an order that could still be paid in another tab.
-      if (row.pine_order_id) throw new HttpError(409, 'The venue price changed. Ask the organiser to reconcile the existing payment before retrying.');
+    if (!row.pine_order_id) {
+      throw new HttpError(409, row.checkout_state === 'creating'
+        ? 'Payment is being created. Check payment status; do not start another checkout.' : reconcileMessage);
     }
-    // Claim the row for a new order; updated_at guards against a concurrent claim.
-    const { data } = await db
-      .from('meetup_payments')
-      .update({ status: 'pending', amount_paise: amount, pine_order_id: null, redirect_url: null })
-      .eq('id', row.id)
-      .eq('updated_at', row.updated_at)
-      .select(cols)
-      .maybeSingle();
-    if (!data) throw new HttpError(409, 'Payment is already being created, retry in a moment');
+    if (row.status === 'pending') {
+      if (row.amount_paise === amount) return ok({ payment: view(row) });
+      throw new HttpError(409, 'The venue price changed. Ask the organiser to reconcile the existing payment before retrying.');
+    }
+  }
+
+  // Persist a new unique merchant reference before calling the provider. It is
+  // a recovery handle, not a claim of provider-side idempotency or safe replay.
+  const merchantRef = randomUUID().replaceAll('-', '');
+  if (row) {
+    const { data, error } = await db.from('meetup_payments')
+      .update({ status: 'pending', amount_paise: amount, pine_order_id: null, redirect_url: null, merchant_order_reference: merchantRef })
+      .eq('id', row.id).eq('updated_at', row.updated_at).eq('status', row.status).select(cols).maybeSingle();
+    if (error) throw new HttpError(503, reconcileMessage);
+    if (!data) throw new HttpError(409, 'Payment changed. Check payment status before continuing.');
     row = data as PaymentRow;
   } else {
-    const { data, error } = await db
-      .from('meetup_payments')
-      .insert({ meetup_id: room.id, attendee_id: me.id, amount_paise: amount, status: 'pending' })
-      .select(cols)
-      .single();
-    if (error?.code === '23505') throw new HttpError(409, 'Payment is already being created, retry in a moment');
-    if (error || !data) throw new HttpError(400, 'Could not start payment');
+    const { data, error } = await db.from('meetup_payments')
+      .insert({ meetup_id: room.id, attendee_id: me.id, amount_paise: amount, status: 'pending', merchant_order_reference: merchantRef })
+      .select(cols).single();
+    if (error?.code === '23505') throw new HttpError(409, 'Payment is already being created. Check payment status.');
+    if (error || !data) throw new HttpError(503, reconcileMessage);
     row = data as PaymentRow;
   }
 
+  const { error: receiptError } = await db.from('meetup_payment_attempts').insert({
+    merchant_order_reference: merchantRef, payment_id: row.id, amount_paise: amount,
+  });
+  if (receiptError) throw new HttpError(503, reconcileMessage);
+
   const { data: guest } = await db.from('meetup_attendees').select('guest_name').eq('id', me.id).single();
-  let order: { orderId: string; redirectUrl: string };
+  let order: Order;
   try {
     order = await createOrder({
-      amountPaise: amount,
-      // Unique per attempt (Pine Labs rejects reused references): 32 + 1 + ~8 chars.
-      merchantRef: `${row.id.replaceAll('-', '')}-${Date.now().toString(36)}`,
-      // WARNING: without NEXT_PUBLIC_SITE_URL this uses the request origin (Host
-      // header). Set it in production so the return URL cannot be steered.
+      amountPaise: amount, merchantRef,
+      // Configure NEXT_PUBLIC_SITE_URL in production; otherwise this uses Host.
       callbackUrl: `${roomUrl(req, token)}?payment=done`,
       guestName: guest?.guest_name ?? 'Guest',
     });
-  } catch (e) {
-    await db.from('meetup_payments').update({ status: 'failed' })
-      .eq('id', row.id).eq('updated_at', row.updated_at)
-      .eq('status', 'pending').is('pine_order_id', null);
-    throw e;
+  } catch {
+    // An exception includes timeouts, lost responses and malformed success
+    // bodies. None proves that the provider did not create a payable order.
+    try {
+      await db.from('meetup_payment_attempts').update({ state: 'uncertain' })
+        .eq('merchant_order_reference', merchantRef).eq('payment_id', row.id).is('pine_order_id', null);
+    } catch { /* The durable claim still blocks all automatic retries. */ }
+    throw new HttpError(502, reconcileMessage);
   }
 
-  const { data: saved, error } = await db
-    .from('meetup_payments')
-    .update({ pine_order_id: order.orderId, redirect_url: order.redirectUrl })
-    .eq('id', row.id)
-    .eq('updated_at', row.updated_at)
-    .eq('status', 'pending')
-    .is('pine_order_id', null)
-    .select(cols)
-    .maybeSingle();
-  if (error) throw new HttpError(503, 'Could not save payment, please retry');
-  if (!saved) {
-    // A newer request owns the row. Never expose or store this stale checkout.
-    await cancelOrder(order.orderId);
-    throw new HttpError(409, 'A newer payment attempt exists, please retry');
-  }
-  return ok({ payment: view(saved as PaymentRow) }, 201);
+  // Keep a separate durable receipt first. If the payment-row save fails, a
+  // later authenticated GET/POST can attach this same order, never create anew.
+  if (await saveReceipt(row, order) === false) throw new HttpError(503, reconcileMessage);
+  const saved = await saveOrder(row, order);
+  if (!saved) throw new HttpError(503, reconcileMessage);
+  return ok({ payment: view(saved) }, 201);
 });

@@ -54,9 +54,35 @@ describe('guest checkout controls', () => {
     const b = boot(vi.fn().mockRejectedValue(new Error('Payments are not configured')));
     await b.run('updatePayment(true)');
     expect(b.$('payment-status').textContent).toContain('not configured');
+    b.api.mockResolvedValueOnce({payment:null});
+    await b.run('updatePayment(false)');
     b.api.mockResolvedValue({payment:{status:'pending',amount_paise:45000,redirect_url:'javascript:alert(1)'}});
     await b.run('updatePayment(true)');
     expect(b.location.assign).not.toHaveBeenCalled();
     expect(b.$('payment-status').textContent).toBe('Invalid checkout link');
   });
+  it.each(['creating', 'reconciliation_required'])('blocks automatic retry and explains %s', async checkout_state => {
+    const b = boot(vi.fn().mockResolvedValue({payment:{status:'pending',amount_paise:45000,redirect_url:null,checkout_state}}));
+    await b.run('updatePayment(false)');
+    expect(b.$('pay-btn').disabled).toBe(true);
+    expect(b.$('payment-check').disabled).toBe(false);
+    expect(b.$('payment-status').textContent).toMatch(/do not start|Do not pay again/);
+    await b.run('updatePayment(true)');
+    expect(b.api).toHaveBeenCalledTimes(1);
+    expect(b.location.assign).not.toHaveBeenCalled();
+  });
+  it('requires a status check after an uncertain POST, and recovers only the same checkout', async () => {
+    const b = boot(vi.fn().mockRejectedValueOnce(new Error('Synthetic response loss')));
+    await b.run('updatePayment(true)');
+    expect(b.$('pay-btn').disabled).toBe(true);
+    await b.run('updatePayment(true)');
+    expect(b.api).toHaveBeenCalledTimes(1);
+    b.api.mockResolvedValue({payment:{status:'pending',amount_paise:45000,redirect_url:'https://pay.example/A',checkout_state:'ready'}});
+    await b.run('updatePayment(false)');
+    expect(b.$('pay-btn').disabled).toBe(false);
+    expect(b.location.assign).not.toHaveBeenCalled();
+    await b.run('updatePayment(true)');
+    expect(b.location.assign).toHaveBeenCalledWith('https://pay.example/A');
+  });
+
 });

@@ -201,7 +201,7 @@ describe('public room privacy, using real routes and a service-role PostgreSQL a
       const response = await invoke(getPayment, { session });
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ payment: {
-        status: 'pending', amount_paise: 50000, redirect_url: `https://checkout.example.test/${marker}`,
+        status: 'pending', amount_paise: 50000, checkout_state: 'ready', redirect_url: `https://checkout.example.test/${marker}`,
       } });
       expect(deps.getOrderStatus).toHaveBeenCalledExactlyOnceWith(`synthetic-order-${marker}`);
     }

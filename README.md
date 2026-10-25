@@ -105,8 +105,8 @@ last_interaction_at, next_followup_at` (ISO timestamps with offset).
 | POST / DELETE | `/api/rooms/:token/vote` | `{ venue_id }` | guest; one vote each, re-vote moves it; must be shortlisted |
 | POST | `/api/rooms/:token/confirm` | `{ venue_id }` | organiser (signed in) |
 | POST | `/api/rooms/:token/close` | | organiser (signed in) |
-| POST | `/api/rooms/:token/pay` | | guest; needs a confirmed venue with a price (409/400). Starts a Pine Labs order for the venue's `price_per_person` (computed server-side). Idempotent: returns the existing pending/paid payment. Returns `{ payment: { status, amount_paise, redirect_url } }`; send the guest to `redirect_url`, they come back to `/m/:token?payment=done` |
-| GET | `/api/rooms/:token/pay` | | guest; own payment (or `null`), status refreshed from Pine Labs while pending |
+| POST | `/api/rooms/:token/pay` | | guest; needs a confirmed venue with a price (409/400). Starts a Pine Labs order for the venue's `price_per_person` (computed server-side). Unknown creation outcomes fail closed and require reconciliation, never an automatic order retry. Idempotent: returns the existing pending/paid payment. Returns `{ payment: { status, amount_paise, redirect_url, checkout_state } }`; send the guest to `redirect_url`, they come back to `/m/:token?payment=done` |
+| GET | `/api/rooms/:token/pay` | | guest; own payment (or `null`), recover a saved order receipt and refresh pending status from Pine Labs. `checkout_state`: `ready`, `creating`, or `reconciliation_required` |
 
 Room page route for the frontend: `/m/:token`.
 
@@ -263,3 +263,7 @@ The organizer's Gmail and Calendar tabs provide explicit compose → saved previ
 Gmail uses send-only access; Calendar targets the selected account's primary
 calendar. Unknown outcomes never trigger automatic resend/recreation.
 See [setup, scopes, replay protection and verification limits](docs/google-actions-setup.md).
+
+### Checkout recovery
+
+Checkout creation safety, required receipt migration, recovery limits, and offline fault-injection coverage are documented in [Pine Labs readiness](docs/readiness/pine-labs-status.md#creation-uncertainty-and-receipt-recovery-2026-10-25).

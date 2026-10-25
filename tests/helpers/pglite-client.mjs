@@ -18,6 +18,10 @@ export function pgliteClient(db, role, uid = null) {
       const query = {
         select(columns = '*') { state.columns = columns; state.returning = true; return query; },
         eq(key, value) { state.filters.push([key, value]); return query; },
+        is(key, value) {
+          if (value !== null) throw new Error('Test adapter only supports IS NULL');
+          state.filters.push([key, value, 'is']); return query;
+        },
         order(key, options = {}) { state.order.push([key, options.ascending !== false]); return query; },
         insert(values) { state.operation = 'insert'; state.values = values; return query; },
         update(values) { state.operation = 'update'; state.values = values; return query; },
@@ -51,7 +55,7 @@ export function pgliteClient(db, role, uid = null) {
         } else {
           sql = `select ${projection(state.columns)} from ${target}`;
         }
-        if (state.filters.length) sql += ' where ' + state.filters.map(([key, value]) => `${identifier(key)} = ${bind(value)}`).join(' and ');
+        if (state.filters.length) sql += ' where ' + state.filters.map(([key, value, operator]) => operator === 'is' ? `${identifier(key)} is null` : `${identifier(key)} = ${bind(value)}`).join(' and ');
         if (state.operation === 'select' && state.order.length) sql += ' order by ' + state.order.map(([key, asc]) => `${identifier(key)} ${asc ? 'asc' : 'desc'}`).join(', ');
         if (state.operation !== 'select' && state.returning) sql += ` returning ${projection(state.columns)}`;
         try {

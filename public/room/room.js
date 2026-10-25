@@ -30,6 +30,11 @@ let paymentBusy = false;
 let paymentLoadedFor = null;
 let payment = null;
 let paymentMessage = '';
+let paymentStartUncertain = false;
+
+function checkoutBlocked() {
+  return paymentStartUncertain || (!!payment && (payment.checkout_state === 'creating' || payment.checkout_state === 'reconciliation_required' || (payment.status === 'pending' && !payment.redirect_url)));
+}
 
 function renderPayment() {
   const panel = $('payment-card');
@@ -39,11 +44,14 @@ function renderPayment() {
   if (!eligible) return;
   const price = view.meetup.final_venue.price_per_person;
   const closed = view.meetup.status !== 'open';
-  $('payment-status').textContent = paymentMessage || (payment
+  const recoveryMessage = payment?.checkout_state === 'creating'
+    ? 'Payment is being created. Check payment status; do not start another checkout.'
+    : checkoutBlocked() ? 'Payment creation needs checking. Do not pay again. Check payment status or ask the organiser to reconcile it.' : '';
+  $('payment-status').textContent = paymentMessage || recoveryMessage || (payment
     ? `Payment ${payment.status} · ${rupees(payment.amount_paise / 100)}`
     : 'Check your payment status before checkout.');
-  $('pay-btn').textContent = payment?.status === 'pending' ? 'Continue checkout' : `Pay ${rupees(price)} with Pine Labs`;
-  $('pay-btn').disabled = paymentBusy || closed || !(price > 0) || payment?.status === 'paid';
+  $('pay-btn').textContent = checkoutBlocked() ? 'Check status before paying' : payment?.status === 'pending' ? 'Continue checkout' : `Pay ${rupees(price)} with Pine Labs`;
+  $('pay-btn').disabled = paymentBusy || checkoutBlocked() || closed || !(price > 0) || payment?.status === 'paid';
   $('payment-check').disabled = paymentBusy;
   if (paymentLoadedFor !== view.me.attendee_id) {
     paymentLoadedFor = view.me.attendee_id;
@@ -52,12 +60,13 @@ function renderPayment() {
 }
 
 async function updatePayment(start) {
-  if (paymentBusy) return;
+  if (paymentBusy || (start && checkoutBlocked())) return;
   paymentBusy = true;
   renderPayment();
   try {
     const data = await api('/pay', { method: start ? 'POST' : 'GET' });
     payment = data.payment;
+    paymentStartUncertain = false;
     paymentMessage = payment ? '' : 'No payment yet.';
     if (start && payment?.status === 'pending' && payment.redirect_url) {
       const url = new URL(payment.redirect_url);
@@ -65,6 +74,7 @@ async function updatePayment(start) {
       location.assign(url.href);
     }
   } catch (e) {
+    if (start) paymentStartUncertain = true;
     paymentMessage = e.message;
   } finally {
     paymentBusy = false;
