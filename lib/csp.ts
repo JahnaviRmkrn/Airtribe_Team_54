@@ -34,10 +34,16 @@ const base = {
     'https://*.elevenlabs.io',
     'wss://*.elevenlabs.io',
     'wss://*.livekit.cloud',
+    // Cloudflare Web Analytics (beacon injected at the edge for muop.win).
+    'https://cloudflareinsights.com',
   ],
   'worker-src': ["'self'"],
   'frame-src': ["'none'"],
 };
+
+// Cloudflare injects its Web Analytics beacon into muop.win pages; allow only
+// that script path on both policies.
+const CF_BEACON = 'https://static.cloudflareinsights.com/beacon.min.js/';
 
 const scripts = {
   // Exact pinned paths (CSP only prefix-matches paths ending in '/'); bump these with the URLs in voice.js, app.js and meet.js.
@@ -46,9 +52,10 @@ const scripts = {
     'https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.27.0/',
     'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js',
     'https://unpkg.com/leaflet@1.9.4/',
+    CF_BEACON,
   ],
   // 'unsafe-eval' only for `next dev` (React Refresh); production never gets it.
-  next: ["'self'", "'unsafe-inline'", ...(process.env.NODE_ENV === 'production' ? [] : ["'unsafe-eval'"])],
+  next: ["'self'", "'unsafe-inline'", CF_BEACON, ...(process.env.NODE_ENV === 'production' ? [] : ["'unsafe-eval'"])],
 };
 
 const render = (policy: Record<string, string[]>) =>
