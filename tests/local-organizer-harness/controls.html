@@ -18,6 +18,13 @@
 <button class="btn" id="reset-empty">Reset with empty Alice</button>
 <button class="btn" id="reset-bulk">Reset with 1,001 Alice contacts</button>
 <p>The bulk fixture has exactly 334 personal, 334 professional and 333 community Alice contacts, with 2 overdue and 2 upcoming check-ins. The last contact is “ZZZ Synthetic Alice 1001”. Bob keeps his private seeded contact. Exact synthetic dates and counts appear in status.</p>
+<button class="btn" id="reset-history">Reset with 1,001 history rows and 3 meetups</button>
+<p>The history fixture gives Alice one contact “Alice History 1001”, with the final history marker dated 28 January 2024, and three meetups ending in “FINAL MEETUP 3 — 2026-11-03”. Bob retains his private seeded data. History pages are capped at 100 and meetup pages at 2, only in this fixture. Recent activity deliberately remains max 100.</p>
+<h2>One-shot history / meetup read failure</h2>
+<p>Load the history fixture and choose Alice. Arm one target, then reload that screen; only its real second cursor page fails. No partial success is returned. The next reload retries normally. Exact contact and meetup IDs, cap evidence and failure consumption appear in status.</p>
+<button class="btn" id="fail-history">Fail next contact History second page</button>
+<button class="btn" id="fail-meetups">Fail next Meetups second page</button>
+<p><a href="/organizer/#/contacts/55555555-5555-4555-8555-000000000001">Alice History 1001 detail</a></p>
 <h2>One-shot paginated-read failure</h2>
 <p>Load the bulk fixture and choose Alice first. Arm the desired API, then open or reload that screen. Only Alice's selected API consumes the fault, after its first real 100-row contact page; the second page fails through the actual route. Other APIs and Bob do not consume it. Status shows whether it is armed or consumed. A retry then loads normally. Reset clears the fault and counters.</p>
 <button class="btn" id="fail-contacts">Fail next Contacts second page</button>

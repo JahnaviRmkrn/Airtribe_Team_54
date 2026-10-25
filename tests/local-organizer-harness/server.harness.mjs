@@ -150,7 +150,12 @@ const providerPath = (path) => ['/api/extract', '/api/assistant', '/api/voice/li
   || /^\/api\/me\/integrations\/google\/(?:contacts|gmail|calendar|sheets-import|sheets-export)(?:\/(?:start|callback|preview|import|cancel))?$/.test(path);
 let db, server, origin, tenants, timeout, stopResolve, stopPromise, queue = Promise.resolve();
 let stopped = false, servedRequests = 0, resets = 0, scenario = 'seeded';
-let bulkExpectations = null;
+let bulkExpectations = null, historyExpectations = null;
+const historyContact = '55555555-5555-4555-8555-000000000001';
+const historyTargets = { history: `/api/me/contacts/${historyContact}`, meetups: '/api/me/meetups' };
+const historyFailure = { pending_target: null, armed_count: 0, consumed_count: 0, last_failure: null };
+const historyReads = {};
+
 const contactReadFailure = { pending_target: null, armed_count: 0, consumed_count: 0, last_failure: null };
 const contactReadTargets = { contacts: '/api/me/contacts', dashboard: '/api/me/dashboard' };
 const issuedGuestCookies = new Set();
@@ -183,10 +188,12 @@ function clearBrowserGuests(context) {
   }
 }
 async function resetFixture(nextScenario = 'seeded') {
-  if (!['seeded', 'empty', 'bulk1001'].includes(nextScenario)) throw new Error('Invalid fixture scenario');
+  if (!['seeded', 'empty', 'bulk1001', 'history1001'].includes(nextScenario)) throw new Error('Invalid fixture scenario');
   tenants = await seedPrivateData(db);
   scenario = nextScenario;
-  bulkExpectations = null;
+  bulkExpectations = null; historyExpectations = null;
+  Object.assign(historyFailure, { pending_target: null, armed_count: 0, consumed_count: 0, last_failure: null });
+  for (const key of Object.keys(historyReads)) delete historyReads[key];
   Object.assign(contactReadFailure, { pending_target: null, armed_count: 0, consumed_count: 0, last_failure: null });
   if (scenario === 'empty') await asRole(db, 'authenticated', identities.alice, async (tx) => {
     await tx.query('delete from contacts');
@@ -219,6 +226,30 @@ async function resetFixture(nextScenario = 'seeded') {
         id: `44444444-4444-4444-8444-${String(number).padStart(12, '0')}`, next_followup_at: due[index],
       })),
     };
+  }
+  if (scenario === 'history1001') {
+    await asRole(db, 'authenticated', identities.alice, async (tx) => {
+      await tx.query('delete from contacts');
+      await tx.query("insert into contacts (id, name, category) values ($1, 'Alice History 1001', 'personal')", [historyContact]);
+      await tx.query(`insert into interactions (id, contact_id, occurred_at, type, notes)
+        select ('55555555-5555-4555-8555-' || lpad((10000 + n)::text, 12, '0'))::uuid,
+          $1::uuid, '2026-10-24T12:00:00Z'::timestamptz - (n - 1) * interval '1 day', 'check_in',
+          case when n = 1001 then 'FINAL HISTORY 1001 — 2024-01-28' else 'Synthetic history ' || lpad(n::text, 4, '0') end
+        from generate_series(1, 1001) as series(n)`, [historyContact]);
+      await tx.query('delete from meetups');
+      await tx.query(`insert into meetups (id, title, created_at, starts_at)
+        select ('66666666-6666-4666-8666-' || lpad(n::text, 12, '0'))::uuid,
+          case when n = 3 then 'FINAL MEETUP 3 — 2026-11-03' else 'Synthetic meetup ' || n end,
+          '2026-10-24T12:00:00Z'::timestamptz - (n - 1) * interval '1 day',
+          '2026-11-01T12:00:00Z'::timestamptz + (n - 1) * interval '1 day'
+        from generate_series(1, 3) as series(n)`);
+    });
+    tenants.alice.contact.id = historyContact;
+    tenants.alice.meetup.id = '66666666-6666-4666-8666-000000000001';
+    historyExpectations = { contact_id: historyContact, alice_interactions: 1001, alice_meetups: 3,
+      caps: { history: 100, meetups: 2 },
+      final_history: { id: '55555555-5555-4555-8555-000000011001', notes: 'FINAL HISTORY 1001 — 2024-01-28', occurred_at: '2024-01-28T12:00:00Z' },
+      final_meetup: { id: '66666666-6666-4666-8666-000000000003', title: 'FINAL MEETUP 3 — 2026-11-03', starts_at: '2026-11-03T12:00:00Z' } };
   }
   for (const name of ['alice', 'bob']) {
     await asRole(db, 'service_role', null, (tx) => tx.query('update meetups set room_token = $1 where id = $2', [tokens[name], tenants[name].meetup.id]));
@@ -257,6 +288,42 @@ function withContactReadFailure(client, context) {
     return query;
   } };
 }
+// Fixture-only transport boundary: cap real SQL result pages, never synthesize success.
+function withHistoryTransport(client, context) {
+  if (scenario !== 'history1001' || context?.requestMethod !== 'GET') return client;
+  const target = Object.keys(historyTargets).find((key) => historyTargets[key] === context.requestPath);
+  if (!target) return client;
+  const tableName = target === 'history' ? 'interactions' : 'meetups';
+  const cap = historyExpectations.caps[target];
+  let pages = 0, firstRows = 0;
+  return { ...client, from(table) {
+    const query = client.from(table);
+    if (table !== tableName) return query;
+    let head = false, cursor = false, executed;
+    const select = query.select.bind(query), gt = query.gt.bind(query), then = query.then.bind(query), limit = query.limit.bind(query);
+    // A backend cap applies even to callers that never request a limit. HEAD
+    // counts remain exact because the SQL adapter omits limits for head reads.
+    limit(cap);
+    query.select = (columns, options) => { head = options?.head === true; return select(columns, options); };
+    query.gt = (column, value) => { if (column === 'id') cursor = true; return gt(column, value); };
+    query.limit = (value) => limit(Math.min(value, cap));
+    const execute = async () => {
+      if (!head && cursor && pages === 1 && firstRows > 0 && context.role === 'owner' && historyFailure.pending_target === target) {
+        historyFailure.pending_target = null; historyFailure.consumed_count++;
+        historyFailure.last_failure = { target, path: context.requestPath, page: 2, first_page_rows: firstRows };
+        return { data: null, error: { code: 'XX000', message: 'Synthetic second collection page read failure' } };
+      }
+      const result = await new Promise((resolve, reject) => then(resolve, reject));
+      if (!head && !result.error && Array.isArray(result.data)) {
+        pages++; if (pages === 1) firstRows = result.data.length;
+        if (context.role === 'owner') historyReads[target] = { cap, pages, first_page_rows: firstRows, last_page_rows: result.data.length };
+      }
+      return result;
+    };
+    query.then = (resolve, reject) => { executed ??= execute(); return executed.then(resolve, reject); };
+    return query;
+  } };
+}
 async function status(context) {
   const counts = await asRole(db, 'service_role', null, async (tx) => (await tx.query(`select
     (select count(*)::int from contacts) as contacts,
@@ -267,6 +334,7 @@ async function status(context) {
     (select count(*)::int from meetups where status = 'closed') as closed_rooms,
     (select count(*)::int from meetups where final_venue_id is not null) as confirmed_rooms`)).rows[0]);
   return { mode: 'local-organizer-real-handler-fixture', role: context.role, scenario, contact_receipts: RECEIPTS ? 'real-local-rpc' : 'disabled-legacy', ...counts, served_requests: servedRequests, resets,
+    history_expectations: historyExpectations, history_read_failure: { ...historyFailure }, history_reads: { ...historyReads },
     bulk_expectations: bulkExpectations, contact_read_failure: { ...contactReadFailure },
     external_fetch_attempts: deps.externalFetchAttempts, provider_attempts: deps.providerAttempts,
     secret_access_attempts: deps.secretAccessAttempts, internal_errors: deps.errorCount,
@@ -306,7 +374,7 @@ async function dispatch(req, res) {
     return respond(res, 200, readFileSync(new URL(asset[0], root)), context, asset[1]);
   }
   if (path === '/__harness/status' && req.method === 'GET') return respond(res, 200, await status(context), context);
-  if (['/__harness/role', '/__harness/reset', '/__harness/stop', '/__harness/read-failure'].includes(path) && req.method === 'POST') {
+  if (['/__harness/role', '/__harness/reset', '/__harness/stop', '/__harness/read-failure', '/__harness/collection-failure'].includes(path) && req.method === 'POST') {
     let payload;
     try { payload = JSON.parse(await bodyBytes(req)); } catch { return respond(res, 400, { error: 'Invalid local control body' }); }
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return respond(res, 400, { error: 'Invalid local control body' });
@@ -317,9 +385,14 @@ async function dispatch(req, res) {
       context.cookies.set('__organizer_harness_role', payload.role);
     } else if (path.endsWith('/reset')) {
       if (payload.confirm !== 'reset-local-fixture') return respond(res, 400, { error: 'Explicit fixture reset required' });
-      if (payload.scenario !== undefined && !['seeded', 'empty', 'bulk1001'].includes(payload.scenario)) return respond(res, 400, { error: 'Invalid fixture scenario' });
-      if (payload.scenario === 'bulk1001' && Object.keys(payload).some((key) => !['confirm', 'scenario'].includes(key))) return respond(res, 400, { error: 'The bulk fixture is fixed; extra inputs are not allowed' });
+      if (payload.scenario !== undefined && !['seeded', 'empty', 'bulk1001', 'history1001'].includes(payload.scenario)) return respond(res, 400, { error: 'Invalid fixture scenario' });
+      if (['bulk1001', 'history1001'].includes(payload.scenario) && Object.keys(payload).some((key) => !['confirm', 'scenario'].includes(key))) return respond(res, 400, { error: 'The fixture is fixed; extra inputs are not allowed' });
       await resetFixture(payload.scenario); clearBrowserGuests(context);
+    } else if (path.endsWith('/collection-failure')) {
+      if (payload.confirm !== 'fail-next-collection-page2' || typeof payload.target !== 'string' || !Object.hasOwn(historyTargets, payload.target)
+        || Object.keys(payload).some((key) => !['confirm', 'target'].includes(key))) return respond(res, 400, { error: 'Explicit fixed collection target required' });
+      if (scenario !== 'history1001' || historyFailure.pending_target !== null) return respond(res, 409, { error: 'Load history1001 and consume or reset any pending fault first' });
+      historyFailure.pending_target = payload.target; historyFailure.armed_count++;
     } else if (path.endsWith('/read-failure')) {
       if (payload.confirm !== 'fail-next-contact-page2' || typeof payload.target !== 'string' || !Object.hasOwn(contactReadTargets, payload.target)
         || Object.keys(payload).some((key) => !['confirm', 'target'].includes(key))) return respond(res, 400, { error: 'Explicit fixed contact-read failure target required' });
@@ -416,7 +489,7 @@ beforeAll(async () => {
   deps.userClient = () => {
     const context = storage.getStore(), role = context?.role;
     const uid = role === 'owner' ? identities.alice : role === 'other' ? identities.bob : null;
-    return withContactReadFailure(pgliteClient(db, uid ? 'authenticated' : 'anon', uid, organizerAdapter), context);
+    return withHistoryTransport(withContactReadFailure(pgliteClient(db, uid ? 'authenticated' : 'anon', uid, organizerAdapter), context), context);
   };
   await resetFixture();
   stopPromise = new Promise((resolve) => { stopResolve = resolve; });
@@ -530,6 +603,7 @@ it('serves unchanged organizer/room assets and real routes with safe HTTP cookie
   expect(summary.secret_access_attempts).toBe(0); expect(summary.internal_errors).toBe(0);
   await organizerSmoke({ owner, other, observer, statusIs, mutate });
   await bulkReadSmoke({ owner, other, observer, statusIs, mutate });
+  await historyReadSmoke({ owner, other, observer, statusIs, mutate });
   // Leave a clean fixture for a browser operator, never the smoke's credentials.
   statusIs(await owner('/__harness/reset', mutate('POST', { confirm: 'reset-local-fixture' })), 200);
   statusIs(await guestA(room + '/me'), 401);
@@ -642,11 +716,16 @@ async function organizerSmoke({ owner, other, observer, statusIs, mutate }) {
   } else expect((await owner(contactsPath)).data.contacts.filter((c) => c.name === sameBody.name)).toHaveLength(2);
 
   statusIs(await owner(meetupsPath, mutate('POST', { title: ' ' })), 400);
-  const start = new Date(Date.now() + 35 * 86_400_000).toISOString();
+  const start = '2050-11-03T20:00:00Z'; // Fixed future instant crosses midnight in IST.
   const meeting = await owner(meetupsPath, mutate('POST', { title: 'Synthetic Organizer Meetup', activity: 'coffee', area: 'Fixture Area', starts_at: start, budget: 0, notes: 'Private meetup detail' }));
   statusIs(meeting, 201);
   const m = meeting.data.meetup, meetupPath = meetupsPath + '/' + m.id;
   expect(m.organizer_id).toBe(identities.alice);
+  expect(meeting.data.invite_text).toBe(`Join "Synthetic Organizer Meetup" on Fri, 4 Nov 2050, 01:30 IST (Asia/Kolkata)! Add your preferences and vote on a place: ${m.room_url}`);
+  expect(Date.parse(m.starts_at)).toBe(Date.parse(start));
+  const storedStart = (await asRole(db, 'authenticated', identities.alice, (tx) =>
+    tx.query("select to_jsonb(m)->>'starts_at' as value from meetups m where id = $1", [m.id]))).rows[0].value;
+  expect(Date.parse(storedStart)).toBe(Date.parse(start));
   expect(new URL(m.room_url).origin).toBe(origin);
   expect(Date.parse(m.expires_at)).toBe(Date.parse(start) + 2 * 86_400_000);
   expect((await owner(meetupsPath)).data.meetups.some((row) => row.id === m.id)).toBe(true);
@@ -783,4 +862,82 @@ async function bulkReadSmoke({ owner, other, observer, statusIs, mutate }) {
   const summary = await fixtureStatus();
   expect(summary.external_fetch_attempts).toBe(0); expect(summary.provider_attempts).toBe(0);
   expect(summary.secret_access_attempts).toBe(0); expect(summary.internal_errors).toBe(0);
+}
+
+async function historyReadSmoke({ owner, other, observer, statusIs, mutate }) {
+  const reset = (scenario, extra = {}) => owner('/__harness/reset', mutate('POST', { confirm: 'reset-local-fixture', scenario, ...extra }));
+  const arm = (target, extra = {}) => owner('/__harness/collection-failure', mutate('POST', { confirm: 'fail-next-collection-page2', target, ...extra }));
+  const fixtureStatus = async () => (await observer('/__harness/status')).data;
+  statusIs(await arm('history'), 409);
+  statusIs(await reset('history1001', { count: 1002 }), 400);
+  const seeded = await reset('history1001'); statusIs(seeded, 200);
+  expect(seeded.data).toMatchObject({ scenario: 'history1001', contacts: 2, interactions: 1002, goals: 6 });
+  const expected = seeded.data.history_expectations;
+  // Negative baseline: the pre-pagination query shape (no explicit limit)
+  // really truncates at this fixture boundary. Success must come from the
+  // shipped handler's pagination, not an accidentally uncapped SQL adapter.
+  for (const [target, table, count] of [['history', 'interactions', 1001], ['meetups', 'meetups', 3]]) {
+    const client = withHistoryTransport(pgliteClient(db, 'authenticated', identities.alice, organizerAdapter),
+      { role: 'owner', requestMethod: 'GET', requestPath: historyTargets[target] });
+    const rows = await client.from(table).select('*').order('id');
+    expect(rows.error).toBeNull(); expect(rows.data).toHaveLength(expected.caps[target]);
+    const head = await client.from(table).select('*', { head: true, count: 'exact' });
+    expect(head.error).toBeNull(); expect(head.count).toBe(count);
+    const smaller = await client.from(table).select('*').order('id').limit(1);
+    expect(smaller.error).toBeNull(); expect(smaller.data).toHaveLength(1);
+  }
+  const checkComplete = (target, response) => {
+    statusIs(response, 200);
+    const rows = response.data[target === 'history' ? 'interactions' : 'meetups'];
+    const count = target === 'history' ? 1001 : 3;
+    expect(rows).toHaveLength(count);
+    expect(rows.every((row) => row[target === 'history' ? 'user_id' : 'organizer_id'] === identities.alice)).toBe(true);
+    expect(rows.map((row) => row.id)).toEqual(Array.from({ length: count }, (_, i) => target === 'history'
+      ? `55555555-5555-4555-8555-${String(10001 + i).padStart(12, '0')}`
+      : `66666666-6666-4666-8666-${String(1 + i).padStart(12, '0')}`));
+    const last = rows.at(-1), marker = expected[target === 'history' ? 'final_history' : 'final_meetup'];
+    expect(last.id).toBe(marker.id);
+    const field = target === 'history' ? 'notes' : 'title', date = target === 'history' ? 'occurred_at' : 'starts_at';
+    expect(last[field]).toBe(marker[field]); expect(Date.parse(last[date])).toBe(Date.parse(marker[date]));
+    return rows;
+  };
+  checkComplete('history', await owner(historyTargets.history));
+  checkComplete('meetups', await owner(historyTargets.meetups));
+  expect((await fixtureStatus()).history_reads).toEqual({
+    history: { cap: 100, pages: 12, first_page_rows: 100, last_page_rows: 0 },
+    meetups: { cap: 2, pages: 3, first_page_rows: 2, last_page_rows: 0 },
+  });
+  const recent = await owner('/api/me/interactions?limit=10000'); statusIs(recent, 200);
+  expect(recent.data.interactions).toHaveLength(100);
+  expect(recent.data.interactions.some((row) => row.id === expected.final_history.id)).toBe(false);
+  const bobContacts = await other('/api/me/contacts'); statusIs(bobContacts, 200); expect(bobContacts.data.contacts).toHaveLength(1);
+  const bobHistory = await other('/api/me/contacts/' + bobContacts.data.contacts[0].id); statusIs(bobHistory, 200);
+  expect(bobHistory.data.interactions).toHaveLength(1);
+  expect(bobHistory.data.interactions[0].user_id).toBe(identities.bob);
+  statusIs(await owner('/api/me/contacts/' + bobContacts.data.contacts[0].id), 404);
+  statusIs(await other(historyTargets.history), 404);
+  statusIs(await other('/api/me/meetups/' + expected.final_meetup.id), 404);
+  const bobMeetups = await other(historyTargets.meetups); statusIs(bobMeetups, 200);
+  expect(bobMeetups.data.meetups).toHaveLength(1); expect(bobMeetups.data.meetups[0].organizer_id).toBe(identities.bob);
+  for (const target of ['history', 'meetups']) {
+    statusIs(await arm(target), 200); statusIs(await arm(target), 409);
+    const before = (await fixtureStatus()).history_read_failure.consumed_count;
+    checkComplete(target === 'history' ? 'meetups' : 'history', await owner(historyTargets[target === 'history' ? 'meetups' : 'history']));
+    statusIs(await other(historyTargets[target]), target === 'history' ? 404 : 200);
+    statusIs(await observer(historyTargets[target]), 401);
+    expect((await fixtureStatus()).history_read_failure).toMatchObject({ pending_target: target, consumed_count: before });
+    const failed = await owner(historyTargets[target]); statusIs(failed, 503);
+    expect(Object.keys(failed.data)).toEqual(['error']); expect(failed.data.error).toMatch(/Complete data could not be loaded/);
+    expect((await fixtureStatus()).history_read_failure).toMatchObject({ pending_target: null, consumed_count: before + 1,
+      last_failure: { target, path: historyTargets[target], page: 2, first_page_rows: expected.caps[target] } });
+    checkComplete(target, await owner(historyTargets[target]));
+    expect((await fixtureStatus()).history_read_failure.consumed_count).toBe(before + 1);
+  }
+  for (const target of ['contacts', '/api/me/meetups', {}, null]) statusIs(await arm(target), 400);
+  for (const extra of [{ page: 3 }, { sql: 'not accepted' }, { count: 2 }, { url: '/api/me/meetups' }]) statusIs(await arm('history', extra), 400);
+  statusIs(await arm('history'), 200);
+  const clean = await reset('seeded'); statusIs(clean, 200);
+  expect(clean.data.history_expectations).toBeNull(); expect(clean.data.history_reads).toEqual({});
+  expect(clean.data.history_read_failure).toEqual({ pending_target: null, armed_count: 0, consumed_count: 0, last_failure: null });
+  expect(clean.data.external_fetch_attempts).toBe(0); expect(clean.data.provider_attempts).toBe(0); expect(clean.data.secret_access_attempts).toBe(0);
 }

@@ -256,3 +256,91 @@ receipt behavior, disabled providers, zero unexpected network/provider/secret
 access, fixture reset invalidation and shutdown. A passing automated smoke is
 **not proof of a completed browser exercise**. Record browser observations and
 browser/network/profile limitations separately.
+
+### Fixed full-history / capped-meetup acceptance fixture
+
+**Reset with 1,001 history rows and 3 meetups** selects `history1001`. This
+fixed reset accepts only `confirm: "reset-local-fixture"` and
+`scenario: "history1001"`; no count, SQL, URL, date or body overrides exist.
+It replaces Alice's contacts with **Alice History 1001**, UUID
+`55555555-5555-4555-8555-000000000001`, with exactly 1,001 synthetic interactions.
+Their newest-first dates run from `2026-10-24T12:00:00Z` to
+`2024-01-28T12:00:00Z`. The final note is **FINAL HISTORY 1001 — 2024-01-28**,
+UUID `55555555-5555-4555-8555-000000011001`. Alice has exactly three meetups;
+newest-created first, the final title is **FINAL MEETUP 3 — 2026-11-03**,
+UUID `66666666-6666-4666-8666-000000000003`, scheduled
+`2026-11-03T12:00:00Z`. Bob retains his private seeded contact, interaction,
+goals and meetup. Existing bulk1001 behavior is unchanged.
+
+Only this scenario's contact-detail history and meetup-list GETs apply fixed
+query-adapter caps (100 history rows, 2 meetups). The actual shipped handlers
+and PostgreSQL/RLS queries execute. Limits are applied to SQL even when a caller omits `.limit()`, not successful
+API responses. Smoke explicitly proves an old-style no-limit query truncates
+to 100/2 while HEAD counts remain 1001/3 and a smaller explicit limit remains
+respected. `history_reads` status records cap, page count, first-page rows
+and last-page rows. At baseline history takes 11 nonempty pages plus one empty
+probe; meetups take two nonempty pages plus one empty probe. Real HEAD counts
+remain uncapped. Recent Activity is deliberately still max100, not full history.
+This is a bounded fixture, not a snapshot or unlimited-collection guarantee.
+
+`POST /__harness/collection-failure` accepts exactly
+`{ "confirm": "fail-next-collection-page2", "target": "history" }` or target
+`"meetups"`. It requires this scenario and cannot overwrite a pending fault.
+Only Alice's exact target GET consumes it, after a successful first real SQL
+page and at the second id-cursor page. The adapter returns a database-style
+error, and the real handler returns 503 with only an error, never partial data.
+Bob, observer and the other collection do not consume it. Status
+`history_read_failure` records pending target, arm/consume counts, exact path,
+page 2 and first-page rows. Retry succeeds without rearming. Reset clears all
+this scenario's fault/evidence state. No provider/secret/network guards change.
+
+#### Exact native-browser checklist (not claimed by HTTP smoke)
+
+1. Launch `./tests/local-organizer-harness/run.sh serve` in the browser machine's
+   native terminal. Open `http://127.0.0.1:4319/__harness/`, click **Reset with
+   1,001 history rows and 3 meetups**, then **Alice fixture organizer**. Reload
+   any existing app tabs. Leave other target tabs idle during failure tests.
+2. Open the controls' **Alice History 1001 detail** link (or
+   `http://127.0.0.1:4319/organizer/#/contacts/55555555-5555-4555-8555-000000000001`).
+   Confirm the profile and History appear. Scroll to the bottom of the History
+   timeline (browser Find can locate `FINAL HISTORY 1001`); visibly verify the
+   final note and its date/time, corresponding to **28 January 2024, 12:00 UTC**.
+   Dates use device locale/timezone: record it, and allow calendar-day changes
+   for zones UTC+12 and farther east. Do not treat a marker's embedded date alone as proof
+   of the separately rendered date. Confirm newest row is 24 October 2026.
+3. Open `http://127.0.0.1:4319/organizer/#/meetups`. Visibly verify all three
+   cards and the final title **FINAL MEETUP 3 — 2026-11-03**, with its separately
+   rendered schedule corresponding to **3 November 2026, 12:00 UTC**. Refresh
+   controls status: first-page rows must be 100/history and 2/meetups, with
+   page counts 12 and 3 respectively at the unchanged baseline.
+4. In controls, click **Fail next contact History second page**. Reload the
+   exact detail tab. In native DevTools Network confirm its real GET returns
+   **503**, payload has only `error`; the screen must show the load error and
+   Retry, **not** a shortened timeline or “No check-ins yet”. Refresh controls:
+   last failure must be `history`, page 2, first-page rows 100, consumed once.
+   Click the app's **Try again** button and verify the complete timeline and
+   final note/date return, with GET 200 and no additional consumption.
+5. Repeat using **Fail next Meetups second page**, reloading the Meetups tab.
+   Confirm GET 503, error-only payload and visible error/Retry rather than an
+   empty or two-card successful list. Status must show `meetups`, page 2,
+   first-page rows 2. **Try again** restores all three cards and the final date.
+6. Choose **Bob fixture organizer** and reload Contacts and Meetups: only Bob's
+   seeded rows appear. Reopen Alice's exact detail URL: real GET must be 404,
+   no Alice history. Directly open
+   `http://127.0.0.1:4319/api/me/meetups/66666666-6666-4666-8666-000000000003`:
+   expect 404, not Alice meetup details. Return to Bob's own contact detail and
+   verify its single private history row. Normal tabs share account cookies;
+   independent simultaneous tests require separate profiles/private contexts.
+7. Restore the seeded fixture and verify fault status/evidence cleared; stop
+   the local server. Do not email/share/send or use providers. Record native
+   observations separately from automated HTTP evidence.
+
+The smoke exercises all counts, complete ID ordering, final note/title and
+actual timestamp values, cap/page evidence, recent100 preservation, both real
+503/error-only paths, target/account isolation, ownership404, retry and cleanup.
+It does not assert that a browser has rendered anything.
+
+The existing real-SQL meetup creation smoke also uses the fixed UTC instant
+`2050-11-03T20:00:00Z`, asserts invitation text says
+`Fri, 4 Nov 2050, 01:30 IST (Asia/Kolkata)`, and checks returned and stored
+`starts_at` preserve the original instant. Nothing is sent or shared.

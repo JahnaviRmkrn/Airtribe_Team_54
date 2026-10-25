@@ -32,3 +32,6 @@ document.getElementById('fail-dashboard').addEventListener('click', () => reques
 document.getElementById('stop').addEventListener('click', () => request('stop', { confirm: 'stop-local-fixture' }));
 document.getElementById('refresh').addEventListener('click', () => request('status'));
 request('status');
+
+document.getElementById('reset-history').addEventListener('click', () => reset('history1001'));
+for (const target of ['history', 'meetups']) document.getElementById('fail-' + target).addEventListener('click', () => request('collection-failure', { confirm: 'fail-next-collection-page2', target }));
