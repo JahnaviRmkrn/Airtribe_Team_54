@@ -17,8 +17,25 @@ const SEND_MESSAGE_HREF =
 // Reads the session cookie, so this must render per request (not prerendered).
 export const dynamic = 'force-dynamic';
 
+type DownloadInfo = { name: string; label: string; bytes: number; sha256: string };
+
+// Installer manifest written by scripts/write-downloads-info.mjs. Read per
+// request (page is force-dynamic) so it always matches the files served.
+async function loadDownloads(): Promise<DownloadInfo[]> {
+  try {
+    const { readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    // cwd is the repo root under `next start`; import.meta.url points into .next.
+    const raw = await readFile(join(process.cwd(), 'public', 'downloads', 'downloads.json'), 'utf8');
+    return (JSON.parse(raw).files ?? []) as DownloadInfo[];
+  } catch { return []; }
+}
+
+const mb = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
+
 // Signed-in users skip the landing page and go straight to the organizer app.
 export default async function Home() {
+  const downloads = await loadDownloads();
   const { data } = await (await userClient()).auth.getUser();
   if (data.user) redirect('/organizer');
   return (
@@ -157,10 +174,28 @@ export default async function Home() {
         </div>
       </section>
 
+      <section className="closing-section section-pad" id="download">
+        <div className="container-wide closing-inner">
+          <span className="eyebrow">Get the apps</span>
+          <h2 className="serif">muop, on your computer<br />and your <em>phone.</em></h2>
+          <p>The desktop apps add local files, screen capture, and — on Mac — Contacts, Notes, Reminders and Messages.</p>
+          <div className="download-links">
+            {downloads.map((d) => (
+              <span key={d.name} className="download-item">
+                <a className="closing-button" href={`/downloads/${d.name}`} download>{d.label} <ArrowUpRight size={17} /></a>
+                <span className="download-meta">{mb(d.bytes)} · SHA-256 {d.sha256.slice(0, 12)}…</span>
+              </span>
+            ))}
+            <span className="closing-footnote">macOS (.dmg) is built on a Mac — see the desktop folder in the repo. Desktop builds are unsigned, so your OS may warn on first launch. Full checksums: <a href="/downloads/downloads.json">downloads.json</a>.</span>
+          </div>
+        </div>
+      </section>
+
       <footer className="site-footer">
         <div className="container-wide footer-inner">
           <BrandMark />
           <span>Make time for the people who matter.</span>
+          <a href="#download" className="back-top">Download the apps <ArrowUpRight size={14} /></a>
           <a href="/traction" className="back-top">Live traction <ArrowUpRight size={14} /></a>
           <a href="#top" className="back-top">Back to the beginning <ArrowUpRight size={14} /></a>
         </div>

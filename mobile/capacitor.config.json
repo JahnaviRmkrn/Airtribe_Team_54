@@ -1,0 +1,10 @@
+{
+  "appId": "win.muop.app",
+  "appName": "Muop",
+  "webDir": "www",
+  "server": {
+    "url": "https://muop.win",
+    "androidScheme": "https",
+    "cleartext": false
+  }
+}

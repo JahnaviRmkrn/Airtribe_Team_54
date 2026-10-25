@@ -1,0 +1,35 @@
+{
+  "name": "muop-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Muop desktop app (Electron shell for muop.win)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac dmg zip",
+    "dist:win": "electron-builder --win nsis portable",
+    "dist:linux": "electron-builder --linux AppImage",
+    "dist": "electron-builder --mac dmg zip --win nsis portable --linux AppImage"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "win.muop.app",
+    "productName": "Muop",
+    "files": ["main.js", "preload.js", "package.json"],
+    "directories": { "output": "release" },
+    "mac": {
+      "category": "public.app-category.social-networking",
+      "target": ["dmg", "zip"],
+      "identity": null
+    },
+    "win": {
+      "target": ["nsis", "portable"],
+      "signAndEditExecutable": false
+    },
+    "linux": { "target": ["AppImage"], "category": "Network" },
+    "nsis": { "oneClick": false, "perMachine": false }
+  }
+}

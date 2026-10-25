@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Muop</string>
+    <string name="title_activity_main">Muop</string>
+    <string name="package_name">win.muop.app</string>
+    <string name="custom_url_scheme">win.muop.app</string>
+</resources>

@@ -272,3 +272,8 @@
   .home .hero-caption, .home .hero-scroll { display:none; }
   .home .hero > .site-header { position:absolute; top:0; left:0; right:0; }
 }
+
+.home .download-links { display:flex; flex-wrap:wrap; gap:12px; justify-content:center; align-items:center; margin-top:18px; }
+.home .download-links .closing-footnote { flex-basis:100%; }
+.home .download-item { display:inline-flex; flex-direction:column; align-items:center; gap:5px; }
+.home .download-meta { font-size:11px; opacity:.75; }

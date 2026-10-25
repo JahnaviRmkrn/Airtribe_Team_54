@@ -12,6 +12,12 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
+    // Electron's main and sandboxed preload entry points intentionally use CommonJS.
+    files: ["desktop/main.js", "desktop/preload.js"],
+    languageOptions: { sourceType: "commonjs" },
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
+  {
     files: ["scripts/**/*.mjs"],
     rules: { "no-undef": "error" },
   },
