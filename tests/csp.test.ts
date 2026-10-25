@@ -11,7 +11,7 @@ describe('content security policy', () => {
   });
 
   it('third-party scripts are pinned to exact versions', () => {
-    for (const src of directive(APP_CSP, 'script-src').split(' ').slice(2)) expect(src).toMatch(/@\d+\.\d+\.\d+\//);
+    for (const src of directive(APP_CSP, 'script-src').split(' ').slice(2).filter((s) => !s.includes('cloudflareinsights'))) expect(src).toMatch(/@\d+\.\d+\.\d+\//);
   });
 
   it('both policies forbid framing, plugins and base-tag hijacks', () => {
@@ -24,5 +24,12 @@ describe('content security policy', () => {
 
   it('only the pinned Leaflet path is allowed from unpkg', () => {
     for (const name of ['img-src', 'style-src']) expect(directive(APP_CSP, name)).not.toMatch(/https:\/\/unpkg\.com(\s|$)/);
+  });
+
+  it('allows only the Cloudflare analytics beacon path, not the whole host', () => {
+    for (const csp of [APP_CSP, NEXT_CSP]) {
+      expect(directive(csp, 'script-src')).toContain('https://static.cloudflareinsights.com/beacon.min.js/');
+      expect(directive(csp, 'script-src')).not.toMatch(/static\.cloudflareinsights\.com(\s|;|$)/);
+    }
   });
 });
