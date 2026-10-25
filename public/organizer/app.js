@@ -874,7 +874,7 @@ async function contactsView() {
   });
   const paint = () => {
     const q = el('c-search').value.trim().toLowerCase();
-    const list = sorted.filter((c) => !q || (c.name || '').toLowerCase().includes(q) || (c.interests || []).some((i) => String(i).toLowerCase().includes(q)));
+    const list = sorted.filter((c) => !q || String(c.name ?? '').toLowerCase().includes(q) || (c.interests || []).some((i) => String(i).toLowerCase().includes(q)));
     el('contact-list').innerHTML = list.length ? list.map(contactRow).join('')
       : `<p class="muted empty">${q ? 'No one matches "' + esc(q) + '".' : (filter ? 'No ' + filter + ' contacts yet.' : 'No contacts yet. Add your first person below.')}</p>`;
     document.querySelectorAll('[data-view]').forEach((b) => { b.onclick = () => go('#/contacts/' + encodeURIComponent(b.dataset.view)); });

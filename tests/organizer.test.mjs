@@ -36,6 +36,40 @@ function organizer(overrides = {}) {
 const attack = '<img src=x onerror=alert(1)>';
 const escaped = '&lt;img src=x onerror=alert(1)&gt;';
 
+describe('contact history and search recovery', () => {
+  it.each([null, undefined, '', 42, false, { imported: 'name' }])('search survives a malformed or empty name: %j', async (name) => {
+    const { context, document } = organizer({
+      fetch: async () => ({ ok: true, status: 200, json: async () => ({ contacts: [
+        { id: 'one', name, category: 'personal', interests: ['chess'] },
+        { id: 'two', name: 'Alice', category: 'personal', interests: [] },
+      ] }) }),
+    });
+    await vm.runInContext('contactsView()', context);
+    const search = document.getElementById('c-search');
+    search.value = 'alice'; search.oninput();
+    expect(document.getElementById('contact-list').innerHTML).toContain('Alice');
+    search.value = 'chess'; search.oninput();
+    expect(document.getElementById('contact-list').innerHTML).toContain('data-view="one"');
+    search.value = 'absent'; search.oninput();
+    expect(document.getElementById('contact-list').innerHTML).toContain('No one matches');
+  });
+
+  it('renders a retryable history error rather than claiming there are no check-ins', async () => {
+    let unavailable = true;
+    const { context, document } = organizer({
+      fetch: async () => unavailable
+        ? { ok: false, status: 400, json: async () => ({ error: 'Synthetic history query timeout' }) }
+        : { ok: true, status: 200, json: async () => ({ contact: { id: 'one', name: 'Alice', category: 'personal' }, interactions: [] }) },
+    });
+    await vm.runInContext("contactDetailView('one')", context);
+    expect(document.getElementById('app').innerHTML).toContain('Synthetic history query timeout');
+    expect(document.getElementById('app').innerHTML).not.toContain('No check-ins yet');
+    unavailable = false;
+    await document.getElementById('retry-btn').onclick();
+    expect(document.getElementById('app').innerHTML).toContain('No check-ins yet');
+  });
+});
+
 describe('organizer meetup rendering', () => {
   it('escapes stored meetup areas in the planned list', () => {
     const { context } = organizer();

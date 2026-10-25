@@ -19,11 +19,12 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
     .eq('id', id)
     .single();
   dbError(error);
-  const { data: recent } = await supabase
+  const { data: recent, error: historyError } = await supabase
     .from('interactions')
     .select('occurred_at, type, notes')
     .eq('contact_id', id)
     .order('occurred_at', { ascending: false })
     .limit(3);
+  dbError(historyError);
   return ok(await draftMessage(contact!, recent ?? []));
 });

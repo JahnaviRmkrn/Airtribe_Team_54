@@ -23,9 +23,15 @@ export const GET = handle(async (req: Request) => {
 export const POST = handle(async (req: Request) => {
   const { supabase } = await requireUser(req);
   const body = await parseBody(req, interactionCreate);
+  // This records a completed check-in, not a future plan. A future occurrence
+  // would otherwise become the latest interaction and postpone reminders.
+  const now = new Date();
+  if (body.occurred_at && Date.parse(body.occurred_at) > now.getTime()) {
+    throw new HttpError(400, 'occurred_at must not be in the future');
+  }
   const { data, error } = await supabase.rpc('record_interaction', {
     p_contact_id: body.contact_id,
-    p_occurred_at: body.occurred_at ?? new Date().toISOString(),
+    p_occurred_at: body.occurred_at ?? now.toISOString(),
     p_type: body.type,
     p_notes: body.notes ?? null,
     p_next_followup_at: body.next_followup_at ?? null,

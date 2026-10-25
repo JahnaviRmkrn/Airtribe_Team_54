@@ -19,6 +19,7 @@ export const GET = handle(async (req: Request) => {
       .from('interactions')
       .select('id, occurred_at, type, notes, contact:contacts(id, name, category)')
       .gte('occurred_at', since)
+      .lte('occurred_at', now.toISOString())
       .order('occurred_at', { ascending: false }),
     // Upcoming = open, room not expired, and not already in the past
     // (unscheduled meetups with no starts_at stay visible).

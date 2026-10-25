@@ -9,11 +9,12 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
   const { supabase } = await requireUser(req);
   const { data: contact, error } = await supabase.from('contacts').select('*').eq('id', id).single();
   dbError(error);
-  const { data: interactions } = await supabase
+  const { data: interactions, error: historyError } = await supabase
     .from('interactions')
     .select('*')
     .eq('contact_id', id)
     .order('occurred_at', { ascending: false });
+  dbError(historyError);
   return ok({ contact, interactions: interactions ?? [] });
 });
 

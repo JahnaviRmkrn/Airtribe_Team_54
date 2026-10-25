@@ -95,6 +95,15 @@ Ported from Arindom Chetia's PR #3 (FastAPI `routers/voice.py`, `static/voice.*`
 Contact fields: `name, category, interests[], notes, preferred_frequency_days,
 last_interaction_at, next_followup_at` (ISO timestamps with offset).
 
+The interaction API rejects `occurred_at` later than its captured server time
+(millisecond precision): this records a completed check-in, not a future plan.
+Backdated logs remain in history but do not roll the latest interaction
+or automatic follow-up backwards; an explicitly supplied next follow-up still
+sets or clears that date. Dashboard activity counts only the last 30 days through
+the current time, excluding any previously stored future-dated entries.
+This guard is API-only: direct SQL/RPC writers must validate their own occurrence
+times. Existing future-dated history or contact schedules are not rewritten.
+
 Meetup detail edits accept `title, activity, area, starts_at, budget, notes`.
 Send only changed fields, and optionally `expected_updated_at` with the exact
 timestamp returned by GET for an atomic version check. A stale version returns
