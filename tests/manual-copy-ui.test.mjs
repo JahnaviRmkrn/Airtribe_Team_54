@@ -324,3 +324,86 @@ describe('existing public room copy fallback', () => {
     app.assertLocalOnly();
   });
 });
+
+// Minimal draft markup adapter: execute the shipped draftPanel and copyText,
+// while the API and DOM parsing are synthetic and never touch the clipboard.
+async function draftEditor(clipboard) {
+  const app = setup({ clipboard });
+  const create = app.document.createElement;
+  app.document.createElement = (tag) => {
+    const element = create(tag);
+    if (tag === 'div') Object.defineProperty(element, 'innerHTML', { set(html) {
+      this.children.slice().forEach((child) => child.remove());
+      if (!html.includes('class="draft-text"')) return;
+      for (const [kind, className] of [['textarea', 'draft-text'], ['a', 'draft-wa'], ['button', 'draft-copy'], ['button', 'draft-again']]) {
+        const child = create(kind); child.className = className; this.appendChild(child);
+        if (kind === 'textarea') child.value = draft;
+        if (className === 'draft-copy') child.textContent = 'Copy';
+      }
+    } });
+    return element;
+  };
+  const container = app.document.body.appendChild(create('div'));
+  app.context.container = container; app.context.draftValue = draft;
+  app.run('api = async () => ({ message: draftValue, source: "template", basis: [] }); draftPanel(container, "synthetic-contact", "Synthetic");');
+  await Promise.resolve(); await Promise.resolve();
+  const text = container.querySelector('.draft-text'), button = container.querySelector('.draft-copy');
+  return { ...app, text, button, container,
+    edit(value) { text.focus(); text.value = value; text.oninput(); },
+    submit() { return button.onclick({ currentTarget: button }); },
+  };
+}
+
+describe('editable draft copy feedback revisions', () => {
+  it.each(['resolve', 'reject'])('suppresses stale %s feedback after edit while retaining the pending lock', async (outcome) => {
+    const wait = deferred(), writeText = vi.fn(() => wait.promise), app = await draftEditor({ writeText });
+    const pending = app.submit(); app.edit('Edited synthetic draft'); await app.submit();
+    expect(writeText).toHaveBeenCalledTimes(1); expect(writeText).toHaveBeenCalledWith(draft);
+    expect(app.button.disabled).toBe(true); expect(app.button.getAttribute('aria-busy')).toBe('true');
+    if (outcome === 'resolve') wait.resolve(); else wait.reject(new Error('Synthetic denial'));
+    await pending;
+    expect(app.button.textContent).toBe('Copy'); expect(app.button.disabled).toBe(false);
+    expect(app.button.getAttribute('aria-busy')).toBeUndefined(); expect(app.panel()).toBeNull();
+    expect(app.document.activeElement).toBe(app.text); expect(app.text.value).toBe('Edited synthetic draft');
+    expect(app.timers).toHaveLength(0); app.assertLocalOnly();
+  });
+  it('invalidates edit then revert, even though text equals the original snapshot again', async () => {
+    const wait = deferred(), app = await draftEditor({ writeText: () => wait.promise });
+    const pending = app.submit(); app.edit('Changed'); app.edit(draft); wait.resolve(); await pending;
+    expect(app.button.textContent).toBe('Copy'); expect(app.panel()).toBeNull(); expect(app.timers).toHaveLength(0);
+  });
+  it('copies the edited value only on a deliberate later activation after settlement', async () => {
+    const wait = deferred(), writeText = vi.fn().mockReturnValueOnce(wait.promise).mockResolvedValueOnce(undefined);
+    const app = await draftEditor({ writeText });
+    const pending = app.submit(); app.edit('New content'); wait.resolve(); await pending;
+    expect(writeText).toHaveBeenCalledTimes(1); await app.submit();
+    expect(writeText.mock.calls.map(([text]) => text)).toEqual([draft, 'New content']);
+    expect(app.button.textContent).toBe('Copied!');
+  });
+  it('clears completed success feedback and its timer when the draft changes', async () => {
+    const app = await draftEditor({ writeText: async () => {} }); await app.submit();
+    expect(app.button.textContent).toBe('Copied!'); const timer = app.timers[0]; app.edit('Changed after copy');
+    expect(app.button.textContent).toBe('Copy'); expect(timer.cancelled).toBe(true);
+    timer.callback(); expect(app.button.textContent).toBe('Copy');
+  });
+  it('removes old manual-copy fallback on edit and preserves the editor focus', async () => {
+    const app = await draftEditor({ writeText: async () => { throw new Error('Denied'); } }); await app.submit();
+    expect(app.panel().querySelector('textarea').value).toBe(draft);
+    app.edit('Corrected'); expect(app.panel()).toBeNull(); expect(app.document.activeElement).toBe(app.text);
+    await app.submit(); expect(app.panel().querySelector('textarea').value).toBe('Corrected');
+  });
+  it.each(['resolve', 'reject'])('suppresses pending %s after editing and navigation', async (outcome) => {
+    const wait = deferred(), app = await draftEditor({ writeText: () => wait.promise });
+    const pending = app.submit(); app.edit('New'); app.context.location.hash = '#/contacts';
+    if (outcome === 'resolve') wait.resolve(); else wait.reject(new Error('Denied'));
+    await pending; expect(app.button.textContent).toBe('Copy'); expect(app.panel()).toBeNull(); expect(app.button.disabled).toBe(false);
+  });
+  it.each(['resolve', 'reject'])('preserves unchanged-draft %s behavior', async (outcome) => {
+    const wait = deferred(), app = await draftEditor({ writeText: () => wait.promise });
+    const pending = app.submit(); if (outcome === 'resolve') wait.resolve(); else wait.reject(new Error('Denied'));
+    await pending;
+    if (outcome === 'resolve') expect(app.button.textContent).toBe('Copied!');
+    else expect(app.panel().querySelector('textarea').value).toBe(draft);
+    app.assertLocalOnly();
+  });
+});

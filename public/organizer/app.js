@@ -381,7 +381,7 @@ async function toggleQr(btn) {
 
 const copyAttempts = new WeakMap();
 let copyFallbackId = 0;
-async function copyText(text, btn, label) {
+async function copyText(text, btn, label, presentationCurrent = () => true) {
   const previous = copyAttempts.get(btn);
   // Native writes cannot be cancelled. Prevent a second write from this
   // button racing the first, including direct calls to its click handler.
@@ -390,7 +390,7 @@ async function copyText(text, btn, label) {
   previous?.panel?.remove();
   const attempt = { pending: true }, nav = navGen, hash = location.hash;
   copyAttempts.set(btn, attempt);
-  const current = () => copyAttempts.get(btn) === attempt && btn.isConnected && !stale(nav) && location.hash === hash;
+  const current = () => copyAttempts.get(btn) === attempt && btn.isConnected && !stale(nav) && location.hash === hash && presentationCurrent();
   const wasDisabled = btn.disabled;
   btn.disabled = true;
   btn.setAttribute('aria-busy', 'true');
@@ -500,8 +500,22 @@ function draftPanel(container, contactId, name) {
       const wa = box.querySelector('.draft-wa');
       const syncWa = () => { wa.href = 'https://wa.me/?text=' + encodeURIComponent(text.value); };
       syncWa();
-      text.oninput = syncWa;
-      box.querySelector('.draft-copy').onclick = (e) => copyText(text.value, e.currentTarget, 'Copy');
+      const copy = box.querySelector('.draft-copy');
+      let revision = 0;
+      text.oninput = () => {
+        revision++;
+        syncWa();
+        // A native write already in flight cannot be cancelled. Invalidate only
+        // its feedback; keep its pending lock until that operation settles.
+        const attempt = copyAttempts.get(copy);
+        clearTimeout(attempt?.timer);
+        attempt?.panel?.remove();
+        copy.textContent = 'Copy';
+      };
+      copy.onclick = (e) => {
+        const copiedRevision = revision;
+        return copyText(text.value, e.currentTarget, 'Copy', () => revision === copiedRevision);
+      };
       box.querySelector('.draft-again').onclick = load;
     } catch (e) {
       if (e instanceof AuthError) return;
