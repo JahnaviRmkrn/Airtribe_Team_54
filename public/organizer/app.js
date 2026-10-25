@@ -1124,7 +1124,9 @@ function onboardingView() {
   const goals = { personal: 50, professional: 30, community: 20, ...(p.goals || {}) };
   // Who understood the extraction: kept with the rows (and in org_prefill) so
   // the attribution survives Back from goals and a refresh.
-  let source = typeof p.source === 'string' ? p.source : null;
+  // Only extractions that actually added someone count, so a later fallback
+  // that added nobody can't take credit for people DeepSeek found.
+  const sources = Array.isArray(p.sources) ? p.sources.filter((x) => typeof x === 'string') : typeof p.source === 'string' ? [p.source] : [];
   let step = 1;
   let voice = null;
 
@@ -1132,7 +1134,7 @@ function onboardingView() {
   const showSource = () => {
     const box = el('ob-source');
     if (!box) return;
-    const label = source && Object.hasOwn(SOURCE_LABELS, source) ? SOURCE_LABELS[source] : null;
+    const label = sources.filter((x) => Object.hasOwn(SOURCE_LABELS, x)).map((x) => SOURCE_LABELS[x]).join(' + ');
     box.textContent = label && rows.some((r) => r.name) ? `Filled from what you said (understood by ${label}). Review each person - nothing is saved until you finish.` : '';
   };
 
@@ -1183,12 +1185,12 @@ function onboardingView() {
     const merged = [...kept, ...added].slice(0, 5);
     rows.splice(0, rows.length, ...(merged.length ? merged : [emptyRow()]));
     if (res.goals) Object.assign(goals, res.goals);
-    if (typeof res.source === 'string') source = res.source;
+    if (added.length && typeof res.source === 'string' && !sources.includes(res.source)) sources.push(res.source);
     try {
       sessionStorage.setItem('org_prefill', JSON.stringify({
         contacts: merged.map((r) => ({ name: r.name, category: r.category, interests: r.interests, preferred_frequency_days: r.freq })),
         goals,
-        source,
+        sources,
       }));
     } catch { /* storage unavailable: pre-fill still applies on screen */ }
     renderRows();

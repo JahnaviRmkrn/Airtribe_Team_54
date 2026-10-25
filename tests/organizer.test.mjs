@@ -132,6 +132,52 @@ describe('onboarding retries', () => {
   });
 });
 
+describe('onboarding extraction source credit', () => {
+  function setup() {
+    const storage = new Map([['org_prefill', JSON.stringify({
+      contacts: [{ name: 'Alice', category: 'personal' }],
+      source: 'deepseek',
+    })]]);
+    const app = organizer({
+      sessionStorage: {
+        getItem: (key) => storage.get(key) ?? null,
+        setItem: (key, value) => storage.set(key, value),
+        removeItem: (key) => storage.delete(key),
+      },
+    });
+    vm.runInContext('onboardingView()', app.context);
+    return { ...app, storage };
+  }
+
+  it.each([
+    ['empty', []],
+    ['duplicate-only', [{ name: 'ALICE', category: 'personal' }]],
+  ])('does not credit a later %s fallback extraction', (_kind, contacts) => {
+    const { context, document, storage } = setup();
+    context.window.OrganizerOnboarding.apply({ contacts, source: 'rules' });
+    const attribution = document.getElementById('ob-source').textContent;
+    expect(attribution).toContain('understood by DeepSeek');
+    expect(attribution).not.toContain('built-in rules');
+    const saved = JSON.parse(storage.get('org_prefill'));
+    expect(saved.sources).toEqual(['deepseek']);
+    expect(saved.contacts.map((contact) => contact.name)).toEqual(['Alice']);
+  });
+
+  it('keeps each contributing source once across Back and refresh', () => {
+    const { context, document, storage } = setup();
+    context.window.OrganizerOnboarding.apply({ contacts: [{ name: 'Bob' }], source: 'rules' });
+    context.window.OrganizerOnboarding.apply({ contacts: [{ name: 'Carol' }], source: 'rules' });
+    const attribution = document.getElementById('ob-source').textContent;
+    expect(attribution).toContain('understood by DeepSeek + built-in rules');
+    expect(JSON.parse(storage.get('org_prefill')).sources).toEqual(['deepseek', 'rules']);
+    document.getElementById('ob-next').onclick();
+    document.getElementById('ob-back').onclick();
+    expect(document.getElementById('ob-source').textContent).toBe(attribution);
+    vm.runInContext('onboardingView()', context);
+    expect(document.getElementById('ob-source').textContent).toBe(attribution);
+  });
+});
+
 describe('organizer navigation races', () => {
   it.each([
     ['dashboardView()', { is_empty: false }],
