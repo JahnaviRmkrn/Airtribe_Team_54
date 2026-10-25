@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Local organizer real-route controls</title><link rel="stylesheet" href="/room/room.css"><script src="/__harness/controls.js" defer></script></head>
+<body><main class="r-wrap">
+<h1>Local organizer real-route controls</h1>
+<p>This is synthetic, local-only test data. Organizer and room screens are unchanged checked-in assets. Supported requests execute real route handlers against in-memory PostgreSQL with real RLS. Supabase Auth and PostgREST are not running.</p>
+<p>No live services are available. Google, payment, voice, extraction, assistant and generated-draft endpoints return 503. Microphone, camera and geolocation are disabled. Do not enter real personal data, credentials or payment details, and do not use email/share links to contact anyone.</p>
+<h2>Choose this browser's synthetic account</h2>
+<button class="btn" data-role="owner">Alice fixture organizer</button>
+<button class="btn" data-role="other">Bob fixture organizer</button>
+<button class="btn" data-role="observer">Signed-out observer / new guest</button>
+<p>Choose an organizer before opening the app. Observer requests return real 401 errors; production login/signout is intentionally not implemented. Role changes clear only this harness's guest cookies. Normal tabs share cookies. Independent simultaneous accounts require separate browser profiles or private contexts.</p>
+<p><a href="/organizer/">Open organizer dashboard</a> · <a href="/organizer/#/contacts">Contacts</a> · <a href="/organizer/#/onboarding">Manual onboarding</a> · <a href="/organizer/#/profile">Goals/profile</a> · <a href="/organizer/#/meetups">Meetups</a></p>
+<p><a href="/m/local_harness_room_alice_0001">Alice's seeded room</a> · <a href="/m/local_harness_room_bob_000001">Bob's seeded room</a></p>
+<h2>Fixture lifecycle</h2>
+<p>Reset replaces only this server's in-memory fixture, invalidates its former guest sessions, and clears this browser's organizer draft/retry storage. Reload all organizer and room tabs after a reset or role switch. The empty-Alice scenario removes Alice's contacts, goals and meetups while preserving Bob's seeded data; Alice's seeded room link then returns 404.</p>
+<button class="btn" id="reset">Reset seeded fixture</button>
+<button class="btn" id="reset-empty">Reset with empty Alice</button>
+<button class="btn" id="refresh">Refresh status</button>
+<button class="btn" id="stop">Stop local server</button>
+<p>The server stops automatically after 30 minutes. Stop or Ctrl-C also closes the listener and discards the database. Receipts are disabled by default; optional receipt mode invokes actual local SQL functions, never a fake successful save.</p>
+<pre id="status" role="status" aria-live="polite">Loading aggregate status…</pre>
+</main></body></html>
