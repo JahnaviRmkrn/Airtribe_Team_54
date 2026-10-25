@@ -395,11 +395,13 @@ async function copyText(text, btn, label) {
   btn.textContent = label;
   btn.setAttribute('aria-live', 'polite');
   let copied = false;
+  let usedLegacy = false;
   try {
     if (navigator.clipboard?.writeText && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
       copied = true;
     } else {
+      usedLegacy = true;
       const t = document.createElement('textarea');
       t.value = text;
       t.readOnly = true;
@@ -411,7 +413,6 @@ async function copyText(text, btn, label) {
         copied = document.execCommand('copy') === true;
       } finally {
         t.remove();
-        if (current()) btn.focus();
       }
     }
   } catch { /* Denied or unsupported: offer manual copy, never claim success. */ }
@@ -421,6 +422,9 @@ async function copyText(text, btn, label) {
     btn.removeAttribute('aria-busy');
   }
   if (!current()) return;
+  // Disabled buttons cannot receive focus. Restore only the synchronous
+  // legacy path after re-enabling, not a later modern clipboard completion.
+  if (usedLegacy) btn.focus();
   if (copied) {
     btn.textContent = 'Copied!';
     attempt.timer = setTimeout(() => { if (current()) btn.textContent = label; }, 1500);

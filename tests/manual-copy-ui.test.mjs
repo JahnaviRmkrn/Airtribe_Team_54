@@ -33,10 +33,14 @@ function setup({ clipboard, secure = true, legacy = () => false, room = false, p
       this.parentNode.children.splice(this.parentNode.children.indexOf(this) + 1, 0, child);
     }
     remove() {
+      if (this.contains(document.activeElement)) document.activeElement = document.body;
       if (this.parentNode) this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1);
       this.parentNode = null;
     }
-    focus() { document.activeElement = this; }
+    contains(node) { return this === node || this.children.some((child) => child.contains(node)); }
+    // Native disabled controls cannot receive focus; removing the focused
+    // element (or its ancestor) returns focus to the document body.
+    focus() { if (!this.disabled && this.isConnected) document.activeElement = this; }
     select() { this.selectionStart = 0; this.selectionEnd = this.value.length; }
     setAttribute(name, value) { this.attributes[name] = String(value); }
     getAttribute(name) { return this.attributes[name]; }
@@ -152,6 +156,20 @@ describe('organizer manual copy boundaries', () => {
     expect(app.button.textContent).toBe('Copied!');
     expect(app.document.body.querySelectorAll('textarea')).toHaveLength(0);
     expect(app.document.activeElement).toBe(app.button);
+    app.assertLocalOnly();
+  });
+
+  it('does not steal focus on modern clipboard completion after the user moved elsewhere', async () => {
+    const pending = deferred();
+    const app = setup({ clipboard: { writeText: () => pending.promise } });
+    const copying = app.copy();
+    const other = app.document.body.appendChild(app.document.createElement('button'));
+    other.focus();
+    // Focusing the temporarily disabled copy button must have no effect.
+    app.button.focus(); expect(app.document.activeElement).toBe(other);
+    pending.resolve(); await copying;
+    expect(app.button.disabled).toBe(false);
+    expect(app.document.activeElement).toBe(other);
     app.assertLocalOnly();
   });
 
