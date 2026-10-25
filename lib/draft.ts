@@ -64,7 +64,9 @@ export function draftBasis(c: DraftContact, recent: DraftInteraction[], now = ne
   return [
     c.interests?.length ? `Interested in ${c.interests.slice(0, 8).join(', ')}` : null,
     c.notes ? `Your note: ${c.notes.slice(0, 300)}` : null,
-    days === null ? 'No check-in logged yet' : `Last contact: ${days} day${days === 1 ? '' : 's'} ago`,
+    // A null date doesn't prove there was never a check-in (it can be cleared),
+    // so say unknown, as the prompt does.
+    days === null ? 'Last contact: unknown' : `Last contact: ${days} day${days === 1 ? '' : 's'} ago`,
     ...recent
       .slice(0, 3)
       .filter((i) => i.notes)
@@ -84,6 +86,16 @@ export function cleanDraft(raw: unknown): string | null {
     s = end > 80 ? cut.slice(0, end + 1) : cut.trimEnd() + '…';
   }
   return s;
+}
+
+// What templateDraft actually reads - never claim notes or check-ins it ignores.
+export function templateBasis(c: DraftContact): string[] {
+  const interest = c.interests?.find((i) => i.trim());
+  return [
+    'Written from a template (no AI)',
+    `Relationship: ${c.category}`,
+    interest ? `Interested in ${interest}` : null,
+  ].filter(Boolean) as string[];
 }
 
 // Used when no LLM key is set or every provider fails, so the button always works.

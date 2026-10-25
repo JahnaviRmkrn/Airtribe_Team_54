@@ -1,5 +1,5 @@
 import 'server-only';
-import { buildDraftPrompt, cleanDraft, draftBasis, templateDraft, type DraftContact, type DraftInteraction } from './draft';
+import { buildDraftPrompt, cleanDraft, draftBasis, templateBasis, templateDraft, type DraftContact, type DraftInteraction } from './draft';
 
 // Same provider order as extract-llm.ts: the user's DeepSeek key first, then any
 // OpenAI-compatible endpoint (OPENAI_API_KEY + OPENAI_BASE_URL), then the
@@ -52,5 +52,5 @@ export async function draftMessage(contact: DraftContact, recent: DraftInteracti
       console.warn(`draft: ${p.name} call failed, trying next provider:`, e instanceof Error ? e.message : e);
     }
   }
-  return { message: templateDraft(contact), source: 'template', basis: draftBasis(contact, recent, now) };
+  return { message: templateDraft(contact), source: 'template', basis: templateBasis(contact) };
 }

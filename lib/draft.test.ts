@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDraftPrompt, cleanDraft, draftBasis, MAX_DRAFT_CHARS, templateDraft, type DraftContact } from './draft';
+import { buildDraftPrompt, cleanDraft, draftBasis, MAX_DRAFT_CHARS, templateBasis, templateDraft, type DraftContact } from './draft';
 
 const meera: DraftContact = {
   name: 'Meera Iyer',
@@ -38,7 +38,7 @@ describe('draftBasis', () => {
 
   it('keeps unknown facts out instead of inventing them', () => {
     const basis = draftBasis({ name: 'Rahul', category: 'professional' }, []);
-    expect(basis).toEqual(['No check-in logged yet']);
+    expect(basis).toEqual(['Last contact: unknown']);
   });
 });
 
@@ -72,5 +72,13 @@ describe('templateDraft', () => {
   it('adapts to the relationship', () => {
     expect(templateDraft({ name: 'Rahul Shah', category: 'professional' })).toMatch(/^Hi Rahul, .*call/);
     expect(templateDraft({ name: 'Sana', category: 'community' })).toMatch(/meetup/);
+  });
+});
+
+describe('templateBasis', () => {
+  it('only lists what the template uses', () => {
+    const basis = templateBasis(meera);
+    expect(basis).toEqual(['Written from a template (no AI)', 'Relationship: personal', 'Interested in trekking']);
+    expect(basis.join(' ')).not.toMatch(/note|check-in|Last contact/i);
   });
 });

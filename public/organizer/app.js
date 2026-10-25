@@ -1112,8 +1112,19 @@ function onboardingView() {
   const p = prefill();
   const rows = (p.contacts && p.contacts.length ? p.contacts.slice(0, 5) : [emptyRow()]).map(toRow);
   const goals = { personal: 50, professional: 30, community: 20, ...(p.goals || {}) };
+  // Who understood the extraction: kept with the rows (and in org_prefill) so
+  // the attribution survives Back from goals and a refresh.
+  let source = typeof p.source === 'string' ? p.source : null;
   let step = 1;
   let voice = null;
+
+  const SOURCE_LABELS = { deepseek: 'DeepSeek', gemini: 'Gemini', openai: 'AI', agenticorg: 'AgenticOrg', rules: 'built-in rules' };
+  const showSource = () => {
+    const box = el('ob-source');
+    if (!box) return;
+    const label = source && Object.hasOwn(SOURCE_LABELS, source) ? SOURCE_LABELS[source] : null;
+    box.textContent = label && rows.some((r) => r.name) ? `Filled from what you said (understood by ${label}). Review each person - nothing is saved until you finish.` : '';
+  };
 
   const finish = (added) => {
     if (voice) voice.stop();
@@ -1160,17 +1171,16 @@ function onboardingView() {
     const merged = [...kept, ...added].slice(0, 5);
     rows.splice(0, rows.length, ...(merged.length ? merged : [emptyRow()]));
     if (res.goals) Object.assign(goals, res.goals);
+    if (typeof res.source === 'string') source = res.source;
     try {
       sessionStorage.setItem('org_prefill', JSON.stringify({
         contacts: merged.map((r) => ({ name: r.name, category: r.category, interests: r.interests, preferred_frequency_days: r.freq })),
         goals,
+        source,
       }));
     } catch { /* storage unavailable: pre-fill still applies on screen */ }
     renderRows();
-    const labels = { deepseek: 'DeepSeek', gemini: 'Gemini', openai: 'AI', agenticorg: 'AgenticOrg', rules: 'built-in rules' };
-    const src = res.source && Object.hasOwn(labels, res.source) ? labels[res.source] : null;
-    const obSource = el('ob-source');
-    if (obSource) obSource.textContent = src ? `Filled from what you said (understood by ${src}). Review each person - nothing is saved until you finish.` : '';
+    showSource();
     if (merged.length >= 5 && kept.length + added.length > 5) {
       el('ob-error').textContent = 'Only the first 5 people were kept - you can add more from Contacts later.';
     }
@@ -1201,6 +1211,7 @@ function onboardingView() {
         <p><button class="link-btn" id="ob-welcome">← What can muop do?</button></p>
       </section>`;
     renderRows();
+    showSource();
     el('ob-welcome').onclick = () => go('#/welcome');
     voice = window.Voice ? window.Voice.mount(el('voice-mount'), applyExtraction) : null;
     // Lets the voice assistant (assistant.js) fill this form and move on.
