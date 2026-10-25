@@ -47,9 +47,10 @@ export async function draftMessage(contact: DraftContact, recent: DraftInteracti
       const message = cleanDraft(await chat(p.base(), key, p.model(), prompt));
       if (message) return { message, source: p.name, basis: draftBasis(contact, recent, now) };
       console.warn(`draft: ${p.name} returned an unusable message, trying next provider`);
-    } catch (e) {
-      // Never log the prompt: it carries the user's contact notes.
-      console.warn(`draft: ${p.name} call failed, trying next provider:`, e instanceof Error ? e.message : e);
+    } catch {
+      // Transport/parser diagnostics can contain request or response content.
+      // Log only the fixed provider label, never arbitrary error text or notes.
+      console.warn(`draft: ${p.name} call failed, trying next provider`);
     }
   }
   return { message: templateDraft(contact), source: 'template', basis: templateBasis(contact) };

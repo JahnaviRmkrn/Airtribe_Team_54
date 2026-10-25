@@ -68,6 +68,8 @@ available. The draft-message route stays read-only: missing/foreign contact
 lookups and failed history reads do not reach the provider. When draft providers
 are absent or fail, the existing editable template is labelled `template`, and
 its basis lists only the facts that template actually uses.
+Draft fallback logs use fixed provider labels only. Transport/parser exception
+text is not logged, because it can contain the source prompt or response.
 
 ## Verification and remaining limits
 
@@ -76,6 +78,24 @@ microphone fixtures. Server routes use pre-import auth/secret/provider mocks;
 provider tests use synthetic keys and intercepted fetch. No live LLM, microphone,
 Google account, Vault, database, payment or external communication was used.
 These tests are not a real-browser accessibility or live-provider certification.
+
+`tests/assistant-route-integration.test.mjs` additionally connects the shipped
+assistant asset to the actual assistant/contact route handlers and intercepted
+model fetch, rather than mocking the route JSON. Its bounded PostgreSQL adapter
+executes the checked-in contact ownership policies and projections against two
+synthetic owners. It verifies summary/prompt minimization, owner replacement
+between model and data requests, stale navigation/abort, explicit local edits,
+provider failures/deadline propagation, declined deletion and non-dispatch of
+protected generic clicks. Draft failures also exercise real prompt construction
+and template fallback without recording provider exception contents.
+
+This test uses only local in-memory PostgreSQL and pre-Google contact-era SQL;
+it does not apply migrations to a server. Authentication and PostgREST transport
+are replaced, the DOM is synthetic, and model replies are fixtures. The timeout
+test triggers the route's deadline signal without waiting 25 seconds. Protected
+controls are inert spies, not live Google/OAuth/payment handlers. Those limits
+mean this is route integration evidence, not browser or live-provider E2E.
+Gmail/Calendar feature flags remain off, and no communication is sent.
 
 Assistant requests and voice-plan creates also freeze the displayed account at
 turn/session startup. They send the existing `X-Contact-Owner` header on API reads,
