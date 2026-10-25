@@ -1,7 +1,8 @@
 # Complete, bounded organizer reads
 
-`GET /api/me/contacts`, `GET /api/me/followups`, and
-`GET /api/me/dashboard` preserve their existing successful JSON shapes. They
+`GET /api/me/contacts`, `GET /api/me/followups`, `GET /api/me/dashboard`,
+`GET /api/me/meetups`, and the interaction-history collection in
+`GET /api/me/contacts/:id` preserve their successful JSON shapes. They
 now return all matching rows within a per-request safety envelope, or an
 explicit HTTP 503 error. A partial dataset is never presented as a complete
 contact list, an exact dashboard count, or an empty follow-up list.
@@ -22,7 +23,23 @@ Supabase, provider, production load or browser test. The PGlite adapter checks
 cancellation at query entry/exit but does not interrupt a running SQL statement.
 The HTTP transport test separately checks that Supabase receives the abort signal.
 
-Final focused validation: 100 tests passed across the bounded-read, contact
+A subsequent five-test audit at `609f14e` confirmed successful truncation of
+the full Meetups list and contact interaction history, at both two-row and
+1,000-row backend caps. Real PGlite owner RLS reproduced both omissions without
+returning Bob's private rows. These two collection reads now use the same
+complete-or-error helper. The contact ownership lookup still precedes history:
+a foreign or missing contact returns 404 before any history query. Meetup room
+URL construction and all mutation paths remain unchanged.
+
+The Meetup/history continuation passed 98 focused tests, including 13 new
+real-SDK/PGlite cases for caps of two and 1,000, newest-first microsecond/offset
+ordering, late-page errors with no partial response, incoming cancellation,
+foreign-owner early 404, room URLs and the unchanged recent-activity cap.
+Related contact/history/privacy and meetup mutation regressions, scoped
+TypeScript, scoped ESLint and diff checks passed. No server, browser, full build
+or live service was used for this continuation.
+
+Initial bounded-list validation: 100 tests passed across the bounded-read, contact
 history/dashboard, contact-create, room-privacy and organizer-adapter suites;
 the actual-handler organizer HTTP smoke also passed and stopped its listener.
 Scoped TypeScript checking, scoped ESLint and diff whitespace checks passed.
@@ -32,8 +49,11 @@ performed for this change.
 
 ## Safety envelope
 
-`lib/complete-read.ts` applies these limits to the entire request, shared across
-the dashboard's contacts, goals, interaction and meetup collections:
+`lib/complete-read.ts` applies these limits to the collection reads in a request,
+shared across the dashboard's contacts, goals, interaction and meetup collections.
+Authentication and the contact detail's existing single-row ownership lookup
+precede this scan budget; the final detail payload's byte budget includes the
+contact itself as well as its complete interaction history:
 
 - At most 100 requested rows per database page.
 - At most 10,000 rows collected across all collections.
@@ -78,8 +98,9 @@ the complete request. The HEAD query shares the request/deadline budget; a
 database count timeout also fails explicitly rather than guessing completeness.
 
 After scanning, contacts are alphabetized using the server JavaScript locale,
-follow-ups are sorted by due date, interactions newest first, and meetups by
-start date with nulls last. Equal names/dates are stabilized by UUID. Timestamp
+follow-ups are sorted by due date, and interactions are newest first. Dashboard
+meetups use start date with nulls last; the full Meetups list retains newest
+`created_at` first. Equal names/dates are stabilized by UUID. Timestamp
 comparison retains PostgreSQL's microsecond precision while normalizing time-zone
 offsets; it does not round ties to JavaScript milliseconds. Name collation follows
 JavaScript rather than an arbitrary deployment-specific PostgreSQL collation.
@@ -90,8 +111,10 @@ a scan can require a refresh, and the dashboard collections can reflect slightly
 different instants. No cross-query snapshot or transactional aggregate guarantee
 is claimed. Stronger consistency would require a separate database/API design.
 
-Contact creation, Google imports, detail/edit/delete handlers and their payloads
-are unchanged. A contact imported or created before a scan begins is not omitted
+Contact creation, Google imports and all contact/meetup mutation handlers and
+their payloads are unchanged. Recent activity intentionally remains limited to
+at most 100 rows and is not converted to a full-history endpoint. A contact
+imported or created before a scan begins is not omitted
 merely because an earlier backend page was capped.
 
 ## Official reference sources, checked 2026-10-25

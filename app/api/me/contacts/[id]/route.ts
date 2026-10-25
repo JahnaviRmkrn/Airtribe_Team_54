@@ -1,5 +1,6 @@
 import { contactUpdate } from '@/lib/schemas';
 import { dbError, handle, ok, parseBody, requireUser } from '@/lib/http';
+import { compareReadTimestamps, withCompleteReads } from '@/lib/complete-read';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -9,13 +10,16 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
   const { supabase } = await requireUser(req);
   const { data: contact, error } = await supabase.from('contacts').select('*').eq('id', id).single();
   dbError(error);
-  const { data: interactions, error: historyError } = await supabase
-    .from('interactions')
-    .select('*')
-    .eq('contact_id', id)
-    .order('occurred_at', { ascending: false });
-  dbError(historyError);
-  return ok({ contact, interactions: interactions ?? [] });
+  return ok(await withCompleteReads(req, async (read) => {
+    const interactions = await read((after, signal, pageRows, verifyEmpty) => {
+      let q = supabase.from('interactions').select('*', verifyEmpty ? { count: 'exact', head: true } : undefined)
+        .eq('contact_id', id).order('id').limit(pageRows).abortSignal(signal);
+      if (after) q = q.gt('id', after);
+      return q;
+    }, (row) => row.id);
+    interactions.sort((a, b) => compareReadTimestamps(b.occurred_at, a.occurred_at) || a.id.localeCompare(b.id));
+    return { contact, interactions };
+  }));
 });
 
 export const PATCH = handle(async (req: Request, { params }: Ctx) => {

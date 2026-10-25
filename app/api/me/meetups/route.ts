@@ -2,13 +2,21 @@ import { meetupCreate } from '@/lib/schemas';
 import { dbError, handle, ok, parseBody, requireUser } from '@/lib/http';
 import { roomUrl } from '@/lib/urls';
 import { roomExpiry } from '@/lib/expiry';
+import { compareReadTimestamps, withCompleteReads } from '@/lib/complete-read';
 
 // GET /api/me/meetups -> the organizer's meetups
 export const GET = handle(async (req: Request) => {
   const { supabase } = await requireUser(req);
-  const { data, error } = await supabase.from('meetups').select('*').order('created_at', { ascending: false });
-  dbError(error);
-  return ok({ meetups: (data ?? []).map((m) => ({ ...m, room_url: roomUrl(req, m.room_token) })) });
+  return ok(await withCompleteReads(req, async (read) => {
+    const data = await read((after, signal, pageRows, verifyEmpty) => {
+      let q = supabase.from('meetups').select('*', verifyEmpty ? { count: 'exact', head: true } : undefined)
+        .order('id').limit(pageRows).abortSignal(signal);
+      if (after) q = q.gt('id', after);
+      return q;
+    }, (row) => row.id);
+    data.sort((a, b) => compareReadTimestamps(b.created_at, a.created_at) || a.id.localeCompare(b.id));
+    return { meetups: data.map((m) => ({ ...m, room_url: roomUrl(req, m.room_token) })) };
+  }));
 });
 
 // POST /api/me/meetups -> creates a room with an unguessable token + share link.

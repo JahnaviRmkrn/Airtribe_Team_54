@@ -69,12 +69,12 @@ describe('contact interaction history', () => {
   it('does not disguise an unavailable history query as a successful empty history', async () => {
     state.historyError = { code: '57014', message: 'Synthetic history query timeout' };
     const response = await detail();
-    expect(response.ok).toBe(false);
-    expect(await response.json()).toEqual({ error: 'Synthetic history query timeout' });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'Complete data could not be loaded: a database page was unavailable. Please retry.' });
   });
   it('returns a genuinely empty history and newest-first populated history', async () => {
     expect(await (await detail()).json()).toEqual({ contact, interactions: [] });
-    state.interactions = ['2026-10-20T12:00:00Z', '2026-10-24T12:00:00Z'].map((occurred_at) => ({ contact_id: id, occurred_at }));
+    state.interactions = ['2026-10-20T12:00:00Z', '2026-10-24T12:00:00Z'].map((occurred_at, index) => ({ id: `synthetic-${index}`, contact_id: id, occurred_at }));
     expect((await (await detail()).json()).interactions.map((row: { occurred_at: string }) => row.occurred_at))
       .toEqual(['2026-10-24T12:00:00Z', '2026-10-20T12:00:00Z']);
   });
