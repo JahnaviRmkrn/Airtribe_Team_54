@@ -120,7 +120,7 @@ describe.each(zones)('follow-up date policy on %s devices', (zone) => {
     expect(result.profile).toContain(result.label);
   });
 
-  it('places follow-ups and Today in IST while keeping meetup date/time device-local', () => {
+  it('separates Today summaries while keeping follow-up dates IST and meetup dates device-local', () => {
     const result = device(zone, `
       const iso = '2026-10-25T20:00:00Z';
       const html = calendarHTML([{ ...data.contact, next_followup_at: iso }], [{ title: 'Meetup', starts_at: iso }]);
@@ -130,13 +130,56 @@ describe.each(zones)('follow-up date policy on %s devices', (zone) => {
         meetupDay: local.getDate(), meetupTime: local.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) };
     `, { contact });
     expect(result.today).toBe('2026-10-26');
-    expect(result.html).toContain('data-day="26" aria-current="date"');
-    expect(result.html).toContain('Check-ins and Today: IST (Asia/Kolkata).');
-    expect(result.html).toContain('Meetup dates and times: your device');
+    expect(result.html).not.toContain('aria-current="date"');
+    expect(result.html).not.toMatch(/class="cal-cell[^"]*cal-today/);
+    expect(result.html).toContain('Check-ins today (IST)');
+    expect(result.html).toContain('Upcoming meetups today (');
+    expect(result.html).toContain('Calendar dates: check-ins use IST (Asia/Kolkata); meetups use your device');
     expect(result.events[26]).toContainEqual(expect.objectContaining({ kind: 'followup', label: 'Alice', status: 'soon' }));
     expect(result.events[result.meetupDay]).toContainEqual({ kind: 'meetup', label: 'Meetup', time: result.meetupTime });
     expect(result.detail).toContain('Monday, October 26');
     expect(result.detail).toContain('Alice');
+  });
+
+  it('never includes a device-tomorrow meetup in either Today summary, even on the IST-selected date', () => {
+    const result = device(zone, `
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1); tomorrow.setHours(10, 0, 0, 0);
+      const html = calendarHTML([{ ...data.contact, next_followup_at: '2026-10-24T20:00:00Z' }],
+        [{ title: 'Device tomorrow', starts_at: tomorrow.toISOString() }]);
+      wireCalendar();
+      return { html, summaries: [...html.matchAll(/<section aria-label="[^\"]*today[^\"]*">([\\s\\S]*?)<\\/section>/g)].map((m) => m[1]),
+        detail: el('cal-detail').innerHTML, sameGridDay: tomorrow.getDate() === Number(window.__calToday.slice(8, 10)) };
+    `, { contact }, '2026-10-24T20:00:00Z');
+    expect(result.summaries).toHaveLength(2);
+    expect(result.summaries[0]).toContain('Alice');
+    expect(result.summaries[1]).toContain('No upcoming meetups today.');
+    for (const summary of result.summaries) expect(summary).not.toContain('Device tomorrow');
+    expect(result.html).not.toContain('aria-current="date"');
+    if (result.sameGridDay) {
+      expect(result.detail).toContain('Device tomorrow');
+      expect(result.detail).toContain('Calendar date:');
+      expect(result.detail).toContain('(device time)');
+      expect(result.detail).not.toContain('Today');
+    }
+  });
+
+  it.each([
+    ['2026-10-31T20:00:00Z', '2026-10-31T21:00:00Z', 'November 2026'],
+    ['2026-12-31T20:00:00Z', '2026-12-31T21:00:00Z', 'January 2027'],
+  ])('keeps device-today meetups visible outside the IST grid month at %s', (now, startsAt, month) => {
+    const result = device(zone, `
+      const html = calendarHTML([], [{ title: 'Device today', starts_at: data.startsAt },
+        { title: 'Unscheduled', starts_at: null }, { title: 'Invalid', starts_at: 'not-a-date' }]);
+      const meetupSummary = html.match(/<section aria-label="Meetups today in [^\"]*">([\\s\\S]*?)<\\/section>/)[1];
+      return { html, meetupSummary, events: window.__calEvents,
+        localMonth: new Date(data.startsAt).getMonth() + 1, istMonth: Number(window.__calToday.slice(5, 7)) };
+    `, { startsAt }, now);
+    expect(result.html).toContain(month + ' (current IST month)');
+    expect(result.meetupSummary).toContain('Device today');
+    expect(result.meetupSummary).not.toContain('No upcoming meetups today.');
+    expect(result.meetupSummary).not.toContain('Unscheduled');
+    expect(result.meetupSummary).not.toContain('Invalid');
+    if (result.localMonth !== result.istMonth) expect(result.events).toEqual({});
   });
 
   it('keeps the calendar month and selected-day detail stable across midnight/year rollover', () => {
@@ -148,7 +191,8 @@ describe.each(zones)('follow-up date policy on %s devices', (zone) => {
     `, { contact }, '2026-12-31T20:00:00Z');
     expect(result.today).toBe('2027-01-01');
     expect(result.html).toContain('January 2027');
-    expect(result.html).toContain('data-day="1" aria-current="date"');
+    expect(result.html).toContain('January 2027 (current IST month)');
+    expect(result.html).not.toContain('aria-current="date"');
     expect(result.detail).toContain('Friday, January 1');
     expect(result.detail).toContain('Alice');
   });
@@ -259,5 +303,24 @@ describe.each(zones)('follow-up date policy on %s devices', (zone) => {
     expect(result.actual).toEqual(result.expected);
     expect(result.utc).toBe('2026-11-01T01:30:00.000Z');
     expect(result.edit).toBe('2026-11-01T05:30:45.123');
+  });
+});
+
+
+describe('device dates ahead of IST', () => {
+  it.each([
+    ['2026-10-31T12:00:00Z', '2026-10-31T13:00:00Z', 'October 2026', 'November 1'],
+    ['2026-12-31T12:00:00Z', '2026-12-31T13:00:00Z', 'December 2026', 'January 1'],
+  ])('retains device-today meetups in the following month/year at %s', (now, startsAt, gridMonth, deviceDay) => {
+    const result = device('Pacific/Auckland', `
+      const html = calendarHTML([], [{ title: 'Ahead-of-IST meetup', starts_at: data.startsAt }]);
+      const summary = html.match(/<section aria-label="Meetups today in [^\"]*">([\\s\\S]*?)<\\/section>/)[1];
+      return { html, summary, events: window.__calEvents };
+    `, { startsAt }, now);
+    expect(result.html).toContain(gridMonth + ' (current IST month)');
+    expect(result.summary).toContain('Ahead-of-IST meetup');
+    expect(result.summary).toContain(deviceDay);
+    expect(result.summary).toContain('Pacific/Auckland');
+    expect(result.events).toEqual({});
   });
 });

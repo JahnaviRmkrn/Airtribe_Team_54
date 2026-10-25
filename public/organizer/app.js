@@ -700,17 +700,18 @@ function calMarker(e) {
   return `<i class="cal-mark ${e.status} cat-${esc(e.cat || 'personal')}" title="${esc(tip)}">${CAT_ICON[e.cat] || '●'}</i>`;
 }
 function calLine(e) {
-  if (e.kind === 'meetup') return `Meetup: ${esc(e.label)}${e.time ? ` · ${esc(e.time)}` : ''}`;
+  if (e.kind === 'meetup') return `Meetup: ${esc(e.label)}${e.time ? ` · ${esc(e.time)}` : ''} (device time)`;
   return e.status === 'overdue'
     ? `Haven't connected with <strong>${esc(e.label)}</strong> · ${lateText(e.late)}`
-    : `Check in with ${esc(e.label)}`;
+    : `Check in with ${esc(e.label)} (IST)`;
 }
 
 function calendarHTML(contacts, meetups) {
   const now = new Date();
   const today = followupDay(now);
-  // The grid's current month and Today follow the check-in policy. Meetup
-  // entries keep their device-local dates/times, explicitly labelled below.
+  // The grid shows the current IST month, but mixes IST check-in dates with
+  // device-local meetup dates. There is deliberately no shared Today cell;
+  // separate summaries below use each event type's actual calendar day.
   const first = new Date(today.slice(0, 7) + '-01T00:00:00Z');
   const monthName = first.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'long', year: 'numeric' });
   const startOffset = first.getUTCDay();
@@ -722,21 +723,28 @@ function calendarHTML(contacts, meetups) {
     const n = Number(day.slice(8, 10));
     (events[n] = events[n] || []).push(ev);
   };
-  const overdue = [];
+  const overdue = [], dueToday = [], meetupsToday = [];
+  const localDay = (t) => [t.getFullYear(), String(t.getMonth() + 1).padStart(2, '0'), String(t.getDate()).padStart(2, '0')].join('-');
+  const deviceToday = localDay(now);
   (contacts || []).forEach((c) => {
-    const n = dueIn(c.next_followup_at);
+    const n = dueIn(c.next_followup_at, now);
     if (n === null) return;
     const day = followupDay(c.next_followup_at);
     const late = -n;
     const ev = { kind: 'followup', status: late > 0 ? 'overdue' : 'soon', id: c.id, cat: c.category, label: c.name || 'Someone', late };
     if (late > 0) overdue.push(ev);
+    if (n === 0) dueToday.push(ev);
     add(day, ev);
   });
   (meetups || []).forEach((m) => {
     const t = m.starts_at && new Date(m.starts_at);
     if (t && !isNaN(t)) {
-      const day = [t.getFullYear(), String(t.getMonth() + 1).padStart(2, '0'), String(t.getDate()).padStart(2, '0')].join('-');
-      add(day, { kind: 'meetup', label: m.title || 'Meetup', time: t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) });
+      const day = localDay(t);
+      const ev = { kind: 'meetup', label: m.title || 'Meetup', time: t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) };
+      // A device-today meetup must remain visible even when IST has already
+      // moved into another month and the grid cannot contain its local date.
+      if (day === deviceToday) meetupsToday.push(ev);
+      add(day, ev);
     }
   });
   overdue.sort((x, y) => y.late - x.late);
@@ -748,28 +756,33 @@ function calendarHTML(contacts, meetups) {
   for (let i = 0; i < startOffset; i++) cells.push('<div class="cal-cell cal-pad"></div>');
   for (let day = 1; day <= daysInMonth; day++) {
     const evs = events[day] || [];
-    const isToday = day === Number(today.slice(8, 10));
-    const cls = (isToday ? ' cal-today' : '') + (evs.length ? ' has-ev' : '') + (evs.some((e) => e.status === 'overdue') ? ' cal-late' : '');
+    const cls = (evs.length ? ' has-ev' : '') + (evs.some((e) => e.status === 'overdue') ? ' cal-late' : '');
     const marks = evs.slice(0, 3).map(calMarker).join('') + (evs.length > 3 ? `<span class="cal-more">+${evs.length - 3}</span>` : '');
     const tip = evs.map((e) => (e.kind === 'meetup' ? 'Meetup: ' : e.status === 'overdue' ? 'Not connected: ' : 'Check-in: ') + e.label).join('; ');
-    cells.push(`<button type="button" class="cal-cell${cls}" data-day="${day}"${isToday ? ' aria-current="date"' : ''} aria-label="${esc(monthName.split(' ')[0] + ' ' + day + (tip ? ': ' + tip : ': nothing planned'))}"><span class="cal-day">${day}</span><span class="cal-dots">${marks}</span></button>`);
+    cells.push(`<button type="button" class="cal-cell${cls}" data-day="${day}" aria-label="${esc(monthName.split(' ')[0] + ' ' + day + (tip ? ': ' + tip : ': nothing planned'))}"><span class="cal-day">${day}</span><span class="cal-dots">${marks}</span></button>`);
   }
   const names = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => `<div class="cal-head">${d}</div>`).join('');
   const todayLabel = now.toLocaleDateString(undefined, { timeZone: FOLLOWUP_TIME_ZONE, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const meetupZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  // Overdue people get the same Draft message / Mark done actions as the
-  // Follow-ups card, so you can act straight from "Today".
-  const lines = overdue.map((e) => `<li class="late row"><span class="cal-line">${calMarker(e)}<span>${calLine(e)}</span></span>${e.id ? `
+  const deviceTodayLabel = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  // Both due-today and overdue check-ins keep the Follow-ups card actions.
+  const followupLine = (e) => `<li class="${e.status === 'overdue' ? 'late ' : ''}row"><span class="cal-line">${calMarker(e)}<span>${calLine(e)}</span></span>${e.id ? `
       <div class="actions">
         <button data-draft="${esc(e.id)}" data-name="${esc(e.label)}">Draft message</button>
         <button data-done="${esc(e.id)}" data-name="${esc(e.label)}">Mark done</button>
-      </div>` : ''}</li>`);
+      </div>` : ''}</li>`;
   return `<div class="calendar">
-    <p class="muted">Check-ins and Today: IST (Asia/Kolkata). Meetup dates and times: your device (${esc(meetupZone)}).</p>
-    <div class="cal-todaybar"><strong>Today</strong> ${esc(todayLabel)}
-      ${overdue.length ? `<span class="cal-overdue-count">${overdue.length} overdue</span>` : '<span class="cal-ok">All caught up</span>'}</div>
-    ${lines.length ? `<ul class="cal-todaylist">${lines.join('')}</ul>` : ''}
-    <div class="cal-month">${esc(monthName)}</div><div class="cal-grid">${names}${cells.join('')}</div>
+    <section aria-label="Check-ins today in Asia/Kolkata">
+      <div class="cal-todaybar"><strong>Check-ins today (IST)</strong> ${esc(todayLabel)}</div>
+      ${dueToday.length ? `<ul class="cal-todaylist">${dueToday.map(followupLine).join('')}</ul>` : '<p class="muted">No check-ins due today.</p>'}
+    </section>
+    ${overdue.length ? `<div class="cal-overdue-count">${overdue.length} overdue check-in${overdue.length === 1 ? '' : 's'} (IST)</div><ul class="cal-todaylist">${overdue.map(followupLine).join('')}</ul>` : '<p class="cal-ok">No overdue check-ins.</p>'}
+    <section aria-label="Meetups today in ${esc(meetupZone)}">
+      <div class="cal-todaybar"><strong>Upcoming meetups today (${esc(meetupZone)})</strong> ${esc(deviceTodayLabel)}</div>
+      ${meetupsToday.length ? `<ul class="cal-todaylist">${meetupsToday.map((e) => `<li>${calMarker(e)}<span>${calLine(e)}</span></li>`).join('')}</ul>` : '<p class="muted">No upcoming meetups today.</p>'}
+    </section>
+    <p class="muted">Calendar dates: check-ins use IST (Asia/Kolkata); meetups use your device (${esc(meetupZone)}). Today is shown separately above.</p>
+    <div class="cal-month">${esc(monthName)} (current IST month)</div><div class="cal-grid">${names}${cells.join('')}</div>
     <div class="cal-detail" id="cal-detail" aria-live="polite"></div>
     <div class="graph-legend">
       <span class="graph-legend-item"><i class="cal-mark overdue">●</i>Haven't connected (overdue)</span>
@@ -788,7 +801,7 @@ function wireCalendar() {
     const list = ev[day] || [];
     document.querySelectorAll('.cal-cell[data-day]').forEach((b) => b.classList.toggle('selected', Number(b.dataset.day) === Number(day)));
     const when = new Date(today.slice(0, 8) + String(day).padStart(2, '0') + 'T00:00:00Z').toLocaleDateString(undefined, { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
-    box.innerHTML = `<strong>${esc(when)}</strong>` + (list.length
+    box.innerHTML = `<strong>Calendar date: ${esc(when)}</strong>` + (list.length
       ? list.map((e) => `<div class="cal-item${e.status === 'overdue' ? ' late' : ''}">${calMarker(e)}<span>${calLine(e)}</span></div>`).join('')
       : '<div class="muted">Nothing planned.</div>');
   };

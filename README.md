@@ -117,10 +117,14 @@ unchanged date in an edit or restored create retry preserves the exact original
 instant, including fractional seconds. Explicitly choosing another date uses
 the IST policy; clearing an existing date removes it.
 
-The calendar's current month and Today indicator use IST. Meetup calendar
-entries keep device-local dates/times, with the device timezone shown beside
-the calendar policy. General meetup/history timestamps also remain device-local;
-the meetup editor continues to take explicit UTC input with a device-local
+The calendar shows the current IST month, with follow-ups on their IST dates
+and meetups on their device-local dates/times. Because those can disagree, the
+mixed grid has no shared Today highlight: separate **Check-ins today (IST)**
+and **Upcoming meetups today (device timezone)** summaries use their respective
+calendar days. The meetup summary is independent of the grid's month, so a
+device-today meetup stays visible at an IST month rollover. Selected grid dates
+are labelled calendar dates, not Today. General meetup/history timestamps remain
+device-local; the meetup editor still takes explicit UTC input with a device-local
 preview. These display/input rules do not change server queries or storage.
 
 Meetup detail edits accept `title, activity, area, starts_at, budget, notes`.
