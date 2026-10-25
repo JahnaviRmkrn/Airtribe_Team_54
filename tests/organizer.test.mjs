@@ -10,7 +10,9 @@ function organizer(overrides = {}) {
   const nodes = new Map();
   const document = {
     getElementById(id) {
-      if (!nodes.has(id)) nodes.set(id, { innerHTML: '', value: '', addEventListener() {}, classList: { remove() {}, toggle() {} } });
+      if (!nodes.has(id)) nodes.set(id, { innerHTML: '', value: '', textContent: '', disabled: false,
+        addEventListener() {}, setAttribute() {}, removeAttribute() {},
+        querySelectorAll() { return this.controls || []; }, classList: { add() {}, remove() {}, toggle() {} } });
       return nodes.get(id);
     },
     querySelectorAll: () => [],
@@ -315,5 +317,351 @@ describe('dashboard people robustness', () => {
     const { context } = organizer();
     context.contacts = [{ name: 123, category: 'personal' }, { name: 'Alice', category: 'personal' }];
     expect(vm.runInContext('peopleCard(contacts)', context)).toContain('123');
+  });
+});
+
+
+const createForms = [
+  { label: 'contact', view: 'contactsView()', form: 'add-form', button: 'add-submit', status: 'add-status', error: 'add-error', endpoint: '/api/me/contacts', fields: { 'c-name': 'Alice', 'c-cat': 'personal', 'c-freq': '14' }, result: { contacts: [] } },
+  { label: 'check-in', view: "contactDetailView('alice')", form: 'log-form', button: 'log-submit', status: 'log-status', error: 'log-error', endpoint: '/api/me/interactions', fields: { 'log-note': 'Coffee together' }, result: { contact: { name: 'Alice' }, interactions: [] } },
+  { label: 'meetup', view: 'meetupsView()', form: 'm-form', button: 'm-submit', status: 'm-status', error: 'm-error', endpoint: '/api/me/meetups', fields: { 'm-title': 'Coffee', 'm-activity': 'coffee' }, result: { meetups: [] } },
+];
+const response = (body = {}, status = 200) => ({ ok: status < 400, status, json: async () => body });
+const submitEvent = () => ({ preventDefault() {} });
+
+async function createFormSetup(spec) {
+  const posts = [];
+  let settle;
+  const app = organizer({ fetch: async (path, opts = {}) => {
+    if (opts.method !== 'POST') return response(spec.result);
+    posts.push({ path, body: JSON.parse(opts.body) });
+    return new Promise((resolve) => { settle = resolve; });
+  } });
+  await vm.runInContext(spec.view, app.context);
+  const node = (id) => app.document.getElementById(id);
+  for (const [id, value] of Object.entries(spec.fields)) node(id).value = value;
+  const button = node(spec.button);
+  button.textContent = 'Save';
+  node(spec.form).controls = [...Object.keys(spec.fields).map(node), button];
+  return { ...app, node, button, posts, submit: node(spec.form).onsubmit, settle: (...args) => settle(...args) };
+}
+
+describe.each(createForms)('$label creation guards', (spec) => {
+  it('blocks direct repeated submissions, disables controls and announces pending work', async () => {
+    const app = await createFormSetup(spec);
+    const pending = app.submit(submitEvent());
+    await app.submit(submitEvent());
+    expect(app.posts).toHaveLength(1);
+    expect(app.posts[0].path).toBe(spec.endpoint);
+    expect(app.button.disabled).toBe(true);
+    expect(app.node(spec.status).textContent).toMatch(/saving|creating|adding/i);
+    for (const id of Object.keys(spec.fields)) expect(app.node(id).disabled).toBe(true);
+    app.settle(response({}, 201));
+    await pending;
+  });
+
+  it('retains entered values and permits one deliberate retry after a failed request', async () => {
+    const app = await createFormSetup(spec);
+    const first = app.submit(submitEvent());
+    app.settle(response({ error: 'Please retry' }, 503));
+    await first;
+    expect(app.node(spec.error).textContent).toBe('Please retry');
+    expect(app.button.disabled).toBe(false);
+    expect(app.button.textContent).toBe('Save');
+    expect(app.node(spec.status).textContent).toBe('');
+    for (const [id, value] of Object.entries(spec.fields)) {
+      expect(app.node(id).value).toBe(value);
+      expect(app.node(id).disabled).toBe(false);
+    }
+    const retry = app.submit(submitEvent());
+    await app.submit(submitEvent());
+    expect(app.posts).toHaveLength(2);
+    expect(app.posts[1].body).toEqual(app.posts[0].body);
+    app.settle(response({}, 201));
+    await retry;
+  });
+
+  it.each([201, 503])('ignores a late %s response and an old handler after navigation', async (status) => {
+    const app = await createFormSetup(spec);
+    const pending = app.submit(submitEvent());
+    vm.runInContext('welcomeView()', app.context);
+    const latest = app.node('app').innerHTML;
+    app.node(spec.error).textContent = 'New view';
+    app.settle(response({ error: 'Old error' }, status));
+    await pending;
+    await app.submit(submitEvent());
+    expect(app.posts).toHaveLength(1);
+    expect(app.node('app').innerHTML).toBe(latest);
+    expect(app.node(spec.error).textContent).toBe('New view');
+  });
+});
+
+function onboardingDraftSetup(storage = new Map(), overrides = {}) {
+  const requests = [];
+  const app = organizer({
+    sessionStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, value),
+      removeItem: (key) => storage.delete(key),
+    },
+    fetch: async (path, opts) => { requests.push({ path, body: JSON.parse(opts.body) }); return response(); },
+    ...overrides,
+  });
+  let goals = [];
+  let html = '';
+  Object.defineProperty(app.document.getElementById('app'), 'innerHTML', {
+    get: () => html,
+    set(value) {
+      html = value;
+      goals = [...value.matchAll(/class="goal-input" data-cat="([^"\s]+)" min="0" max="100" value="([^"]*)"/g)]
+        .map((match) => ({ dataset: { cat: match[1] }, value: match[2], disabled: false }));
+    },
+  });
+  app.document.querySelectorAll = (selector) => selector === '.goal-input' ? goals : [];
+  vm.runInContext('onboardingView()', app.context);
+  const node = (id) => app.document.getElementById(id);
+  return { ...app, storage, node, goals: () => goals, requests };
+}
+
+describe('onboarding editable goal drafts', () => {
+  it('preserves edited goals across Back, Next and refresh without saving to the API', () => {
+    const app = onboardingDraftSetup();
+    app.node('ob-next').onclick();
+    app.goals().forEach((input, i) => { input.value = ['60', '20', '20'][i]; input.oninput(); });
+    expect(app.node('goals-total').textContent).toBe(100);
+    app.node('ob-back').onclick();
+    app.node('ob-next').onclick();
+    expect(app.goals().map((input) => input.value)).toEqual(['60', '20', '20']);
+    expect(JSON.parse(app.storage.get('org_prefill')).goals).toEqual({ personal: 60, professional: 20, community: 20 });
+    const refreshed = onboardingDraftSetup(app.storage);
+    refreshed.node('ob-next').onclick();
+    expect(refreshed.goals().map((input) => input.value)).toEqual(['60', '20', '20']);
+    expect(app.requests).toEqual([]);
+    expect(refreshed.requests).toEqual([]);
+  });
+
+  it('retains invalid totals as drafts but refuses to save them', async () => {
+    const app = onboardingDraftSetup();
+    app.node('ob-next').onclick();
+    app.goals()[0].value = '60';
+    app.goals()[0].oninput();
+    app.node('ob-back').onclick();
+    app.node('ob-next').onclick();
+    await app.node('ob-confirm').onclick();
+    expect(app.node('ob-error').textContent).toContain('currently 110%');
+    expect(app.requests).toEqual([]);
+  });
+
+  it('blocks repeated saves and Back or Skip while saving, then restores controls after failure', async () => {
+    let settle;
+    let calls = 0;
+    const app = onboardingDraftSetup(new Map(), { fetch: () => { calls++; return new Promise((resolve) => { settle = resolve; }); } });
+    app.node('ob-next').onclick();
+    const save = app.node('ob-confirm').onclick;
+    const pending = save();
+    await save();
+    expect(calls).toBe(1);
+    expect(app.node('ob-confirm').disabled).toBe(true);
+    expect(app.node('ob-back').disabled).toBe(true);
+    expect(app.node('ob-skip').disabled).toBe(true);
+    expect(app.goals().every((input) => input.disabled)).toBe(true);
+    app.node('ob-back').onclick();
+    app.node('ob-skip').onclick();
+    expect(app.node('app').innerHTML).toContain('Step 2 of 2');
+    expect(app.context.location.hash).toBe('');
+    settle(response({ error: 'Retry goals' }, 503));
+    await pending;
+    expect(app.node('ob-confirm').disabled).toBe(false);
+    expect(app.node('ob-back').disabled).toBe(false);
+    expect(app.node('ob-skip').disabled).toBe(false);
+    expect(app.goals().every((input) => !input.disabled)).toBe(true);
+    app.node('ob-back').onclick();
+    expect(app.node('app').innerHTML).toContain('Step 1 of 2');
+    await save();
+    expect(calls).toBe(1);
+  });
+
+  it('does not create contacts or repaint after leaving during a goal save', async () => {
+    let settle;
+    const paths = [];
+    const storage = new Map([['org_prefill', JSON.stringify({ contacts: [{ name: 'Alice' }] })]]);
+    const app = onboardingDraftSetup(storage, { fetch: (path) => { paths.push(path); return new Promise((resolve) => { settle = resolve; }); } });
+    app.node('ob-next').onclick();
+    const pending = app.node('ob-confirm').onclick();
+    vm.runInContext('welcomeView()', app.context);
+    const latest = app.node('app').innerHTML;
+    settle(response());
+    await pending;
+    expect(paths).toEqual(['/api/me/goals']);
+    expect(app.node('app').innerHTML).toBe(latest);
+    expect(storage.has('org_prefill')).toBe(true);
+  });
+});
+
+
+it('visibly pauses check-in controls while contact details are being edited', async () => {
+  const app = await createFormSetup(createForms[1]);
+  app.node('c-edit').onclick();
+  expect(app.button.disabled).toBe(true);
+  expect(app.node('log-note').disabled).toBe(true);
+  expect(app.node('log-status').textContent).toContain('Save or cancel contact edits');
+  await app.submit(submitEvent());
+  expect(app.posts).toHaveLength(0);
+});
+
+describe('onboarding draft edge cases', () => {
+  it('keeps the newer draft when setup was originally prefilled in memory', () => {
+    const app = onboardingDraftSetup(new Map(), { window: { ORGANIZER_PREFILL: { goals: { personal: 50, professional: 30, community: 20 } } } });
+    app.node('ob-next').onclick();
+    app.goals().forEach((input, i) => { input.value = ['60', '20', '20'][i]; input.oninput(); });
+    vm.runInContext('onboardingView()', app.context);
+    app.node('ob-next').onclick();
+    expect(app.goals().map((input) => input.value)).toEqual(['60', '20', '20']);
+    expect(app.requests).toEqual([]);
+  });
+
+  it.each([
+    [['50.5', '29.5', '20']],
+    [['-10', '90', '20']],
+    [['', '80', '20']],
+  ])('rejects invalid percentages even if the numeric total is 100: %j', async (values) => {
+    const app = onboardingDraftSetup();
+    app.node('ob-next').onclick();
+    app.goals().forEach((input, i) => { input.value = values[i]; input.oninput(); });
+    await app.node('ob-confirm').onclick();
+    expect(app.node('ob-error').textContent).toContain('whole percentages between 0 and 100');
+    expect(app.requests).toEqual([]);
+  });
+
+  it('retains an in-memory draft when browser storage is unavailable', () => {
+    const app = onboardingDraftSetup(new Map(), { sessionStorage: { getItem: () => null, setItem() { throw new Error('Unavailable'); } } });
+    app.node('ob-next').onclick();
+    app.goals().forEach((input, i) => { input.value = ['60', '20', '20'][i]; input.oninput(); });
+    app.node('ob-back').onclick();
+    app.node('ob-next').onclick();
+    expect(app.goals().map((input) => input.value)).toEqual(['60', '20', '20']);
+    expect(app.requests).toEqual([]);
+  });
+
+  it('blocks repeats during contact creation and ignores its response after leaving', async () => {
+    let settle;
+    let started;
+    const contactStarted = new Promise((resolve) => { started = resolve; });
+    const paths = [];
+    const storage = new Map([['org_prefill', JSON.stringify({ contacts: [{ name: 'Alice' }] })]]);
+    const app = onboardingDraftSetup(storage, { fetch: (path) => {
+      paths.push(path);
+      if (path === '/api/me/goals') return Promise.resolve(response());
+      started();
+      return new Promise((resolve) => { settle = resolve; });
+    } });
+    app.node('ob-next').onclick();
+    const submit = app.node('ob-confirm').onclick;
+    const pending = submit();
+    await contactStarted;
+    await submit();
+    expect(paths).toEqual(['/api/me/goals', '/api/me/contacts']);
+    vm.runInContext('welcomeView()', app.context);
+    const latest = app.node('app').innerHTML;
+    settle(response());
+    await pending;
+    expect(app.node('app').innerHTML).toBe(latest);
+    expect(storage.has('org_prefill')).toBe(true);
+  });
+});
+
+
+const profileResults = {
+  '/api/me': { user: { email: 'alice@example.test' } },
+  '/api/me/dashboard': { goals: { personal: 60, professional: 20, community: 20 }, contact_counts: { personal: 2 } },
+  '/api/me/interactions?limit=100': { interactions: [{ contact: { name: 'Bob' }, type: 'check_in' }] },
+};
+
+describe('profile rendering and navigation', () => {
+  it('loads account details, goals and interactions without a missing navigation helper', async () => {
+    const paths = [];
+    const { context, document } = organizer({ fetch: async (path) => { paths.push(path); return response(profileResults[path]); } });
+    await vm.runInContext('profileView()', context);
+    const html = document.getElementById('app').innerHTML;
+    expect(html).toContain('alice@example.test');
+    expect(html).toContain('Personal</strong> · 60%');
+    expect(html).toContain('Bob');
+    expect(paths).toEqual(Object.keys(profileResults));
+  });
+
+  it('shows a retryable initial request error', async () => {
+    const { context, document } = organizer({ fetch: async () => response({ error: 'Profile unavailable' }, 503) });
+    await vm.runInContext('profileView()', context);
+    expect(document.getElementById('app').innerHTML).toContain('Profile unavailable');
+    expect(document.getElementById('retry-btn').onclick).toBeTypeOf('function');
+  });
+
+  it.each(['/api/me', '/api/me/interactions?limit=100'])(
+    'does not render over navigation after a delayed %s request', async (target) => {
+      let settle;
+      let started;
+      const waiting = new Promise((resolve) => { started = resolve; });
+      const { context, document } = organizer({ fetch: (path) => {
+        if (path !== target) return Promise.resolve(response(profileResults[path]));
+        started();
+        return new Promise((resolve) => { settle = resolve; });
+      } });
+      const pending = vm.runInContext('profileView()', context);
+      await waiting;
+      vm.runInContext('welcomeView()', context);
+      const latest = document.getElementById('app').innerHTML;
+      settle(response(profileResults[target]));
+      await pending;
+      expect(document.getElementById('app').innerHTML).toBe(latest);
+    },
+  );
+
+  it.each([200, 503])('ignores a late goal-save response (%s) after navigation', async (status) => {
+    let settle;
+    const goals = ['60', '20', '20'].map((value, i) => ({ value, dataset: { cat: ['personal', 'professional', 'community'][i] } }));
+    const { context, document } = organizer({ fetch: (path, opts = {}) => opts.method === 'PUT'
+      ? new Promise((resolve) => { settle = resolve; }) : Promise.resolve(response(profileResults[path])) });
+    document.querySelectorAll = (selector) => selector === '.me-goal-input' ? goals : [];
+    await vm.runInContext('profileView()', context);
+    document.getElementById('me-edit-goals').onclick();
+    const pending = document.getElementById('me-goals-save').onclick();
+    vm.runInContext('welcomeView()', context);
+    const latest = document.getElementById('app').innerHTML;
+    document.getElementById('me-goals-error').textContent = 'New view';
+    settle(response({ error: 'Old goal error' }, status));
+    await pending;
+    expect(document.getElementById('app').innerHTML).toBe(latest);
+    expect(document.getElementById('me-goals-error').textContent).toBe('New view');
+  });
+
+  it('guards repeated goal saves and permits retry after an explicit server failure', async () => {
+    let settle;
+    const writes = [];
+    const goals = ['60', '20', '20'].map((value, i) => ({ value, disabled: false, dataset: { cat: ['personal', 'professional', 'community'][i] } }));
+    const { context, document } = organizer({ fetch: (path, opts = {}) => {
+      if (opts.method !== 'PUT') return Promise.resolve(response(profileResults[path]));
+      writes.push(JSON.parse(opts.body));
+      return new Promise((resolve) => { settle = resolve; });
+    } });
+    const node = (id) => document.getElementById(id);
+    document.querySelectorAll = (selector) => selector === '.me-goal-input' ? goals : [];
+    await vm.runInContext('profileView()', context);
+    node('me-edit-goals').onclick();
+    const save = node('me-goals-save').onclick;
+    const pending = save();
+    await save();
+    expect(writes).toEqual([{ personal: 60, professional: 20, community: 20 }]);
+    expect(node('me-goals-save').disabled).toBe(true);
+    expect(node('me-goals-cancel').disabled).toBe(true);
+    expect(goals.every((input) => input.disabled)).toBe(true);
+    settle(response({ error: 'Retry goal save' }, 503));
+    await pending;
+    expect(node('me-goals-error').textContent).toBe('Retry goal save');
+    expect(node('me-goals-save').disabled).toBe(false);
+    expect(node('me-goals-cancel').disabled).toBe(false);
+    const retry = save();
+    expect(writes).toHaveLength(2);
+    settle(response());
+    await retry;
   });
 });

@@ -145,6 +145,42 @@ function renderError(err, retry) {
   el('retry-btn').onclick = retry;
 }
 
+// A disabled button alone does not stop keyboard/programmatic submissions.
+// Keep the guard synchronous, scoped to this rendered form, and ignore callbacks
+// from older views. This prevents overlapping creates, not response-loss retries
+// after a server commit (those require durable server-side idempotency).
+function wireCreateForm(formId, prefix, nav, pendingText, save) {
+  const form = el(formId), button = el(prefix + '-submit');
+  const error = el(prefix + '-error'), status = el(prefix + '-status');
+  let pending = false;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    if (pending || stale(nav)) return;
+    pending = true;
+    const controls = [...new Set([button, ...form.querySelectorAll('input, select, textarea, button')])];
+    const disabled = controls.map((control) => control.disabled);
+    const label = button.textContent;
+    controls.forEach((control) => { control.disabled = true; });
+    form.setAttribute('aria-busy', 'true');
+    button.textContent = pendingText;
+    status.textContent = pendingText;
+    error.textContent = '';
+    try {
+      await save();
+    } catch (err) {
+      if (!stale(nav)) error.textContent = err.message;
+    } finally {
+      pending = false;
+      if (!stale(nav)) {
+        controls.forEach((control, index) => { control.disabled = disabled[index]; });
+        form.removeAttribute('aria-busy');
+        button.textContent = label;
+        status.textContent = '';
+      }
+    }
+  };
+}
+
 // Room QR code: scan from a phone and join with no account. The generator is
 // loaded only when someone taps "QR code", pinned with SRI like Leaflet/ElevenLabs.
 const QR_JS = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
@@ -683,8 +719,9 @@ async function contactsView() {
           <label>Email <input id="c-email" type="email" placeholder="name@example.com"></label>
           <label class="full">Notes <input id="c-notes" placeholder="Notes"></label>
         </div>
-        <p class="error" id="add-error"></p>
-        <button class="primary" type="submit">Add</button>
+        <p class="error" id="add-error" role="alert"></p>
+        <p class="muted" id="add-status" role="status"></p>
+        <button class="primary" id="add-submit" type="submit">Add</button>
       </form>
     </details>`;
 
@@ -703,9 +740,7 @@ async function contactsView() {
   el('c-search').oninput = paint;
   paint();
   document.querySelectorAll('[data-filter]').forEach((b) => { b.onclick = () => { sessionStorage.setItem('org_filter', b.dataset.filter); contactsView(); }; });
-  el('add-form').onsubmit = async (e) => {
-    e.preventDefault();
-    el('add-error').textContent = '';
+  wireCreateForm('add-form', 'add', nav, 'Adding person...', async () => {
     const body = {
       name: el('c-name').value.trim(),
       category: el('c-cat').value,
@@ -718,13 +753,11 @@ async function contactsView() {
     if (freq > 0) body.preferred_frequency_days = freq;
     const next = el('c-next').value;
     if (next) body.next_followup_at = new Date(next + 'T12:00:00').toISOString();
-    try {
-      await api('/api/me/contacts', { method: 'POST', body: JSON.stringify(body) });
-      if (stale(nav)) return;
-      flash(body.name + ' added. Open them to log a check-in or plan a meetup.');
-      contactsView();
-    } catch (err) { if (!stale(nav)) el('add-error').textContent = err.message; }
-  };
+    await api('/api/me/contacts', { method: 'POST', body: JSON.stringify(body) });
+    if (stale(nav)) return;
+    flash(body.name + ' added. Open them to log a check-in or plan a meetup.');
+    contactsView();
+  });
   if (sessionStorage.getItem('org_new_contact')) {
     sessionStorage.removeItem('org_new_contact');
     el('add-details').scrollIntoView({ block: 'center' });
@@ -783,8 +816,9 @@ async function contactDetailView(id) {
         <label>What happened? <input id="log-note" placeholder="Coffee, a call, a message..."></label>
         <label>Next follow-up (optional) <input id="log-next" type="date"></label>
         <p class="muted">Leave the date blank to schedule by their check-in frequency.</p>
-        <p class="error" id="log-error"></p>
-        <button class="primary" type="submit">Save check-in</button>
+        <p class="error" id="log-error" role="alert"></p>
+        <p class="muted" id="log-status" role="status"></p>
+        <button class="primary" id="log-submit" type="submit">Save check-in</button>
       </form>
     </section>
     <section class="card">
@@ -808,23 +842,23 @@ async function contactDetailView(id) {
   };
   el('c-edit').onclick = () => editContactForm(id, contact);
   el('c-draft').onclick = () => draftPanel(el('c-draft-slot'), id, contact.name);
-  el('log-form').onsubmit = async (e) => {
-    e.preventDefault();
-    el('log-error').textContent = '';
+  wireCreateForm('log-form', 'log', nav, 'Saving check-in...', async () => {
     const body = { contact_id: id, type: 'check_in', notes: el('log-note').value.trim() };
     const next = el('log-next').value;
     if (next) body.next_followup_at = new Date(next + 'T12:00:00').toISOString();
-    try {
-      await api('/api/me/interactions', { method: 'POST', body: JSON.stringify(body) });
-      if (stale(nav)) return;
-      flash('Check-in saved. Your next reminder is set.', [['Back to dashboard', '#/dashboard']]);
-      contactDetailView(id);
-    } catch (err) { if (!stale(nav)) el('log-error').textContent = err.message; }
-  };
+    await api('/api/me/interactions', { method: 'POST', body: JSON.stringify(body) });
+    if (stale(nav)) return;
+    flash('Check-in saved. Your next reminder is set.', [['Back to dashboard', '#/dashboard']]);
+    contactDetailView(id);
+  });
 }
 
 function editContactForm(id, c) {
   const nav = ++navGen;
+  // Editing invalidates this detail view's save callbacks but leaves its log
+  // form visible. Make that temporary pause explicit until Save or Cancel.
+  el('log-form').querySelectorAll('input, button').forEach((control) => { control.disabled = true; });
+  el('log-status').textContent = 'Save or cancel contact edits before logging a check-in.';
   const card = el('profile-card');
   card.innerHTML = `
     <h2>Edit ${esc(c.name)}</h2>
@@ -899,8 +933,9 @@ async function meetupsView(created) {
           <label>Date &amp; time (optional) <input id="m-when" type="datetime-local"></label>
           <label>Budget per person (₹, optional) <input id="m-budget" type="number" min="0" step="50" placeholder="500"></label>
         </div>
-        <p class="error" id="m-error"></p>
-        <button class="primary" type="submit">Create meetup</button>
+        <p class="error" id="m-error" role="alert"></p>
+        <p class="muted" id="m-status" role="status"></p>
+        <button class="primary" id="m-submit" type="submit">Create meetup</button>
       </form>
     </section>
     <section class="card">
@@ -911,20 +946,16 @@ async function meetupsView(created) {
   if (window.PlanByVoice) window.PlanByVoice.mount(el('plan-voice'));
   const pre = sessionStorage.getItem('org_meetup_title');
   if (pre) { sessionStorage.removeItem('org_meetup_title'); el('m-title').value = pre; el('m-title').focus(); }
-  el('m-form').onsubmit = async (e) => {
-    e.preventDefault();
-    el('m-error').textContent = '';
+  wireCreateForm('m-form', 'm', nav, 'Creating meetup...', async () => {
     const body = { title: el('m-title').value.trim(), activity: el('m-activity').value };
     if (el('m-area').value.trim()) body.area = el('m-area').value.trim();
     const when = el('m-when').value;
     if (when) body.starts_at = toISO(when);
     const budget = parseInt(el('m-budget').value, 10);
     if (budget > 0) body.budget = budget;
-    try {
-      const r = await api('/api/me/meetups', { method: 'POST', body: JSON.stringify(body) });
-      if (!stale(nav)) meetupsView(r);
-    } catch (err) { if (!stale(nav)) el('m-error').textContent = err.message; }
-  };
+    const r = await api('/api/me/meetups', { method: 'POST', body: JSON.stringify(body) });
+    if (!stale(nav)) meetupsView(r);
+  });
   wireMeetupRows();
   if (el('created-dash')) el('created-dash').onclick = () => go('#/dashboard');
 }
@@ -1129,6 +1160,8 @@ function onboardingView() {
   const sources = Array.isArray(p.sources) ? p.sources.filter((x) => typeof x === 'string') : typeof p.source === 'string' ? [p.source] : [];
   let step = 1;
   let voice = null;
+  let saving = false;
+  let stepGen = 0;
 
   const SOURCE_LABELS = { deepseek: 'DeepSeek', gemini: 'Gemini', openai: 'AI', agenticorg: 'AgenticOrg', rules: 'built-in rules' };
   const showSource = () => {
@@ -1143,6 +1176,8 @@ function onboardingView() {
     if (voice) voice.stop();
     localStorage.setItem('org_onboarded', '1');
     sessionStorage.removeItem('org_prefill');
+    delete window.ORGANIZER_PREFILL;
+    step = 3;
     if (added && added.length) return renderDone(added);
     go('#/dashboard');
   };
@@ -1187,13 +1222,7 @@ function onboardingView() {
     if (res.goals) Object.assign(goals, res.goals);
     // Credit only providers whose additions survived the five-person limit.
     if (merged.length > kept.length && typeof res.source === 'string' && !sources.includes(res.source)) sources.push(res.source);
-    try {
-      sessionStorage.setItem('org_prefill', JSON.stringify({
-        contacts: merged.map((r) => ({ name: r.name, category: r.category, interests: r.interests, preferred_frequency_days: r.freq })),
-        goals,
-        sources,
-      }));
-    } catch { /* storage unavailable: pre-fill still applies on screen */ }
+    persistDraft();
     renderRows();
     showSource();
     if (merged.length >= 5 && kept.length + added.length > 5) {
@@ -1204,7 +1233,21 @@ function onboardingView() {
     if (res.action === 'confirm' && merged.some((r) => r.name)) el('ob-next').click();
   }
 
+  function persistDraft() {
+    const draft = {
+      contacts: rows.map((r) => ({ name: r.name, category: r.category, interests: r.interests, preferred_frequency_days: r.freq })),
+      goals: { ...goals },
+      sources: [...sources],
+    };
+    // Keep the in-memory prefill in sync too, rather than letting it override a
+    // newer session draft if setup is opened again without reloading the page.
+    window.ORGANIZER_PREFILL = draft;
+    try { sessionStorage.setItem('org_prefill', JSON.stringify(draft)); } catch { /* keep the current draft in memory */ }
+  }
+
   function renderStep1() {
+    if (saving || stale(nav)) return;
+    ++stepGen;
     if (voice) voice.stop();
     step = 1;
     el('app').innerHTML = `
@@ -1238,7 +1281,9 @@ function onboardingView() {
       renderRows();
     };
     el('ob-next').onclick = () => {
+      if (saving || stale(nav) || step !== 1) return;
       collectRows();
+      persistDraft();
       if (voice) voice.stop();
       step = 2;
       renderStep2();
@@ -1272,6 +1317,8 @@ function onboardingView() {
   }
 
   function renderStep2() {
+    const version = ++stepGen;
+    const inactive = () => stale(nav) || step !== 2 || version !== stepGen;
     el('app').innerHTML = `
       <section class="card ob-cute">
         <div class="ob-deco" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
@@ -1279,10 +1326,11 @@ function onboardingView() {
         <h1>How do you want to share your time?</h1>
         <p class="muted">Split 100% between the parts of your life. You can change this anytime from your Profile.</p>
         <div class="goals-grid">
-          ${CATEGORIES.map((c) => `<label>${catLabel(c)} <input type="number" class="goal-input" data-cat="${c}" min="0" max="100" value="${goals[c] || 0}"></label>`).join('')}
+          ${CATEGORIES.map((c) => `<label>${catLabel(c)} <input type="number" class="goal-input" data-cat="${c}" min="0" max="100" value="${esc(goals[c] ?? 0)}"></label>`).join('')}
         </div>
         <p>Total: <strong id="goals-total">0</strong>%</p>
-        <p class="error" id="ob-error"></p>
+        <p class="error" id="ob-error" role="alert"></p>
+        <p class="muted" id="ob-status" role="status"></p>
         <div class="quick-actions">
           <button id="ob-back">Back</button>
           <button class="primary" id="ob-confirm">Save and finish 🎉</button>
@@ -1290,20 +1338,42 @@ function onboardingView() {
         </div>
       </section>`;
     const inputs = [...document.querySelectorAll('.goal-input')];
-    const total = () => inputs.reduce((s, i) => s + (parseInt(i.value, 10) || 0), 0);
+    const total = () => inputs.reduce((sum, input) => sum + (Number(input.value) || 0), 0);
+    const collectGoals = () => {
+      inputs.forEach((input) => { goals[input.dataset.cat] = input.value === '' ? '' : Number(input.value); });
+      persistDraft();
+    };
     const refresh = () => { el('goals-total').textContent = total(); };
-    inputs.forEach((i) => { i.oninput = refresh; });
+    inputs.forEach((input) => { input.oninput = () => {
+      if (saving || inactive()) return;
+      collectGoals();
+      refresh();
+    }; });
     refresh();
-    el('ob-back').onclick = renderStep1;
-    el('ob-skip').onclick = () => finish();
+    el('ob-back').onclick = () => {
+      if (saving || inactive()) return;
+      collectGoals();
+      renderStep1();
+    };
+    el('ob-skip').onclick = () => { if (!saving && !inactive()) finish(); };
     el('ob-confirm').onclick = async () => {
+      if (saving || inactive()) return;
       el('ob-error').textContent = '';
+      collectGoals();
+      if (inputs.some((input) => input.value === '' || !Number.isInteger(Number(input.value)) || Number(input.value) < 0 || Number(input.value) > 100)) {
+        el('ob-error').textContent = 'Use whole percentages between 0 and 100 for each goal.';
+        return;
+      }
       if (total() !== 100) {
         el('ob-error').textContent = 'Goals must total 100% - currently ' + total() + '%.';
         return;
       }
-      el('ob-confirm').disabled = true;
-      const goalBody = Object.fromEntries(inputs.map((i) => [i.dataset.cat, parseInt(i.value, 10) || 0]));
+      saving = true;
+      const controls = [...inputs, el('ob-back'), el('ob-skip'), el('ob-confirm')];
+      const status = el('ob-status');
+      controls.forEach((control) => { control.disabled = true; });
+      status.textContent = 'Saving your setup...';
+      const goalBody = { ...goals };
       const contacts = rows.filter((r) => r.name).slice(0, 5).map((r) => ({
         name: r.name,
         category: r.category,
@@ -1314,14 +1384,19 @@ function onboardingView() {
         // Goals are an idempotent PUT. Save them before creating contacts so a
         // failed goals request can be retried without duplicating every person.
         await api('/api/me/goals', { method: 'PUT', body: JSON.stringify(goalBody) });
+        if (inactive()) return;
         if (contacts.length) {
           await api('/api/me/contacts', { method: 'POST', body: JSON.stringify({ contacts }) });
         }
-        finish(contacts);
+        if (!inactive()) finish(contacts);
       } catch (e) {
-        if (stale(nav)) return;
-        el('ob-confirm').disabled = false;
-        el('ob-error').textContent = e.message;
+        if (!inactive()) el('ob-error').textContent = e.message;
+      } finally {
+        saving = false;
+        if (!inactive()) {
+          controls.forEach((control) => { control.disabled = false; });
+          status.textContent = '';
+        }
       }
     };
   }
@@ -1333,8 +1408,7 @@ function onboardingView() {
 // --- profile: your account, your goals, and the full activity log -----------
 
 async function profileView() {
-  const nav = navToken();
-  renderLoading('Loading your profile...');
+  const nav = renderLoading('Loading your profile...');
   let me = null, d = null, interactions = [];
   try {
     [me, d] = await Promise.all([api('/api/me'), api('/api/me/dashboard')]);
@@ -1388,7 +1462,8 @@ async function profileView() {
           ${CATEGORIES.map((c) => `<label>${catLabel(c)} <input type="number" class="me-goal-input" data-cat="${c}" min="0" max="100" value="${goals[c] || 0}"></label>`).join('')}
         </div>
         <p>Total: <strong id="me-goals-total">100</strong>% <span class="muted">(must be 100)</span></p>
-        <p class="error" id="me-goals-error"></p>
+        <p class="error" id="me-goals-error" role="alert"></p>
+        <p class="muted" id="me-goals-status" role="status"></p>
         <div class="quick-actions">
           <button class="primary" id="me-goals-save">Save goals</button>
           <button id="me-goals-cancel">Cancel</button>
@@ -1408,23 +1483,52 @@ async function profileView() {
       : '<p class="muted">Nothing logged yet. Log a check-in from a contact page or the dashboard.</p>'}
     </section>`;
 
-  el('me-edit-goals').onclick = () => { el('me-goals-form').classList.remove('hidden'); el('me-edit-goals').classList.add('hidden'); };
-  el('me-goals-cancel').onclick = () => { el('me-goals-form').classList.add('hidden'); el('me-edit-goals').classList.remove('hidden'); };
+  let savingGoals = false;
+  let editingGoals = false;
+  el('me-edit-goals').onclick = () => {
+    if (stale(nav) || savingGoals) return;
+    editingGoals = true;
+    el('me-goals-form').classList.remove('hidden');
+    el('me-edit-goals').classList.add('hidden');
+  };
+  el('me-goals-cancel').onclick = () => {
+    if (stale(nav) || savingGoals) return;
+    editingGoals = false;
+    el('me-goals-form').classList.add('hidden');
+    el('me-edit-goals').classList.remove('hidden');
+  };
   const inputs = [...document.querySelectorAll('.me-goal-input')];
-  const total = () => inputs.reduce((sum, i) => sum + (parseInt(i.value, 10) || 0), 0);
-  inputs.forEach((i) => { i.oninput = () => { el('me-goals-total').textContent = total(); }; });
+  const total = () => inputs.reduce((sum, input) => sum + (Number(input.value) || 0), 0);
+  inputs.forEach((input) => { input.oninput = () => {
+    if (!stale(nav)) el('me-goals-total').textContent = total();
+  }; });
   el('me-goals-save').onclick = async () => {
-    el('me-goals-error').textContent = '';
-    if (total() !== 100) { el('me-goals-error').textContent = 'Goals must total 100% - currently ' + total() + '%.'; return; }
-    el('me-goals-save').disabled = true;
+    if (stale(nav) || savingGoals || !editingGoals) return;
+    const error = el('me-goals-error'), status = el('me-goals-status');
+    error.textContent = '';
+    if (inputs.some((input) => input.value === '' || !Number.isInteger(Number(input.value)) || Number(input.value) < 0 || Number(input.value) > 100)) {
+      error.textContent = 'Use whole percentages between 0 and 100 for each goal.';
+      return;
+    }
+    if (total() !== 100) { error.textContent = 'Goals must total 100% - currently ' + total() + '%.'; return; }
+    savingGoals = true;
+    const controls = [...inputs, el('me-goals-save'), el('me-goals-cancel')];
+    controls.forEach((control) => { control.disabled = true; });
+    status.textContent = 'Saving goals...';
     try {
-      const body = Object.fromEntries(inputs.map((i) => [i.dataset.cat, parseInt(i.value, 10) || 0]));
+      const body = Object.fromEntries(inputs.map((input) => [input.dataset.cat, Number(input.value)]));
       await api('/api/me/goals', { method: 'PUT', body: JSON.stringify(body) });
+      if (stale(nav)) return;
       flash('Goals saved.');
       profileView();
     } catch (e) {
-      el('me-goals-save').disabled = false;
-      el('me-goals-error').textContent = e.message;
+      if (!stale(nav)) error.textContent = e.message;
+    } finally {
+      savingGoals = false;
+      if (!stale(nav)) {
+        controls.forEach((control) => { control.disabled = false; });
+        status.textContent = '';
+      }
     }
   };
 }
