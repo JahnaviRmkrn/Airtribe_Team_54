@@ -6,7 +6,7 @@ import { HttpError, requireUser } from '@/lib/http';
 import { adminClient } from '@/lib/supabase/admin';
 import {
   acquireGoogleSession, authorization, checkpointGoogleSession, consumeGoogleAuthorization,
-  createGoogleSession, deleteGoogleSession, discardGoogleSession, exchangeCode, googleConfig, googleConnectorSchemaReady,
+  createGoogleSession, deleteGoogleSession, discardGoogleSession, exchangeCode, googleConfig, googleConnectorSchemaReady, GOOGLE_SETUP_UNVERIFIED,
   googleResponse, googleRoute, releaseGoogleSession, requireGoogleConfig, sameOrigin,
   saveGoogleSession, validState, type GoogleConfig, type Session,
 } from './connector';
@@ -67,7 +67,7 @@ async function withSession(req: Request, mode: SheetsMode, work: (config: Google
 export const sheetsStatus = (mode: SheetsMode) => googleRoute(async req => {
   const { user, supabase } = await requireUser(req);
   const config = googleConfig(purpose(mode));
-  const configured = !!config && await googleConnectorSchemaReady();
+  const configured = !!config && await googleConnectorSchemaReady(purpose(mode));
   let sessionView: SheetsSessionView = { connected: false };
   if (config && configured) {
     let session: Session<SheetsPayload> | undefined;
@@ -77,7 +77,9 @@ export const sheetsStatus = (mode: SheetsMode) => googleRoute(async req => {
   }
   let contacts: { id: string; name: string; email: string | null; category: string }[] = [];
   let contactsTruncated = false;
-  if (mode === 'export') {
+  // A partial schema may also be missing contact columns. Keep setup status
+  // usable instead of attempting a dependent query after a failed probe.
+  if (mode === 'export' && configured) {
     const result = await supabase.from('contacts').select('id,name,email,category').eq('user_id', user.id).order('name').limit(1001);
     if (result.error) throw new HttpError(503, 'Your contacts could not be loaded. Please try again.');
     contactsTruncated = (result.data?.length ?? 0) > 1000;
@@ -90,6 +92,7 @@ export const sheetsConnect = (mode: SheetsMode) => googleRoute(async req => {
   const { user } = await requireUser(req);
   const config = requireGoogleConfig(purpose(mode));
   sameOrigin(req, config); await parseBody(req, emptyBody);
+  if (!await googleConnectorSchemaReady(purpose(mode))) throw new HttpError(503, GOOGLE_SETUP_UNVERIFIED);
   // A repeated connect click must not erase an unresolved write receipt.
   let existing: Session<SheetsPayload> | undefined;
   try {
@@ -103,14 +106,15 @@ export const sheetsConnect = (mode: SheetsMode) => googleRoute(async req => {
   return googleResponse({ url: consent.url });
 });
 
-export const sheetsCallback = (mode: SheetsMode) => async (req: Request) => {
+export const sheetsCallback = (mode: SheetsMode) => googleRoute(async (req: Request) => {
+  const { user } = await requireUser(req);
   const config = googleConfig(purpose(mode));
   // Use only configured origin, never an untrusted Host header for a redirect.
   if (!config) return googleResponse({ error: 'Google Sheets needs administrator setup.' }, 503);
+  if (!await googleConnectorSchemaReady(purpose(mode))) return googleResponse({ error: GOOGLE_SETUP_UNVERIFIED }, 503);
   const destination = new URL('/integrations/google-sheets', config.origin);
   let session: Session<SheetsPayload> | undefined;
   try {
-    const { user } = await requireUser(req);
     session = await acquireGoogleSession<SheetsPayload>(config, user.id);
     const url = new URL(req.url);
     if (session.payload.phase !== 'oauth' || !session.payload.state || !session.payload.verifier || !validState(url.searchParams.get('state'), session.payload.state)) throw new HttpError(400, 'Invalid Google authorization state.');
@@ -132,7 +136,7 @@ export const sheetsCallback = (mode: SheetsMode) => async (req: Request) => {
     destination.searchParams.set('google', 'error');
   } finally { if (session) await releaseGoogleSession(config, session); }
   return NextResponse.redirect(destination, { status: 303, headers: { 'Cache-Control': 'no-store, private', 'Referrer-Policy': 'no-referrer' } });
-};
+});
 
 export const sheetsDisconnect = (mode: SheetsMode) => googleRoute(async req => {
   const { user } = await requireUser(req);

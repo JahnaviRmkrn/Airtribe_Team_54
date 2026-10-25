@@ -21,6 +21,7 @@ export const SESSION_SECONDS = 15 * 60;
 const CALLBACK_ROOT = '/api/me/integrations/google';
 const TABLE = 'google_connector_sessions';
 const SETUP = 'This Google connector needs administrator setup. You can still add contacts manually.';
+export const GOOGLE_SETUP_UNVERIFIED = 'Google setup could not be verified. An administrator must check this feature before you continue. Existing action outcomes are unchanged; do not resend or recreate a previous action.';
 
 export interface GoogleConfig {
   purpose: GooglePurpose; clientId: string; clientSecret: string;
@@ -104,9 +105,21 @@ export function googleAccessToken(session: Session<{ token: string | null; token
   }
   return session.payload.token;
 }
-export async function googleConnectorSchemaReady() {
-  const { data, error } = await adminClient().rpc('google_connector_session_ready');
-  return !error && data === true;
+// A failed/denied probe is not proof that a migration is missing. Treat every
+// unverified result as unavailable, without touching sessions or action receipts.
+// Bound caller latency even if transport never settles. A late read-only result
+// cannot trigger work, and an unavailable capability is never automatically retried.
+export async function googleConnectorSchemaReady(purpose: GooglePurpose) {
+  if (!Object.prototype.hasOwnProperty.call(PURPOSES, purpose)) return false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      adminClient().rpc('google_connector_purpose_ready', { p_purpose: purpose }),
+      new Promise<null>(resolve => { timeout = setTimeout(() => resolve(null), 1500); }),
+    ]);
+    return !!result && !result.error && result.data === true;
+  } catch { return false; }
+  finally { if (timeout) clearTimeout(timeout); }
 }
 export async function createGoogleSession(config: GoogleConfig, owner: string, payload: unknown) {
   const handle = randomBytes(32).toString('base64url');

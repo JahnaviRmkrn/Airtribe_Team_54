@@ -1,7 +1,7 @@
 name: Desktop & Android builds
 
 # Builds the Electron installers (macOS .dmg/.zip, Windows NSIS/portable,
-# Linux AppImage) and the Android debug APK. Run manually, or by pushing a
+# Linux AppImage) and the signed Android release APK. Run manually, or by pushing a
 # tag like desktop-v0.1.0. Artifacts land under the run's Artifacts section.
 on:
   workflow_dispatch:
@@ -74,35 +74,25 @@ jobs:
         run: npx cap sync android
       - name: Point Gradle at the CI Android SDK
         run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-      - name: Build debug APK
+      - name: Build signed release APK
         working-directory: mobile/android
-        run: ./gradlew assembleDebug
+        env:
+          MUOP_KEYSTORE_B64: ${{ secrets.MUOP_ANDROID_KEYSTORE_B64 }}
+          MUOP_KEYSTORE_PASSWORD: ${{ secrets.MUOP_ANDROID_KEYSTORE_PASSWORD }}
+          MUOP_KEY_ALIAS: ${{ secrets.MUOP_ANDROID_KEY_ALIAS }}
+          MUOP_KEY_PASSWORD: ${{ secrets.MUOP_ANDROID_KEY_PASSWORD }}
+        run: |
+          # Fail rather than publish an unsigned or debug build.
+          if [ -z "$MUOP_KEYSTORE_B64" ]; then echo "::error::MUOP_ANDROID_KEYSTORE_B64 secret missing"; exit 1; fi
+          export MUOP_KEYSTORE_FILE="$RUNNER_TEMP/muop-release.jks"
+          echo "$MUOP_KEYSTORE_B64" | base64 -d > "$MUOP_KEYSTORE_FILE"
+          ./gradlew assembleRelease
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -i "SHA-256"
+      - name: Remove the decoded keystore (even if the build failed)
+        if: always()
+        run: rm -f "$RUNNER_TEMP/muop-release.jks"
       - uses: actions/upload-artifact@v4
         with:
           name: muop-android
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-      # Signed release APK, only when the keystore secrets exist (mobile/README.md).
-      - name: Check for release keystore secret
-        id: ks
-        run: echo "present=${{ secrets.MUOP_KEYSTORE_BASE64 != '' }}" >> "$GITHUB_OUTPUT"
-      - name: Restore release keystore
-        if: steps.ks.outputs.present == 'true'
-        run: echo "$MUOP_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/muop-release.jks"
-        env:
-          MUOP_KEYSTORE_BASE64: ${{ secrets.MUOP_KEYSTORE_BASE64 }}
-      - name: Build signed release APK
-        if: steps.ks.outputs.present == 'true'
-        working-directory: mobile/android
-        run: ./gradlew assembleRelease
-        env:
-          MUOP_KEYSTORE_FILE: ${{ runner.temp }}/muop-release.jks
-          MUOP_KEYSTORE_PASSWORD: ${{ secrets.MUOP_KEYSTORE_PASSWORD }}
-          MUOP_KEY_ALIAS: ${{ secrets.MUOP_KEY_ALIAS }}
-          MUOP_KEY_PASSWORD: ${{ secrets.MUOP_KEY_PASSWORD }}
-      - uses: actions/upload-artifact@v4
-        if: steps.ks.outputs.present == 'true'
-        with:
-          name: muop-android-release
           path: mobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error

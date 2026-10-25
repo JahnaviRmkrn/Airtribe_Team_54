@@ -7,8 +7,8 @@ android {
         applicationId "win.muop.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "0.2.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,24 +16,27 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    // Release signing comes from CI secrets (see mobile/README.md). Without
-    // them the release build stays unsigned and CI skips publishing it —
-    // a debug-signed APK must never be offered for download.
+    // Release builds are signed with the muop release key from CI secrets
+    // (MUOP_KEYSTORE_FILE etc.). Every published APK must use this one key so
+    // installs can update in place; never publish debug builds (debuggable,
+    // shared debug key).
     signingConfigs {
         release {
-            if (System.getenv('MUOP_KEYSTORE_FILE')) {
-                storeFile file(System.getenv('MUOP_KEYSTORE_FILE'))
-                storePassword System.getenv('MUOP_KEYSTORE_PASSWORD')
-                keyAlias System.getenv('MUOP_KEY_ALIAS')
-                keyPassword System.getenv('MUOP_KEY_PASSWORD')
+            def ks = System.getenv("MUOP_KEYSTORE_FILE")
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv("MUOP_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("MUOP_KEY_ALIAS")
+                keyPassword System.getenv("MUOP_KEY_PASSWORD")
             }
         }
     }
     buildTypes {
         release {
+            if (System.getenv("MUOP_KEYSTORE_FILE")) signingConfig signingConfigs.release
+            debuggable false
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            if (System.getenv('MUOP_KEYSTORE_FILE')) signingConfig signingConfigs.release
         }
     }
 }

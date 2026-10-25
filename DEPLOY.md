@@ -1,5 +1,19 @@
 # Deploy: Vercel + hosted Supabase
 
+## Release safety first
+
+A successful application build or Git push does **not** apply database migrations
+or enable Google/payment integrations. Before following this guide, review the
+[feature rollout checklist](docs/feature-rollout.md) against the exact intended
+project. Do not bulk-apply migrations, run the production smoke script, create
+credentials or enable a provider merely to check whether a deployment works.
+
+If any service-role key, database password or provider credential has been
+exposed, an authorized operator must revoke/rotate it and review access before
+adding new integration credentials. Moving a value into Vault does not revoke an
+old key that can still access Vault. Never put a Google connector encryption key
+in a store reachable with a compromised credential.
+
 Placeholders: `<ref>` = Supabase project ref (from its URL `https://<ref>.supabase.co`),
 `<app>` = the Vercel production host (e.g. `airtribe-team-54.vercel.app`).
 
@@ -18,8 +32,10 @@ paste `supabase/seed.sql` into Dashboard > SQL Editor and run it instead.
 
 Auth settings (Dashboard > Authentication):
 
-- Sign In / Providers > Email: turn **off** "Confirm email" (demo; password
-  sign-up and `scripts/smoke.mjs` need a session straight away).
+- Sign In / Providers > Email: keep **Confirm email** enabled for production.
+  The legacy demo smoke flow assumes immediate sessions and is not a reason to
+  weaken production authentication. Use a separately approved disposable test
+  project if that demo behavior is needed.
 - URL Configuration > Site URL: `https://<app>`
 - URL Configuration > Redirect URLs: add
   - `https://<app>/auth/callback`
@@ -96,3 +112,9 @@ node scripts/smoke.mjs https://<app>
 
 If sign-up is rejected for `example.com`, set `SMOKE_EMAIL_DOMAIN` to a domain you own.
 Then open `https://<app>/login`, sign in, and check `/organizer/`.
+
+## Payment safety rollout
+
+Before enabling checkout, an authorized operator must follow the
+[payment safety upgrade checklist](docs/payment-safety-rollout.md). Published
+code is not proof that the required database migrations are installed.

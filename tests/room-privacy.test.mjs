@@ -110,8 +110,8 @@ describe('public room privacy, using real routes and a service-role PostgreSQL a
     const b = await join(browser(), 'Guest B', undefined, { location: { lat: 12.981, lng: 77.651, label: 'Shared B' } });
     const otherRoomGuest = await join(browser(), 'Other room guest', tenants.bob.meetup.room_token);
     await asRole(db, 'service_role', null, (tx) => tx.query(`insert into meetup_payments
-      (meetup_id, attendee_id, amount_paise, pine_order_id, redirect_url)
-      values ($1, $2, 50000, 'synthetic-private-order', 'https://checkout.example.test/private')`, [tenants.alice.meetup.id, a.attendee_id]));
+      (meetup_id, attendee_id, amount_paise, pine_order_id, redirect_url, merchant_order_reference)
+      values ($1, $2, 50000, 'synthetic-private-order', 'https://checkout.example.test/private', 'synthetic-private-ref')`, [tenants.alice.meetup.id, a.attendee_id]));
     const response = await invoke(viewRoom);
     expect(response.status).toBe(200);
     const payload = await response.json();
@@ -192,21 +192,21 @@ describe('public room privacy, using real routes and a service-role PostgreSQL a
     await join(third, 'Guest without payment');
     for (const [guest, marker] of [[a, 'A'], [b, 'B']]) {
       await asRole(db, 'service_role', null, (tx) => tx.query(`insert into meetup_payments
-        (meetup_id, attendee_id, amount_paise, pine_order_id, redirect_url)
-        values ($1, $2, 50000, $3, $4)`,
+        (meetup_id, attendee_id, amount_paise, pine_order_id, redirect_url, merchant_order_reference)
+        values ($1, $2, 50000, $3, $4, $3)`,
       [tenants.alice.meetup.id, guest.attendee_id, `synthetic-order-${marker}`, `https://checkout.example.test/${marker}`]));
     }
     for (const [session, marker] of [[first, 'A'], [second, 'B']]) {
       deps.getOrderStatus.mockClear();
       const response = await invoke(getPayment, { session });
       expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ payment: {
+      expect(await response.json()).toEqual({ checkout_availability: 'ready', payment: {
         status: 'pending', amount_paise: 50000, checkout_state: 'ready', redirect_url: `https://checkout.example.test/${marker}`,
       } });
       expect(deps.getOrderStatus).toHaveBeenCalledExactlyOnceWith(`synthetic-order-${marker}`);
     }
     deps.getOrderStatus.mockClear();
-    expect(await (await invoke(getPayment, { session: third })).json()).toEqual({ payment: null });
+    expect(await (await invoke(getPayment, { session: third })).json()).toEqual({ checkout_availability: 'ready', payment: null });
     expect(deps.getOrderStatus).not.toHaveBeenCalled();
   });
 

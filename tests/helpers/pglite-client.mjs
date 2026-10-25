@@ -11,6 +11,16 @@ const projection = (value) => value === '*' ? '*' : value.split(',').map((part) 
 
 export function pgliteClient(db, role, uid = null) {
   return {
+    async rpc(name) {
+      // Read-only capability probes only; never emulate mutation RPCs here.
+      if (name !== 'payment_checkout_ready') throw new Error('Unsupported test RPC');
+      try {
+        const { rows } = await asRole(db, role, uid, (tx) => tx.query('select public.payment_checkout_ready() as ready'));
+        return { data: rows[0].ready, error: null };
+      } catch (error) {
+        return { data: null, error: { message: error.message, code: error.code } };
+      }
+    },
     auth: { getUser: async () => ({ data: { user: uid ? { id: uid } : null }, error: null }) },
     from(table) {
       const state = { operation: 'select', columns: '*', filters: [], order: [], returning: false, single: null };

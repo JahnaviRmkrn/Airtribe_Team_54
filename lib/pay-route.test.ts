@@ -17,7 +17,7 @@ vi.mock('@/lib/room', () => ({
   requireGuest: mocks.requireGuest, requireOpen: vi.fn(),
 }));
 vi.mock('@/lib/urls', () => ({roomUrl: () => 'https://app/m/test'}));
-vi.mock('@/lib/supabase/admin', () => ({ adminClient: () => ({ from: () => {
+vi.mock('@/lib/supabase/admin', () => ({ adminClient: () => ({ rpc: async () => ({ data: true, error: null }), from: () => {
   const chain: Record<string, unknown> = {};
   for (const method of ['select','eq','is','insert']) chain[method] = () => chain;
   chain.update = (v: unknown) => { mocks.update(v); return chain; };

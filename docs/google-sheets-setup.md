@@ -64,8 +64,10 @@ an entire Google project grant and inadvertently disconnect other purposes.
    operator's explicit authorization.
 5. Apply reviewed migration
    `supabase/migrations/20261025110000_google_contact_import.sql` and additive
-   `supabase/migrations/20261025114000_google_session_replacement.sql` through the
-   deployment's normal authorized procedure. The service-role client needs
+   `supabase/migrations/20261025114000_google_session_replacement.sql`, then
+   `supabase/migrations/20261025121500_google_purpose_readiness.sql`, in that
+   order before releasing this application version, through the deployment's
+   normal authorized procedure. The service-role client needs
    `SUPABASE_SERVICE_ROLE_KEY` and the normal Supabase URL/anon settings. The
    migrations are authored code, not evidence they have been applied. The
    replacement RPC and protected-action column are required for all shared
@@ -73,8 +75,15 @@ an entire Google project grant and inadvertently disconnect other purposes.
    migration blocks new sessions and mutation checkpoints; there is no upsert
    fallback.
 
-   Status uses a read-only schema capability probe; environment variables alone
-   do not make this feature ready. Upgrade backfill protects all already-live
+   Status, connect and callback exchange use the read-only purpose capability
+   probe; environment variables or the session table alone do not make this
+   feature ready. Sheets import requires contact matching, duplicate preview
+   and import routines; export requires contact fields and shared session
+   infrastructure but not import routines or the optional Gmail/Calendar action
+   migration. Missing, denied or failed probes stop before consent/session
+   creation or token exchange, without inferring that a permission/transport
+   error proves schema is absent. No fallback to the old session-only probe
+   or reconnect/resend is attempted; unresolved receipts remain unchanged. Upgrade backfill protects all already-live
    sessions until explicit disconnect or their original expiry, since encrypted
    legacy payloads cannot safely be classified in SQL.
 6. Schedule `cleanup_google_connector_sessions()` at least every 15 minutes

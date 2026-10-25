@@ -29,9 +29,19 @@ function assertAppSender(event) {
   }
 }
 
+// Page-supplied text in a prompt: one line, printable, short - so a script
+// can't restyle the question with newlines or control characters.
+const clean = (text, max = 80) => String(text ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+
+// After 3 refusals in a row for the same feature, stop asking until restart,
+// so a script can't nag the person into clicking Allow.
+const DENY_LIMIT = 3;
+const denials = new Map();
+
 // Sensitive reads/writes need the person's say-so in a native dialog the
 // page cannot draw or click, so a script on the page can't use them silently.
-async function confirmAccess(event, what) {
+async function confirmAccess(event, what, key) {
+  if ((denials.get(key) || 0) >= DENY_LIMIT) throw new Error('Denied');
   const win = BrowserWindow.fromWebContents(event.sender);
   const { response } = await dialog.showMessageBox(win, {
     type: 'question',
@@ -42,14 +52,18 @@ async function confirmAccess(event, what) {
     message: `Allow muop to ${what}?`,
     detail: 'Only allow this if you just asked muop to do it.',
   });
-  if (response !== 0) throw new Error('Denied');
+  if (response !== 0) {
+    denials.set(key, (denials.get(key) || 0) + 1);
+    throw new Error('Denied');
+  }
+  denials.delete(key);
 }
 
 // Wraps an IPC handler: origin check always, native confirmation if `what` is set.
 function handle(channel, what, fn) {
   ipcMain.handle(channel, async (event, ...args) => {
     assertAppSender(event);
-    if (what) await confirmAccess(event, typeof what === 'function' ? what(...args) : what);
+    if (what) await confirmAccess(event, typeof what === 'function' ? what(...args) : what, channel);
     return fn(event, ...args);
   });
 }
@@ -143,7 +157,7 @@ function registerIpc() {
     })()`);
   });
 
-  handle('muop:create-reminder', (opts = {}) => `add the reminder "${String(opts.name || '').slice(0, 80)}" to Reminders`, async (_event, opts = {}) => {
+  handle('muop:create-reminder', (opts = {}) => `add the reminder "${clean(opts.name)}" to Reminders`, async (_event, opts = {}) => {
     requireDarwin();
     if (!opts.name) throw new Error('createReminder requires a name');
     const payload = JSON.stringify({ name: String(opts.name), body: String(opts.body || ''), list: opts.list ? String(opts.list) : null, dueDate: opts.dueDate || null });
@@ -190,36 +204,81 @@ function registerIpc() {
   });
 }
 
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 360,
-    minHeight: 560,
-    autoHideMenuBar: true,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-  });
+const WEB_PREFERENCES = {
+  contextIsolation: true,
+  nodeIntegration: false,
+  sandbox: true,
+  preload: path.join(__dirname, 'preload.js'),
+};
 
-  // Keep navigation (including server redirects) on the app's exact origin;
-  // anything else goes to the system browser, and only for safe schemes.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (isAppUrl(url)) return { action: 'allow' };
+// Navigation rules for a window and every window it opens: stay on the
+// app's exact origin (including server redirects); anything else goes to the
+// system browser, and only for safe schemes. Same-origin popups get the same
+// locked-down preferences and, recursively, the same rules.
+function guard(contents) {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isAppUrl(url)) return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true, webPreferences: WEB_PREFERENCES } };
     openExternal(url);
     return { action: 'deny' };
   });
   const keepInApp = (e, url) => {
     if (!isAppUrl(url)) { e.preventDefault(); openExternal(url); }
   };
-  win.webContents.on('will-navigate', keepInApp);
-  win.webContents.on('will-redirect', keepInApp);
-  win.webContents.on('will-attach-webview', (e) => e.preventDefault());
+  contents.on('will-navigate', keepInApp);
+  contents.on('will-redirect', keepInApp);
+  contents.on('will-attach-webview', (e) => e.preventDefault());
+  contents.on('did-create-window', (child) => guard(child.webContents));
+}
 
-  win.loadURL(APP_URL);
+// Unsigned builds can't auto-install updates, so ask muop.win which versions
+// are still OK. Below `minimum` the app won't open the site (old shells may
+// lack security fixes); below `latest` it suggests the update. Network
+// errors never block the app.
+const DOWNLOAD_URL = `${APP_URL}/#download`;
+const newer = (a, b) => {
+  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+  return false;
+};
+async function checkVersion(win) {
+  let info;
+  try {
+    const res = await fetch(`${APP_URL}/desktop-version.json`, { signal: AbortSignal.timeout(5000), cache: 'no-store' });
+    if (!res.ok) return true;
+    info = await res.json();
+  } catch { return true; }
+  if (!info || typeof info !== 'object') return true;
+  const current = app.getVersion();
+  if (info.minimum && newer(info.minimum, current)) {
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning', buttons: ['Download update', 'Quit'], defaultId: 0, cancelId: 1, noLink: true,
+      message: `This version of Muop (${current}) is no longer supported.`,
+      detail: `Please install version ${clean(info.latest || info.minimum, 20)} or newer. It includes security fixes.`,
+    });
+    if (response === 0) openExternal(DOWNLOAD_URL);
+    app.quit();
+    return false;
+  }
+  if (info.latest && newer(info.latest, current)) {
+    dialog.showMessageBox(win, {
+      type: 'info', buttons: ['Download', 'Later'], defaultId: 0, cancelId: 1, noLink: true,
+      message: `Muop ${clean(info.latest, 20)} is available (you have ${current}).`,
+    }).then(({ response }) => { if (response === 0) openExternal(DOWNLOAD_URL); });
+  }
+  return true;
+}
+
+async function createWindow() {
+  const win = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    minWidth: 360,
+    minHeight: 560,
+    autoHideMenuBar: true,
+    webPreferences: WEB_PREFERENCES,
+  });
+  guard(win.webContents);
+  if (await checkVersion(win)) win.loadURL(APP_URL);
 }
 
 app.whenReady().then(() => {

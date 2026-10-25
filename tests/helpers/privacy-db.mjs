@@ -4,7 +4,7 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 
 // Local PostgreSQL only. Supabase's normal table grants are modelled before
 // migrations so explicit revocations (e.g. rate_limits) remain effective.
-export async function privacyDatabase() {
+export async function privacyDatabase({ beforeMigration, skipMigrations = [] } = {}) {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(`
     create role anon;
@@ -22,8 +22,9 @@ export async function privacyDatabase() {
   `);
   const directory = new URL('../../supabase/migrations/', import.meta.url);
   for (const file of readdirSync(directory).filter((name) => name.endsWith('.sql')).sort()) {
+    if (beforeMigration && file >= beforeMigration) continue;
     // Vault cannot run in PGlite; never load production secrets to test RLS.
-    if (file === '20261025090000_app_secrets_vault.sql') continue;
+    if (file === '20261025090000_app_secrets_vault.sql' || skipMigrations.includes(file)) continue;
     await db.exec(readFileSync(new URL(file, directory), 'utf8'));
   }
   return db;

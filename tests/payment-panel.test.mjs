@@ -48,7 +48,7 @@ async function loaded(api, overrides) {
 
 describe('React payment reconciliation controls', () => {
   it.each(['creating', 'reconciliation_required'])('shows and blocks a %s attempt but leaves status checking available', async checkout_state => {
-    const api = vi.fn().mockResolvedValue({ payment: { ...ready, redirect_url: null, checkout_state } });
+    const api = vi.fn().mockResolvedValue({ checkout_availability: 'ready', payment: { ...ready, redirect_url: null, checkout_state } });
     const { panel } = await loaded(api);
     const ui = panel.render();
     expect(ui.pay.disabled).toBe(true);
@@ -60,13 +60,13 @@ describe('React payment reconciliation controls', () => {
   });
 
   it('requires status reconciliation after a lost POST response without automatically redirecting', async () => {
-    const api = vi.fn().mockResolvedValueOnce({ payment: null }).mockRejectedValueOnce(new Error('Synthetic response loss'));
+    const api = vi.fn().mockResolvedValueOnce({ checkout_availability: 'ready', payment: null }).mockRejectedValueOnce(new Error('Synthetic response loss'));
     const { panel } = await loaded(api);
     await panel.render().pay.onClick();
     expect(panel.render().pay.disabled).toBe(true);
     await panel.render().pay.onClick();
     expect(api).toHaveBeenCalledTimes(2);
-    api.mockResolvedValue({ payment: ready });
+    api.mockResolvedValue({ checkout_availability: 'ready', payment: ready });
     await panel.render().check.onClick();
     expect(panel.render().pay.disabled).toBe(false);
     expect(panel.location.assign).not.toHaveBeenCalled();
@@ -76,31 +76,90 @@ describe('React payment reconciliation controls', () => {
 
   it('uses the immediate ref lock to prevent duplicate clicks before re-render', async () => {
     let finish;
-    const api = vi.fn().mockResolvedValueOnce({ payment: null }).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const api = vi.fn().mockResolvedValueOnce({ checkout_availability: 'ready', payment: null }).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
     const { panel } = await loaded(api);
     const button = panel.render().pay;
     const pending = button.onClick();
     await button.onClick();
     expect(api).toHaveBeenCalledTimes(2);
-    finish({ payment: ready });
+    finish({ checkout_availability: 'ready', payment: ready });
     await pending;
     expect(panel.location.assign).toHaveBeenCalledTimes(1);
   });
 
   it('does not navigate after an in-flight checkout panel is unmounted', async () => {
     let finish;
-    const api = vi.fn().mockResolvedValueOnce({ payment: null }).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const api = vi.fn().mockResolvedValueOnce({ checkout_availability: 'ready', payment: null }).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
     const { panel, cleanup } = await loaded(api);
     const pending = panel.render().pay.onClick();
     cleanup();
-    finish({ payment: ready });
+    finish({ checkout_availability: 'ready', payment: ready });
     await pending;
     expect(panel.location.assign).not.toHaveBeenCalled();
   });
 
   it('allows status checks but disables starting in a closed room', async () => {
-    const { panel } = await loaded(vi.fn().mockResolvedValue({ payment: ready }), { closed: true });
+    const { panel } = await loaded(vi.fn().mockResolvedValue({ checkout_availability: 'ready', payment: ready }), { closed: true });
     expect(panel.render().pay.disabled).toBe(true);
     expect(panel.render().check.disabled).toBe(false);
   });
+});
+
+
+describe('React payment schema availability', () => {
+  it.each([null, { ...ready, status: 'paid', redirect_url: null }])('keeps setup-required disabled while showing read-only payment status', async payment => {
+    const api = vi.fn().mockResolvedValue({ checkout_availability: 'setup_required', payment });
+    const { panel } = await loaded(api);
+    expect(panel.render().pay.disabled).toBe(true);
+    expect(panel.render().pay.children).toBe('Checkout unavailable');
+    expect(panel.render().status).toContain('operator completes the payment safety upgrade');
+    if (payment) expect(panel.render().status).toContain('Payment paid');
+    await panel.render().pay.onClick();
+    expect(api).toHaveBeenCalledTimes(1);
+    await panel.render().check.onClick();
+    expect(api).toHaveBeenCalledTimes(2);
+    expect(panel.location.assign).not.toHaveBeenCalled();
+  });
+  it('blocks checkout after initial status failure, with no automatic retry', async () => {
+    const api = vi.fn().mockRejectedValue(new Error('Payment status is temporarily unavailable'));
+    const { panel } = await loaded(api);
+    expect(panel.render().pay.disabled).toBe(true);
+    expect(panel.render().status).not.toContain('upgrade');
+    await panel.render().pay.onClick();
+    expect(api).toHaveBeenCalledTimes(1);
+    api.mockResolvedValue({ checkout_availability: 'ready', payment: null });
+    await panel.render().check.onClick();
+    expect(panel.render().pay.disabled).toBe(false);
+  });
+  it('revokes previously ready checkout after a status read failure', async () => {
+    const api = vi.fn().mockResolvedValueOnce({ checkout_availability: 'ready', payment: ready }).mockRejectedValue(new Error('Read lost'));
+    const { panel } = await loaded(api);
+    expect(panel.render().pay.disabled).toBe(false);
+    await panel.render().check.onClick();
+    expect(panel.render().pay.disabled).toBe(true);
+    await panel.render().pay.onClick();
+    expect(api).toHaveBeenCalledTimes(2);
+  });
+  it('does not assume a mixed-version response without readiness means checkout is safe', async () => {
+    const { panel } = await loaded(vi.fn().mockResolvedValue({ payment: ready }));
+    expect(panel.render().pay.disabled).toBe(true);
+    expect(panel.render().status).not.toContain('upgrade');
+  });
+});
+
+
+it('discards a late checkout response after the payment effect is replaced', async () => {
+  let finish;
+  const api = vi.fn().mockResolvedValueOnce({ checkout_availability: 'ready', payment: null })
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+    .mockResolvedValue({ checkout_availability: 'ready', payment: null });
+  const { panel, cleanup } = await loaded(api);
+  const old = panel.render().pay.onClick();
+  cleanup();
+  panel.effects[0]();
+  await flush();
+  finish({ checkout_availability: 'ready', payment: ready });
+  await old;
+  expect(panel.location.assign).not.toHaveBeenCalled();
+  expect(panel.render().status).toBe('No payment yet.');
 });

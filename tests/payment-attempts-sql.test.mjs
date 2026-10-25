@@ -162,7 +162,7 @@ describe('payment attempts with real PostgreSQL receipts and authorization', () 
       expect((await invoke(GET, { credential })).status).toBe(401);
       expect((await invoke(POST, { credential })).status).toBe(401);
     }
-    expect(await (await invoke(GET, { who: 'bob' })).json()).toEqual({ payment: null });
+    expect(await (await invoke(GET, { who: 'bob' })).json()).toEqual({ payment: null, checkout_availability: 'ready' });
     expect(deps.getOrderStatus).not.toHaveBeenCalled();
     expect(deps.createOrder).toHaveBeenCalledTimes(1);
   });
@@ -202,5 +202,40 @@ describe('payment attempts with real PostgreSQL receipts and authorization', () 
     expect((await result.json()).payment).toMatchObject({ redirect_url: null, checkout_state: 'reconciliation_required' });
     expect((await invoke(POST)).status).toBe(409);
     expect(deps.createOrder).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+describe('payment rollout database contract', () => {
+  it('exposes the readiness capability only to service_role', async () => {
+    expect((await service('select public.payment_checkout_ready() as ready')).rows[0].ready).toBe(true);
+    for (const role of ['anon', 'authenticated']) {
+      await expect(asRole(db, role, identities.alice, tx => tx.query('select public.payment_checkout_ready()')))
+        .rejects.toThrow(/permission denied/);
+    }
+  });
+  it.each([
+    ['meetup_payments', 'payments_unknown_attempt'],
+    ['meetup_payments', 'payments_new_attempt'],
+    ['meetup_payment_attempts', 'payment_attempts_receipt'],
+  ])('fails closed before provider creation when %s.%s is disabled', async (table, trigger) => {
+    await db.exec(`alter table ${table} disable trigger ${trigger}`);
+    try {
+      expect((await service('select public.payment_checkout_ready() as ready')).rows[0].ready).toBe(false);
+      expect((await invoke(POST)).status).toBe(503);
+      expect(deps.createOrder).not.toHaveBeenCalled();
+      expect((await service('select * from meetup_payments')).rows).toHaveLength(0);
+    } finally { await db.exec(`alter table ${table} enable trigger ${trigger}`); }
+  });
+  it('fences an old binary inserting a new claim without a durable reference', async () => {
+    const oldCreate = vi.fn();
+    const oldRequest = async () => {
+      await service(`insert into meetup_payments(meetup_id, attendee_id, amount_paise)
+        values ($1, $2, 50000)`, [tenants.alice.meetup.id, attendees.alice]);
+      oldCreate();
+    };
+    await expect(oldRequest()).rejects.toThrow('payment_upgrade_required');
+    expect(oldCreate).not.toHaveBeenCalled();
+    expect((await service('select * from meetup_payments')).rows).toHaveLength(0);
   });
 });

@@ -31,9 +31,11 @@ let paymentLoadedFor = null;
 let payment = null;
 let paymentMessage = '';
 let paymentStartUncertain = false;
+let paymentAvailability = 'unavailable';
+let paymentGeneration = 0;
 
 function checkoutBlocked() {
-  return paymentStartUncertain || (!!payment && (payment.checkout_state === 'creating' || payment.checkout_state === 'reconciliation_required' || (payment.status === 'pending' && !payment.redirect_url)));
+  return paymentAvailability !== 'ready' || paymentStartUncertain || (!!payment && (payment.checkout_state === 'creating' || payment.checkout_state === 'reconciliation_required' || (payment.status === 'pending' && !payment.redirect_url)));
 }
 
 function renderPayment() {
@@ -44,41 +46,52 @@ function renderPayment() {
   if (!eligible) return;
   const price = view.meetup.final_venue.price_per_person;
   const closed = view.meetup.status !== 'open';
-  const recoveryMessage = payment?.checkout_state === 'creating'
+  const recoveryMessage = paymentAvailability === 'setup_required'
+    ? 'Checkout is unavailable until the operator completes the payment safety upgrade. You can still check an existing payment status.'
+    : paymentAvailability !== 'ready' ? 'Check payment status before paying. Checkout is unavailable until that check succeeds.'
+    : payment?.checkout_state === 'creating'
     ? 'Payment is being created. Check payment status; do not start another checkout.'
     : checkoutBlocked() ? 'Payment creation needs checking. Do not pay again. Check payment status or ask the organiser to reconcile it.' : '';
-  $('payment-status').textContent = paymentMessage || recoveryMessage || (payment
-    ? `Payment ${payment.status} · ${rupees(payment.amount_paise / 100)}`
-    : 'Check your payment status before checkout.');
-  $('pay-btn').textContent = checkoutBlocked() ? 'Check status before paying' : payment?.status === 'pending' ? 'Continue checkout' : `Pay ${rupees(price)} with Pine Labs`;
+  $('payment-status').textContent = [payment && `Payment ${payment.status} · ${rupees(payment.amount_paise / 100)}`,
+    paymentMessage || recoveryMessage].filter(Boolean).join('. ');
+  $('pay-btn').textContent = paymentAvailability === 'setup_required' ? 'Checkout unavailable' : checkoutBlocked() ? 'Check status before paying' : payment?.status === 'pending' ? 'Continue checkout' : `Pay ${rupees(price)} with Pine Labs`;
   $('pay-btn').disabled = paymentBusy || checkoutBlocked() || closed || !(price > 0) || payment?.status === 'paid';
   $('payment-check').disabled = paymentBusy;
   if (paymentLoadedFor !== view.me.attendee_id) {
+    paymentGeneration++; paymentBusy = false;
     paymentLoadedFor = view.me.attendee_id;
+    payment = null; paymentAvailability = 'unavailable'; paymentStartUncertain = false;
     updatePayment(false);
   }
 }
 
 async function updatePayment(start) {
   if (paymentBusy || (start && checkoutBlocked())) return;
+  const generation = paymentGeneration;
+  const attendeeId = view?.me?.attendee_id;
+  const roomPath = location.pathname;
+  const current = () => generation === paymentGeneration && view?.me?.attendee_id === attendeeId && location.pathname === roomPath;
   paymentBusy = true;
   renderPayment();
   try {
     const data = await api('/pay', { method: start ? 'POST' : 'GET' });
+    if (!current()) return;
     payment = data.payment;
+    paymentAvailability = data.checkout_availability ?? 'unavailable';
     paymentStartUncertain = false;
-    paymentMessage = payment ? '' : 'No payment yet.';
-    if (start && payment?.status === 'pending' && payment.redirect_url) {
+    paymentMessage = paymentAvailability === 'ready' && !payment ? 'No payment yet.' : '';
+    if (start && paymentAvailability === 'ready' && payment?.status === 'pending' && payment.redirect_url) {
       const url = new URL(payment.redirect_url);
       if (url.protocol !== 'https:' || url.username || url.password) throw new Error('Invalid checkout link');
       location.assign(url.href);
     }
   } catch (e) {
+    if (!current()) return;
+    paymentAvailability = 'unavailable';
     if (start) paymentStartUncertain = true;
     paymentMessage = e.message;
   } finally {
-    paymentBusy = false;
-    renderPayment();
+    if (current()) { paymentBusy = false; renderPayment(); }
   }
 }
 

@@ -25,10 +25,14 @@ keytool -genkeypair -v -keystore muop-release.jks -alias muop \
 base64 -w0 muop-release.jks   # keep the .jks itself out of git, forever
 ```
 
-Set these GitHub Actions secrets: `MUOP_KEYSTORE_BASE64` (output above),
-`MUOP_KEYSTORE_PASSWORD`, `MUOP_KEY_ALIAS` (`muop`), `MUOP_KEY_PASSWORD`.
-CI then builds `app-release.apk` alongside the debug APK. Locally, export
-the same four values as env vars (`MUOP_KEYSTORE_FILE` = path to the .jks)
-and run `./gradlew assembleRelease`.
+GitHub Actions secrets (already set for this repo; the keystore and its
+passwords are backed up on the muop.win deploy box): `MUOP_ANDROID_KEYSTORE_B64`
+(output above), `MUOP_ANDROID_KEYSTORE_PASSWORD`, `MUOP_ANDROID_KEY_ALIAS`
+(`muop`), `MUOP_ANDROID_KEY_PASSWORD`. CI builds only the signed
+`app-release.apk` and fails if the keystore secret is missing; it never
+builds or uploads the debug APK. Locally, export `MUOP_KEYSTORE_FILE` (path to
+the .jks), `MUOP_KEYSTORE_PASSWORD`, `MUOP_KEY_ALIAS` and `MUOP_KEY_PASSWORD`,
+then run `./gradlew assembleRelease`. Every published APK must use this one
+key, or installs can't update in place.
 This machine's toolchain used here lives in `~/.local/share/android-dev/`
 (JDK 21 + SDK, not committed).
