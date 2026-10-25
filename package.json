@@ -13,6 +13,7 @@
     "check-env": "node scripts/check-env.mjs",
     "push-secrets": "node scripts/push-secrets.mjs",
     "tla": "cd spec && java -cp ${TLA2TOOLS:-$HOME/.local/share/tla/tla2tools.jar} tlc2.TLC -workers auto -deadlock -cleanup MeetupRoom",
+    "tla:payments": "cd spec && java -cp ${TLA2TOOLS:-$HOME/.local/share/tla/tla2tools.jar} tlc2.TLC -workers auto -deadlock -cleanup MeetupPayment",
     "prebuild": "node scripts/check-repo.mjs",
     "check:repo": "node scripts/check-repo.mjs"
   },
