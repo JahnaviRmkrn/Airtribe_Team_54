@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { HttpError } from './http';
+import { importRowSchema } from './schemas';
 import { parseGoogleCsv } from './import-google';
 import { parseFacebookFriends } from './import-facebook';
 import { parseLinkedInCsv } from './import-linkedin';
@@ -40,6 +41,7 @@ export async function loadStaged(supabase: SupabaseClient, source: 'facebook' | 
   const since = new Date(Date.now() - STAGE_TTL_DAYS * 86_400_000).toISOString();
   const { data, error } = await supabase.from('contact_import_stage').select('rows').eq('source', source).gte('created_at', since).maybeSingle();
   if (error) throw new HttpError(400, error.message);
-  const rows = Array.isArray(data?.rows) ? (data.rows as ImportRow[]) : [];
+  // The table is user-writable, so re-validate instead of trusting the cast.
+  const rows = Array.isArray(data?.rows) ? (data.rows.slice(0, MAX_ROWS).map((r: unknown) => importRowSchema.safeParse(r)).filter((r) => r.success).map((r) => r.data) as ImportRow[]) : [];
   return rows.length ? { rows: rows.slice(0, MAX_ROWS), truncated: false } : null;
 }

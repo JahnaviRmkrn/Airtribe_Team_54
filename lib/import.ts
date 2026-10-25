@@ -10,7 +10,8 @@ export const BATCH_SIZE = 500; // rows per import_contacts() call (the SQL funct
 
 export const IMPORT_SOURCES = ['linkedin', 'facebook', 'whatsapp', 'vcard', 'google', 'android'] as const;
 export type ImportSource = (typeof IMPORT_SOURCES)[number];
-export const maxBytesFor = (source: ImportSource) => (source === 'vcard' ? MAX_VCF_BYTES : MAX_FILE_BYTES);
+// .vcf (and the Google export, which may be a .vcf) get the larger cap.
+export const maxBytesFor = (source: ImportSource) => (source === 'vcard' || source === 'google' ? MAX_VCF_BYTES : MAX_FILE_BYTES);
 
 // One person parsed from an export, before it becomes a contact row.
 export type ImportRow = {

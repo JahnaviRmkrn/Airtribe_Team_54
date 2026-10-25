@@ -62,7 +62,7 @@ grant execute on function public.import_contacts(text, text, jsonb) to authentic
 create table public.contact_import_stage (
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
   source text not null check (source in ('facebook', 'google')),
-  rows jsonb not null check (jsonb_typeof(rows) = 'array'),
+  rows jsonb not null check (jsonb_typeof(rows) = 'array' and jsonb_array_length(rows) <= 5000 and pg_column_size(rows) < 2097152),
   created_at timestamptz not null default now(),
   primary key (user_id, source)
 );

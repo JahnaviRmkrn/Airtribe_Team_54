@@ -180,3 +180,20 @@ describe('Google Contacts', () => {
     expect(rows.map((r) => [r.name, r.email, r.phone])).toEqual([['Kavya Nair', 'kavya@example.com', '+919876543210'], ['only', 'only@example.com', null]]);
   });
 });
+
+describe('hostile input stays fast', () => {
+  const fast = (fn: () => unknown) => {
+    const t = Date.now();
+    try { fn(); } catch { /* a rejection is fine */ }
+    expect(Date.now() - t).toBeLessThan(1500);
+  };
+  it('facebook html with unclosed <h2 tags', () => fast(() => parseFacebookHtml('<h2'.repeat(1_500_000))));
+  it('vcard with an endless quoted-printable soft break', () =>
+    fast(() => parseVcard('BEGIN:VCARD\r\nNOTE;ENCODING=QUOTED-PRINTABLE:=\r\n' + 'a=\r\n'.repeat(2_000_000) + 'END:VCARD\r\n')));
+  it('vcard with an endless folded line', () =>
+    fast(() => parseVcard('BEGIN:VCARD\r\nFN:x\r\nNOTE:a\r\n' + ' bbbbbbbb\r\n'.repeat(1_000_000) + 'END:VCARD\r\n')));
+  it('still joins ordinary soft breaks', () => {
+    const { rows } = parseVcard('BEGIN:VCARD\r\nFN;ENCODING=QUOTED-PRINTABLE:Ana=\r\n Maria\r\nEND:VCARD');
+    expect(rows[0].name).toBe('Ana Maria');
+  });
+});

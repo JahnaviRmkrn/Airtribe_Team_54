@@ -692,6 +692,7 @@ async function contactsView() {
       </div>
       <div class="actions">
         <button type="button" id="imp-google">Import from Google Contacts</button>
+        <button type="button" id="imp-facebook">Import Facebook friends</button>
         <span id="imp-pick-wrap" class="hidden"><button type="button" id="imp-pick">Pick from this phone</button></span>
       </div>
       <p id="imp-msg" class="muted" role="status"></p>
@@ -769,6 +770,7 @@ function wireImport() {
   el('imp-src').onchange = syncSource;
   syncSource();
   el('imp-google').onclick = () => { location.href = '/connect/google'; };
+  el('imp-facebook').onclick = () => { location.href = '/connect/facebook'; };
   if (navigator.contacts && navigator.contacts.select) {
     el('imp-pick-wrap').classList.remove('hidden');
     el('imp-pick').onclick = async () => {

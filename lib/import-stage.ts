@@ -12,11 +12,12 @@ export async function stageFromSession(supabase: SupabaseClient, session: Sessio
   const token = session?.provider_token;
   if (!session || !token) return;
   try {
-    // Facebook identities only: sending another provider's token to Facebook would leak it.
-    const source = flow === 'facebook' && session.user.app_metadata?.provider === 'facebook' ? 'facebook'
-      : flow === 'google' && session.user.identities?.some((i) => i.provider === 'google') ? 'google'
-      : null;
-    if (!source) return;
+    // The ?import flag is only a request: it can be forged on a link. Use the token only when
+    // that provider's identity signed in within the last 2 minutes, i.e. this very exchange
+    // produced the token, so a Google token is never sent to Facebook or the reverse.
+    const source = flow === 'facebook' || flow === 'google' ? flow : null;
+    const fresh = source && session.user.identities?.some((i) => i.provider === source && Date.now() - Date.parse(i.last_sign_in_at ?? '') < 120_000);
+    if (!source || !fresh) return;
     const { rows } = source === 'facebook' ? await fetchGraphFriends(token) : await fetchGoogleContacts(token);
     if (!rows.length) return;
     await supabase.from('contact_import_stage').upsert({ user_id: session.user.id, source, rows, created_at: new Date().toISOString() });

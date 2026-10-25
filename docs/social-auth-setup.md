@@ -41,10 +41,10 @@ page; nothing else breaks.
    developers and testers listed under App Roles can sign in until the app is
    switched to Live.
 
-Contact import: the Facebook button also requests `user_friends` (plus `email`, `public_profile`) so
-friends who use the app can be offered for import. Meta only returns those friends, and `user_friends`
-needs app review for anyone who is not an admin/developer/tester on the app. If Meta refuses the scope,
-set `NEXT_PUBLIC_FACEBOOK_FRIENDS=0` and redeploy; the Facebook friends-file upload keeps working.
+Contact import: normal Facebook sign-in asks for `email` only. The organizer's **Import Facebook friends**
+button (`/connect/facebook`) re-runs OAuth asking for `user_friends` so friends who use the app can be
+offered for import. Meta only returns those friends, and `user_friends` needs app review (Advanced
+Access) for anyone who is not an admin/developer/tester on the app; the friends-file upload always works.
 
 ## LinkedIn (provider id: `linkedin_oidc`)
 
@@ -127,3 +127,6 @@ The organizer's **Import from Google Contacts** button (`/connect/google`) re-ru
 enable the **People API** in the GCP project, and add the scope on the OAuth consent screen. It is a Google
 "sensitive" scope, so users see an "unverified app" warning until Google verifies the app. The token is used
 once in `/auth/callback?import=google` to list connections and is not stored.
+
+Note: Supabase's SSR cookie keeps the session's `provider_token` for the life of the session, so the
+Google/Facebook token also sits in the user's own auth cookie. The import code never persists it elsewhere.

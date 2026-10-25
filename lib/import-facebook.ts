@@ -54,7 +54,19 @@ const decodeEntities = (s: string) =>
 // HTML variant (your_friends.html): each friend is a heading whose text is the
 // name, e.g. <h2 class="_a6-h _a6-i">Name</h2>.
 export function parseFacebookHtml(text: string): ParseResult {
-  const names = [...text.matchAll(/<h2[^>]*>([^<]{1,200})<\/h2>/gi)].map((m) => decodeEntities(m[1]));
+  // Linear scan (no backtracking regex): hostile files full of unclosed tags stay fast.
+  const names: string[] = [];
+  const lower = text.toLowerCase();
+  let at = lower.indexOf('<h2');
+  while (at >= 0 && names.length < MAX_ROWS) {
+    const open = lower.indexOf('>', at);
+    if (open < 0) break;
+    const close = lower.indexOf('</h2>', open);
+    if (close < 0) break;
+    const inner = text.slice(open + 1, close);
+    if (inner.length >= 1 && inner.length <= 200 && !inner.includes('<') && open - at <= 300) names.push(decodeEntities(inner));
+    at = lower.indexOf('<h2', close);
+  }
   if (!names.length) throw new Error('No friends found in this HTML file. Use your_friends.json if you can.');
   return toRows(names);
 }

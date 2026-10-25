@@ -2,6 +2,7 @@ import { blankRow, clean, cleanEmail, MAX_ROWS, normPhone, type ImportRow, type 
 
 // Properties whose payload is a (huge, base64) blob. Skipped line by line, so the
 // photo never lands in a string we keep.
+const MAX_PROP = 65_536; // longest logical property line we keep (the rest is dropped)
 const BLOBS = new Set(['PHOTO', 'LOGO', 'SOUND', 'KEY']);
 
 const bytesOf = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0) & 0xff);
@@ -75,14 +76,28 @@ export function parseVcard(text: string): ParseResult {
     const head = sep < 0 ? line : line.slice(0, sep);
     const name = head.slice(head.lastIndexOf('.') + 1).toUpperCase();
     const blob = BLOBS.has(name);
-    // Unfold: continuation lines start with a space or tab. Blob lines are dropped unread.
-    while (i + 1 < lines.length && /^[ \t]/.test(lines[i + 1])) {
-      i++;
-      if (!blob) line += lines[i].slice(1);
+    const pieces = [line];
+    let size = line.length;
+    if (!blob && line.endsWith('=') && /ENCODING=QUOTED-PRINTABLE/i.test(line)) {
+      // Quoted-printable soft break: a trailing "=" continues verbatim on the next physical line.
+      // Joined once, with a size cap, so hostile input stays linear.
+      pieces[0] = line.slice(0, -1);
+      while (size < MAX_PROP && i + 1 < lines.length) {
+        const next = lines[++i];
+        const soft = next.endsWith('=');
+        pieces.push(soft ? next.slice(0, -1) : next);
+        size += next.length;
+        if (!soft) break;
+      }
+    } else {
+      // Unfold: continuation lines start with a space or tab. Blob lines are dropped unread.
+      while (i + 1 < lines.length && /^[ \t]/.test(lines[i + 1])) {
+        i++;
+        if (!blob && size < MAX_PROP) { pieces.push(lines[i].slice(1)); size += lines[i].length; }
+      }
     }
     if (blob) continue;
-    // Quoted-printable soft break: a trailing "=" continues on the next physical line.
-    while (/=$/.test(line) && /ENCODING=QUOTED-PRINTABLE/i.test(line) && i + 1 < lines.length) line = line.slice(0, -1) + lines[++i];
+    line = pieces.join('');
 
     const upper = line.trim().toUpperCase();
     if (upper === 'BEGIN:VCARD') props = [];

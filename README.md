@@ -255,12 +255,11 @@ normalised name and left unticked), pick a category, confirm.
 | Source | How the user gets the data |
 |---|---|
 | LinkedIn | Settings -> Data privacy -> Get a copy of your data -> Connections (`Connections.csv`) |
-| Facebook | Download your information -> Friends and followers, JSON (`connections/friends/your_friends.json`; HTML also works). Signing in with Facebook also stages friends who use the app (Graph API `/me/friends`) |
+| Facebook | Download your information -> Friends and followers, JSON (`connections/friends/your_friends.json`; HTML also works). The **Import Facebook friends** button also stages friends who use the app (Graph API `/me/friends`, `user_friends` requested only then) |
 | iPhone / vCard | iCloud.com -> Contacts -> select all -> Export vCard, or share contacts from the Contacts app (`.vcf`, 3.0 and 4.0) |
 | Google | contacts.google.com -> Export (Google CSV or vCard), or the **Import from Google Contacts** button (People API, read-only scope requested only for that button) |
 | Android | **Pick from this phone** (Contact Picker API, Chrome on Android only) |
 
-Config: `NEXT_PUBLIC_FACEBOOK_FRIENDS=0` stops the Facebook button asking for `user_friends` (set it if Meta
-rejects the scope for your app). Provider tokens are used once at the OAuth callback and never stored; only the
+Provider tokens are used once at the OAuth callback and never stored; only the
 fetched names are parked in `contact_import_stage`. Migration: `20261025090000_contact_sources.sql`.
 Parsers/dedupe: `lib/import*.ts`; fixtures: `fixtures/import/`.
