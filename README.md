@@ -52,6 +52,12 @@ OAuth client, server-side encryption key, and reviewed database migration. See
 scopes, redirects, retention/cleanup, revocation limitations and mock-test coverage.
 Adding the code does not connect a real Google account.
 
+API-generated meetup invitation text includes Bengaluru date/time with an explicit
+`IST (Asia/Kolkata)` label, independent of the server timezone. Stored meetup
+instants are unchanged; meetup screens continue to display device-local time.
+Unscheduled meetups do not invent a date. A separately generated voice-plan
+share message is not reformatted by this API fallback.
+
 ## Private API (signed-in user, scoped by RLS)
 
 | Method | Path | Body / query | Notes |

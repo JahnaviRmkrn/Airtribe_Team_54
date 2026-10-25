@@ -32,7 +32,12 @@ export const POST = handle(async (req: Request) => {
     .single();
   dbError(error);
   const room_url = roomUrl(req, data.room_token);
-  const when = data.starts_at ? ` on ${new Date(data.starts_at).toDateString()}` : '';
+  // Shared invitation text cannot infer the recipient's device timezone.
+  // Label Bengaluru's zone explicitly; stored instants and device-local UI stay unchanged.
+  const when = data.starts_at ? ` on ${new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).format(new Date(data.starts_at))} IST (Asia/Kolkata)` : '';
   return ok(
     {
       meetup: { ...data, room_url },
