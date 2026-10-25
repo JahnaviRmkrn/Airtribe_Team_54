@@ -64,6 +64,10 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: android-actions/setup-android@v3
+        with:
+          # The action's default package set includes the removed legacy
+          # 'tools' package; name only what the build needs.
+          packages: platform-tools platforms;android-35 build-tools;35.0.0
       - run: npm ci
       - name: Point Gradle at the CI Android SDK
         run: echo "sdk.dir=$ANDROID_HOME" > android/local.properties
