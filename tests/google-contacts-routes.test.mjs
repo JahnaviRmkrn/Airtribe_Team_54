@@ -42,7 +42,7 @@ vi.mock('../lib/supabase/admin', () => ({ adminClient: () => ({
   rpc: async (name, args) => {
     mock.operations.push(name);
     if (name === 'hit_rate_limit') return { data: mock.rateAllowed, error: null };
-    if (name === 'google_connector_session_ready') return { data: !mock.schemaMissing && !mock.replacementMissing, error: null };
+    if (name === 'google_connector_purpose_ready') return { data: !mock.schemaMissing && !mock.replacementMissing, error: null };
     if (name === 'replace_google_connector_session') {
       if (mock.schemaMissing || mock.replacementMissing) return { data: null, error: { message: 'Missing connector replacement function' } };
       const existing = mock.rows.find((row) => row.user_id === args.p_owner && row.purpose === args.p_purpose);

@@ -49,13 +49,19 @@ connector settings are deliberately not added to the existing Vault bootstrap.
    or `http://127.0.0.1:PORT` only outside production. Do not use real data for
    development. No `NEXT_PUBLIC_` Google credential variables are supported.
 4. Review and apply `20261025110000_google_contact_import.sql` and the additive
-   `20261025114000_google_session_replacement.sql` through the normal
+   `20261025114000_google_session_replacement.sql`, then
+   `20261025121500_google_purpose_readiness.sql`, in that order before releasing
+   this application version, through the normal
    authorized database-change process. It creates an RLS-protected service-only
    session table and service-only import/preview/cleanup RPCs. The ordinary
    signed-in user and anonymous roles cannot access them directly. The second
    migration is required by every shared connector purpose (Contacts, Sheets,
    Gmail and Calendar): missing RPC/column schema fails closed, not back to an
-   unsafe upsert.
+   unsafe upsert. The final migration adds only a read-only purpose probe.
+   Contacts additionally requires its duplicate-preview, matching and import
+   routines, contact fields and rate-limit infrastructure; installing only the
+   session table/replacement guard is insufficient. Neither this probe nor
+   Contacts requires the optional Gmail/Calendar action migration.
 5. Schedule `select public.cleanup_google_connector_sessions();` at least every
    15 minutes using the deployment's supported privileged scheduler. This
    migration does **not** install cron or create a schedule. Expired rows are
@@ -133,9 +139,16 @@ entries do not enable them or imply approval to send messages/create events.
   owner/purpose replacement RPC. An active lease or unexpired protected action
   blocks replacement regardless of cookies, including a different browser.
   Check the prior result and explicitly disconnect before reconnecting.
-- `googleConnectorSchemaReady()` calls the read-only service-role readiness RPC.
-  Status routes must check it before reporting configuration ready. It verifies
-  the replacement function and protection column, without creating a session.
+- `googleConnectorSchemaReady(purpose)` calls the read-only service-role
+  `google_connector_purpose_ready(p_purpose)` RPC. Status, start/connect, and
+  callback exchange check the exact purpose before advertising readiness or
+  issuing consent/session state. The probe verifies that purpose's required
+  tables/columns, RLS, routine access and action trigger, without invoking them
+  or reading Vault. Probes have a 1.5-second deadline and are not retried.
+  Callbacks authenticate before probing. Unknown purposes and
+  unavailable/denied/failed probes fail closed; an error does not prove schema is absent. No fallback to the old
+  replacement-only probe is allowed. Existing action outcomes are not reset
+  or retried. Manual contact creation remains available.
   Upgrade backfill conservatively protects all already-live ciphertext because
   a migration cannot inspect its encrypted action state.
 - `googleAccessToken(session)` is a server-only expiry check after acquiring the

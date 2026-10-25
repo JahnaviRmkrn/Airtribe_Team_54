@@ -55,7 +55,7 @@ beforeEach(() => {
   const persist = async (config: GoogleConfig, session: Session<SheetsPayload>) => { stored.set(config.purpose, structuredClone(session)); };
   mocks.save.mockImplementation(persist); mocks.checkpoint.mockImplementation(persist);
   mocks.remove.mockImplementation(async (config: GoogleConfig) => { stored.delete(config.purpose); });
-  mocks.rpc.mockImplementation(async (name: string) => ({ data: name === 'google_connector_session_ready' ? true : name === 'preview_google_contact_duplicates' ? [] : { added: 1, skipped: 0 }, error: null }));
+  mocks.rpc.mockImplementation(async (name: string) => ({ data: name === 'google_connector_purpose_ready' ? true : name === 'preview_google_contact_duplicates' ? [] : { added: 1, skipped: 0 }, error: null }));
   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('No network: configure a synthetic mock'); }));
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
@@ -65,7 +65,7 @@ describe('Sheets session and consent isolation', () => {
     vi.stubEnv('GOOGLE_SHEETS_CLIENT_SECRET', '');
     const result = await (await sheetsStatus('export')(request())).json();
     expect(result.configured).toBe(false); expect(result.session.connected).toBe(false);
-    expect(selectedColumns).toBe('id,name,email,category');
+    expect(selectedColumns).toBe(''); expect(mocks.from).not.toHaveBeenCalled();
     expect(JSON.stringify(result)).not.toContain('private secret');
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -79,7 +79,7 @@ describe('Sheets session and consent isolation', () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { message: 'Missing readiness RPC' } });
     const result = await (await sheetsStatus('export')(request())).json();
     expect(result.configured).toBe(false); expect(result.session.connected).toBe(false);
-    expect(mocks.acquire).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.acquire).not.toHaveBeenCalled(); expect(mocks.from).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
   });
   it.each([['import', 'spreadsheets.readonly'], ['export', 'drive.file']] as const)('requests only %s scope and creates no Google file', async (mode, scope) => {
     const result = await (await sheetsConnect(mode)(request({}))).json();
@@ -113,7 +113,8 @@ describe('Sheets session and consent isolation', () => {
     expect(mocks.consume).not.toHaveBeenCalled();
     response = await sheetsCallback('import')(new Request(`${origin}/callback?state=${'a'.repeat(43)}&error=access_denied`));
     expect(response.headers.get('location')).toContain('google=cancelled');
-    expect(mocks.discard).toHaveBeenCalledOnce(); expect(fetch).not.toHaveBeenCalled(); expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.discard).toHaveBeenCalledOnce(); expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.rpc.mock.calls).toEqual(Array(2).fill(['google_connector_purpose_ready', { p_purpose: 'sheets-import' }]));
   });
   it('verifies destination account using drive.file without listing files or adding scopes', async () => {
     payload().phase = 'oauth'; payload().state = 'a'.repeat(43); payload().verifier = 'verifier';
@@ -123,7 +124,8 @@ describe('Sheets session and consent isolation', () => {
     expect(response.headers.get('location')).toContain('google=sheets-export');
     expect(payload().destinationEmail).toBe('verified@example.test');
     expect(vi.mocked(fetch).mock.calls[1][0]).toBe('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)');
-    expect(mocks.consume).toHaveBeenCalledOnce(); expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.consume).toHaveBeenCalledOnce();
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith('google_connector_purpose_ready', { p_purpose: 'sheets-export' });
   });
   it('preserves a newer ready preview when an old or replayed callback arrives', async () => {
     const previewId = await prepareExport();
