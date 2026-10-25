@@ -10,25 +10,29 @@ const deferred = () => { let resolve, reject; const promise = new Promise((a, b)
 // DOM-shaped fixture, not a browser: exercise the shipped handlers without
 // actual HTTP, Google accounts, external navigation or application boot.
 function harness(api, purpose = 'gmail') {
-  let current = true; const nodes = new Map();
+  let current = true; const nodes = new Map(), focus = [];
+  const document = { body: {}, getElementById: (id) => nodes.get(id) || null };
+  document.activeElement = document.body;
   const make = () => ({ value: '', textContent: '', disabled: false, querySelectorAll: () => [...nodes.values()].filter((n) => n.control) });
   const app = make(); let html = '';
+  app.contains = (node) => [...nodes.values()].includes(node);
   Object.defineProperty(app, 'innerHTML', { get: () => html, set(value) {
+    if (app.contains(document.activeElement)) document.activeElement = document.body;
     html = value; nodes.clear(); nodes.set('app', app);
     for (const match of value.matchAll(/<(\w+)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
       const node = make(); node.disabled = /\bdisabled(?:[=\s]|$)/.test(match[2]); node.control = ['input', 'select', 'textarea', 'button'].includes(match[1]);
       node.value = match[2].match(/\bvalue="([^"]*)"/)?.[1] || '';
       if (match[1] === 'textarea') node.value = value.slice(match.index + match[0].length).split('</textarea>')[0];
+      node.focus = () => { document.activeElement = node; focus.push(match[3]); };
       nodes.set(match[3], node);
     }
   } });
   nodes.set('app', app);
-  const document = { getElementById: (id) => nodes.get(id) || null };
   const location = { assign: vi.fn() };
   const window = {};
   vm.runInNewContext(source, { window, document, location, URL, Intl });
   const render = () => window.GoogleActions.render(purpose, { api, esc: escape, isCurrent: () => current });
-  return { render, app, node: (id) => nodes.get(id), leave: () => { current = false; }, location };
+  return { render, app, document, focus, node: (id) => nodes.get(id), leave: () => { current = false; }, location };
 }
 async function composing(api) {
   const h = harness(api); await h.render(); await h.node('ga-compose').onclick();
@@ -43,6 +47,8 @@ describe('shipped explicit Google action UI', () => {
     const saved = { ...action(), preview: { kind: 'calendar', title: 'Meetup', localStart: '2026-11-01T10:00', endLocal: '2026-11-01T11:00', timeZone: 'UTC', durationMinutes: 60, start: '2026-11-01T10:00:00Z', end: '2026-11-01T11:00:00Z', attendees: [] } };
     const api = vi.fn(async (_url, options) => options ? { action: saved } : { enabled: true, connected: true, actions: [saved] });
     const h = harness(api, 'calendar'); await h.render(); await h.node('ga-history-0').onclick();
+    expect(h.app.innerHTML).toContain('Create a Google Calendar event: Review saved preview</h1>');
+    expect(h.document.activeElement).toBe(h.node('ga-step-heading'));
     await h.node('ga-confirm').onclick({ isTrusted: false });
     expect(api.mock.calls.filter(([, o]) => o)).toHaveLength(0);
     expect(h.node('ga-error').textContent).toMatch(/yourself|manual/i);
@@ -93,11 +99,13 @@ describe('shipped explicit Google action UI', () => {
     expect(button.disabled).toBe(true); const confirmations = api.mock.calls.filter(([, o]) => o && JSON.parse(o.body).operation === 'confirm');
     expect(confirmations).toHaveLength(1); expect(JSON.parse(confirmations[0][1].body)).toEqual({ operation: 'confirm', id: action().id, previewHash: action().previewHash, confirmed: true, senderAcknowledged: true });
     wait.resolve({ action: action('completed') }); await Promise.all([first, second]); expect(h.app.innerHTML).toContain('Google accepted this email');
+    expect(h.document.activeElement).toBe(h.node('ga-step-heading')); expect(h.focus).not.toContain('ga-confirm');
   });
   it('a lost confirm response removes resend controls and offers status checking only', async () => {
     const api = readyApi((body) => { if (body.operation === 'confirm') throw new Error('Lost response'); return { action: action() }; });
     const h = await composing(api); await submit(h); h.node('ga-sender-check').checked = true; h.node('ga-sender-check').onchange(); await h.node('ga-confirm').onclick(humanClick);
     expect(h.app.innerHTML).toContain('The outcome is unknown'); expect(h.node('ga-confirm')).toBeUndefined(); expect(h.node('ga-check')).toBeDefined(); expect(h.node('ga-reconcile')).toBeUndefined();
+    expect(h.document.activeElement).toBe(h.node('ga-step-heading')); expect(h.focus).not.toContain('ga-confirm');
   });
   it('ignores delayed preview success after navigation and performs no confirm', async () => {
     const wait = deferred(); const api = readyApi(() => wait.promise);
@@ -122,5 +130,73 @@ describe('shipped explicit Google action UI', () => {
     const api = readyApi(() => ({ authorizationUrl: 'https://evil.test/steal' }));
     const h = harness(api); await h.render(); await h.node('ga-connect').onclick(humanClick);
     expect(h.location.assign).not.toHaveBeenCalled(); expect(h.node('ga-error').textContent).toContain('Unexpected Google connection destination');
+  });
+});
+
+
+describe('Google action deliberate-step focus', () => {
+  it('focuses a labelled non-tab-stop heading for compose, preview, edit and cancellation, never Confirm', async () => {
+    const api = readyApi((body) => ({ action: action(body.operation === 'cancel' ? 'cancelled' : 'preview') }));
+    const h = await composing(api);
+    expect(h.app.innerHTML).toContain('<h1 id="ga-step-heading" tabindex="-1">Send with Gmail: Compose draft</h1>');
+    expect(h.document.activeElement).toBe(h.node('ga-step-heading'));
+    await submit(h); expect(h.app.innerHTML).toContain('Send with Gmail: Review saved preview</h1>');
+    expect(h.document.activeElement).toBe(h.node('ga-step-heading')); expect(h.node('ga-confirm').disabled).toBe(true);
+    await h.node('ga-edit').onclick(); expect(h.app.innerHTML).toContain('Send with Gmail: Compose draft</h1>');
+    await submit(h); await h.node('ga-cancel').onclick();
+    expect(h.app.innerHTML).toContain('Send with Gmail: Saved action status</h1>');
+    expect(h.focus.every((id) => id === 'ga-step-heading')).toBe(true);
+  });
+  it('does not focus a loading frame or steal focus on initial deferred status', async () => {
+    const wait = deferred(), h = harness(() => wait.promise);
+    const pending = h.render(); expect(h.focus).toEqual([]);
+    const elsewhere = {}; h.document.activeElement = elsewhere;
+    wait.resolve({ enabled: true, connected: true, actions: [] }); await pending;
+    expect(h.focus).toEqual([]); expect(h.document.activeElement).toBe(elsewhere);
+  });
+  it.each(['success', 'failure'])('does not steal focus after navigation while preview %s is pending', async (outcome) => {
+    const wait = deferred(), h = await composing(readyApi(() => wait.promise));
+    h.node('ga-preview').focus(); const before = [...h.focus], pending = submit(h);
+    expect(h.focus).toEqual(before);
+    h.leave(); h.app.innerHTML = '<p>Another page</p>';
+    if (outcome === 'failure') wait.reject(new Error('Old error')); else wait.resolve({ action: action() });
+    await pending; expect(h.focus).toEqual(before); expect(h.app.innerHTML).toBe('<p>Another page</p>');
+  });
+  it('focuses the preview heading only after the pending request completes with retained focus intent', async () => {
+    const wait = deferred(), h = await composing(readyApi(() => wait.promise));
+    h.node('ga-preview').focus(); const before = h.focus.length, pending = submit(h);
+    expect(h.focus).toHaveLength(before); expect(h.node('ga-preview').disabled).toBe(true);
+    // Native disabling may move focus to body. It is not a new focus destination.
+    h.document.activeElement = h.document.body;
+    wait.resolve({ action: action() }); await pending;
+    expect(h.focus.slice(before)).toEqual(['ga-step-heading']); expect(h.document.activeElement).toBe(h.node('ga-step-heading'));
+  });
+  it('does not steal focus when the user leaves the pending form without navigating', async () => {
+    const wait = deferred(), h = await composing(readyApi(() => wait.promise));
+    h.node('ga-preview').focus(); const before = h.focus.length, pending = submit(h);
+    const elsewhere = {}; h.document.activeElement = elsewhere;
+    wait.resolve({ action: action() }); await pending;
+    expect(h.focus).toHaveLength(before); expect(h.document.activeElement).toBe(elsewhere);
+  });
+  it('does not refocus a delayed saved-status result after focus moved to another live control', async () => {
+    const wait = deferred();
+    const api = vi.fn(async (url) => url.includes('?id=') ? wait.promise : { enabled: true, connected: true, actions: [action('completed')] });
+    const h = harness(api); await h.render(); h.node('ga-history-0').focus(); await h.node('ga-history-0').onclick();
+    h.node('ga-check').focus(); const pending = h.node('ga-check').onclick(); h.node('ga-home').focus(); const before = h.focus.length;
+    wait.resolve({ action: action('completed') }); await pending;
+    expect(h.focus).toHaveLength(before);
+  });
+  it('restores the connection heading after deliberate Back, never a consequential button', async () => {
+    const h = await composing(readyApi(() => ({ action: action() })));
+    h.node('ga-abandon').focus(); await h.node('ga-abandon').onclick();
+    expect(h.app.innerHTML).toContain('Send with Gmail: Connection and saved actions</h1>');
+    expect(h.document.activeElement).toBe(h.node('ga-step-heading'));
+  });
+  it('drops old frame focus after a newer render generation takes ownership', async () => {
+    const wait = deferred(); let requests = 0;
+    const h = harness(() => ++requests === 1 ? wait.promise : Promise.resolve({ enabled: false, message: 'New view', actions: [] }));
+    const old = h.render(); await h.render(); const before = [...h.focus];
+    wait.resolve({ enabled: true, connected: true, actions: [] }); await old;
+    expect(h.app.innerHTML).toContain('New view'); expect(h.focus).toEqual(before);
   });
 });

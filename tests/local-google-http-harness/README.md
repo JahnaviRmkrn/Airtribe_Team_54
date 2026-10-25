@@ -153,3 +153,53 @@ readiness or deployment behavior. The React Sheets component is mounted, not
 Next-hydrated. Other organizer writes, payments, voice, assistant, live auth and
 unrelated endpoints are deliberately unavailable. No live integration or product
 readiness claim should be based on this fixture alone.
+
+
+## Native keyboard focus acceptance (separate from VM/HTTP proof)
+
+Use only the coordinated synthetic fixture above; these steps do not authorize
+live Google consent, messages, events or external links. No native browser
+execution is implied by passing the actual-source VM focus tests.
+
+1. Choose Alice and install a synthetic Gmail connection in controls. Open the
+   Gmail screen. Tab to **Compose new draft**, activate with Enter or Space,
+   and verify focus is on the heading **Send with Gmail: Compose draft**, not
+   body or a removed button. The heading has `tabindex="-1"`: it is a deliberate
+   transition target, not an extra sequential tab stop. Tab proceeds into the
+   form. Repeat the activation using the other native key where appropriate.
+2. Fill only the fixed synthetic sender/recipient and synthetic text. Activate
+   **Review exact email**. While pending, controls stay disabled and no heading
+   jump happens. When settled, focus lands on **Review saved preview**, never
+   **Confirm and send email**. The sender acknowledgment and fresh native
+   confirmation remain mandatory. Back to edit returns focus to **Compose
+   draft**; Cancel preview focuses **Saved action status**; Back to Gmail
+   focuses **Connection and saved actions** after status settles.
+3. In this synthetic fixture only, use acknowledgment plus native confirmation.
+   Completed and lost-response/uncertain frames focus **Saved action status**,
+   not any consequential control. The uncertain view must have no resend
+   button. Checking saved status must never resend. Record the fixture counters.
+4. Repeat compose/review/back/cancel/status with the synthetic Calendar
+   connection. Headings begin **Create a Google Calendar event:**. Focus must
+   never jump to **Confirm and create event**. Any synthetic unknown outcome
+   offers the same explicit read-only reconciliation as before, not a retry.
+5. For deferred responses, use only available native network throttling or a
+   prearranged bounded local delay. Move focus to a persistent navigation item
+   outside the pending form before completion: it must not be stolen back to
+   the heading. Navigate away before settlement and verify the new screen and
+   focus remain unchanged. Also start a newer Google render before the older
+   status settles; the older response must not replace or refocus the new view.
+   Inline errors retain their alert behavior. A failed request that does not
+   transition frames may leave focus on body after native disabling; this patch
+   does not fix that pre-existing error-focus gap. It does not auto-focus a
+   consequential button or claim complete screen-reader/browser coverage.
+6. For contact names, stop this Google fixture and use the separately
+   coordinated local-organizer fixture (`tests/local-organizer-harness/README.md`,
+   port4319), whose normal contact creation route accepts synthetic entries.
+   Create multiple synthetic contacts, including names containing `&`, quotes
+   and angle brackets. Visible buttons still say **Open**. Inspect
+   native accessibility names (or screen-reader button list): each says
+   **Open contact: [that contact's name]**, with characters as text, not markup.
+   Activate a selected button and verify the corresponding contact opens.
+7. Record browser, input method, heading/focus observations and unresolved
+   limitations. Stop the local fixture through controls; do not share/send
+   anything outside it.

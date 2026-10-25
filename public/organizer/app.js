@@ -1047,7 +1047,7 @@ function contactRow(c) {
         ${(c.interests || []).length ? `<div class="interest-pills">${c.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}</div>` : ''}
         <div class="muted">${when}</div>
       </div>
-      <div class="actions"><button data-view="${esc(c.id)}">Open</button></div>
+      <div class="actions"><button data-view="${esc(c.id)}" aria-label="${esc('Open contact: ' + (c.name || 'Unnamed contact'))}">Open</button></div>
     </div>`;
 }
 
