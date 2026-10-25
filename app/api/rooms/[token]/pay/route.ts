@@ -26,7 +26,31 @@ type Attempt = {
   created_at: string;
 };
 
-const cols = 'id, amount_paise, pine_order_id, redirect_url, merchant_order_reference, status, updated_at';
+const legacyCols = 'id, amount_paise, pine_order_id, redirect_url, status, updated_at';
+const cols = `${legacyCols}, merchant_order_reference`;
+const setupMessage = 'Checkout is unavailable until the operator completes the payment safety upgrade. Do not start another payment; you can still check an existing payment status.';
+const unavailableMessage = 'Payment status is temporarily unavailable. Check status before paying; do not start another payment.';
+class PaymentSetupError extends HttpError {
+  constructor() { super(503, setupMessage); }
+}
+// Only documented missing-object codes establish setup-needed. A timeout, empty
+// acknowledgement or unknown error is NOT evidence that a migration is absent.
+const missingSchema = (error: { code?: string } | null) =>
+  !!error && ['42P01', '42703', 'PGRST204', 'PGRST205'].includes(error.code ?? '');
+async function paymentSchemaReady() {
+  try {
+    const { data, error } = await adminClient().rpc('payment_checkout_ready');
+    if (error && ['42883', 'PGRST202'].includes(error.code ?? '')) return false;
+    if (missingSchema(error)) return false;
+    if (error || typeof data !== 'boolean') throw new HttpError(503, unavailableMessage);
+    return data;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(503, unavailableMessage);
+  }
+}
+const readyResponse = (payment: ReturnType<typeof view> | null, status = 200) =>
+  ok({ payment, checkout_availability: 'ready' }, status);
 // This changes the message only. An elapsed timer NEVER releases a claim.
 const CREATION_NOTICE_MS = 2 * 60_000;
 const reconcileMessage = 'Payment creation could not be confirmed. Do not pay again. Check payment status or ask the organiser to reconcile it.';
@@ -47,12 +71,26 @@ async function setup(req: Request, token: string) {
   return { room, me };
 }
 
-async function findPayment(room: MeetupRow, attendeeId: string) {
+async function findPayment(room: MeetupRow, attendeeId: string, legacy = false) {
   const { data, error } = await adminClient()
-    .from('meetup_payments').select(cols)
+    .from('meetup_payments').select(legacy ? legacyCols : cols)
     .eq('meetup_id', room.id).eq('attendee_id', attendeeId).maybeSingle();
-  if (error) throw new HttpError(503, 'Could not load payment, please check status again');
+  if (missingSchema(error)) throw new PaymentSetupError();
+  if (error) throw new HttpError(503, unavailableMessage);
   return data as PaymentRow | null;
+}
+
+// Compatibility is deliberately READ ONLY. No receipt recovery, status save,
+// legacy claim, checkout URL or automatic retry is permitted without the guard.
+async function readOnlyStatus(room: MeetupRow, attendeeId: string) {
+  const p = await findPayment(room, attendeeId, true);
+  const status = p?.status === 'pending' && p.pine_order_id
+    ? await getOrderStatus(p.pine_order_id) : p?.status;
+  return ok({
+    payment: p ? { ...view(p), status, redirect_url: null } : null,
+    checkout_availability: 'setup_required',
+    message: setupMessage,
+  });
 }
 
 // Bounded, idempotent DB-only recovery. A lost write acknowledgement may mean
@@ -105,6 +143,7 @@ async function recover(p: PaymentRow): Promise<PaymentRow> {
     .select('state, pine_order_id, redirect_url, created_at')
     .eq('merchant_order_reference', p.merchant_order_reference).eq('payment_id', p.id)
     .eq('amount_paise', p.amount_paise).maybeSingle();
+  if (missingSchema(error)) throw new PaymentSetupError();
   if (error) throw new HttpError(503, reconcileMessage);
   const receipt = data as Attempt | null;
   if (p.status === 'pending' && receipt?.state === 'received' && receipt.pine_order_id && receipt.redirect_url) {
@@ -134,14 +173,21 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
   const { token } = await params;
   await limitRoom(req, 'pay', token);
   const { room, me } = await setup(req, token);
-  const p = await findPayment(room, me.id);
-  return ok({ payment: p ? view(await refresh(p)) : null });
+  if (!await paymentSchemaReady()) return readOnlyStatus(room, me.id);
+  try {
+    const p = await findPayment(room, me.id);
+    return readyResponse(p ? view(await refresh(p)) : null);
+  } catch (error) {
+    if (error instanceof PaymentSetupError) return readOnlyStatus(room, me.id);
+    throw error;
+  }
 });
 
 export const POST = handle(async (req: Request, { params }: Ctx) => {
   const { token } = await params;
   await limitRoom(req, 'pay', token);
   const { room, me } = await setup(req, token);
+  if (!await paymentSchemaReady()) throw new PaymentSetupError();
   requireOpen(room);
   if (!room.final_venue_id) throw new HttpError(409, 'The organiser has not confirmed a venue yet');
 
@@ -154,13 +200,13 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
   let row = await findPayment(room, me.id);
   if (row) {
     row = await refresh(row);
-    if (row.status === 'paid') return ok({ payment: view(row) });
+    if (row.status === 'paid') return readyResponse(view(row));
     if (!row.pine_order_id) {
       throw new HttpError(409, row.checkout_state === 'creating'
         ? 'Payment is being created. Check payment status; do not start another checkout.' : reconcileMessage);
     }
     if (row.status === 'pending') {
-      if (row.amount_paise === amount) return ok({ payment: view(row) });
+      if (row.amount_paise === amount) return readyResponse(view(row));
       throw new HttpError(409, 'The venue price changed. Ask the organiser to reconcile the existing payment before retrying.');
     }
   }
@@ -172,6 +218,7 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
     const { data, error } = await db.from('meetup_payments')
       .update({ status: 'pending', amount_paise: amount, pine_order_id: null, redirect_url: null, merchant_order_reference: merchantRef })
       .eq('id', row.id).eq('updated_at', row.updated_at).eq('status', row.status).select(cols).maybeSingle();
+    if (missingSchema(error)) throw new PaymentSetupError();
     if (error) throw new HttpError(503, reconcileMessage);
     if (!data) throw new HttpError(409, 'Payment changed. Check payment status before continuing.');
     row = data as PaymentRow;
@@ -180,6 +227,7 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
       .insert({ meetup_id: room.id, attendee_id: me.id, amount_paise: amount, status: 'pending', merchant_order_reference: merchantRef })
       .select(cols).single();
     if (error?.code === '23505') throw new HttpError(409, 'Payment is already being created. Check payment status.');
+    if (missingSchema(error)) throw new PaymentSetupError();
     if (error || !data) throw new HttpError(503, reconcileMessage);
     row = data as PaymentRow;
   }
@@ -187,6 +235,7 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
   const { error: receiptError } = await db.from('meetup_payment_attempts').insert({
     merchant_order_reference: merchantRef, payment_id: row.id, amount_paise: amount,
   });
+  if (missingSchema(receiptError)) throw new PaymentSetupError();
   if (receiptError) throw new HttpError(503, reconcileMessage);
 
   const { data: guest } = await db.from('meetup_attendees').select('guest_name').eq('id', me.id).single();
@@ -213,5 +262,5 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
   if (await saveReceipt(row, order) === false) throw new HttpError(503, reconcileMessage);
   const saved = await saveOrder(row, order);
   if (!saved) throw new HttpError(503, reconcileMessage);
-  return ok({ payment: view(saved) }, 201);
+  return readyResponse(view(saved), 201);
 });

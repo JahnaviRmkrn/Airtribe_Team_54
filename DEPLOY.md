@@ -112,3 +112,9 @@ node scripts/smoke.mjs https://<app>
 
 If sign-up is rejected for `example.com`, set `SMOKE_EMAIL_DOMAIN` to a domain you own.
 Then open `https://<app>/login`, sign in, and check `/organizer/`.
+
+## Payment safety rollout
+
+Before enabling checkout, an authorized operator must follow the
+[payment safety upgrade checklist](docs/payment-safety-rollout.md). Published
+code is not proof that the required database migrations are installed.

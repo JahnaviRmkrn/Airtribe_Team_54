@@ -6,6 +6,7 @@ const deps = vi.hoisted(() => ({
   createOrder: vi.fn(),
   cancelOrder: vi.fn(),
   getOrderStatus: vi.fn(),
+  readiness: vi.fn(),
 }));
 vi.mock('@/lib/supabase/server', () => ({ userClient: vi.fn() }));
 vi.mock('@/lib/supabase/admin', () => ({ adminClient: () => deps.db }));
@@ -37,14 +38,17 @@ let version;
 let venuePrice;
 let receipts;
 let faults;
+let missingReference;
+let missingReceipts;
+let writes;
 // In-memory query builder implements compare-and-swap filters, not real DB calls.
 function database() {
-  return { from(table) {
+  return { rpc: deps.readiness, from(table) {
     let operation = 'read';
-    let values;
+    let values, columns;
     const filters = [];
     const query = {
-      select() { return query; },
+      select(value) { columns = value; return query; },
       eq(key, value) { filters.push([key, value]); return query; },
       is(key, value) { filters.push([key, value]); return query; },
       update(data) { operation = 'update'; values = data; return query; },
@@ -55,6 +59,10 @@ function database() {
         const run = () => {
           if (table === 'venues') return { data: { price_per_person: venuePrice }, error: null };
           if (table === 'meetup_attendees') return { data: { guest_name: 'Guest' }, error: null };
+          if (operation !== 'read') writes.push({ table, operation });
+          if ((missingReference && columns?.includes('merchant_order_reference')) || (missingReceipts && table === 'meetup_payment_attempts')) {
+            return { data: null, error: { code: missingReference ? '42703' : '42P01', message: 'Synthetic missing private schema detail' } };
+          }
           const isReceipt = table === 'meetup_payment_attempts';
           const rows = isReceipt ? [...receipts.values()] : payment ? [payment] : [];
           const matches = (row) => !filters.some(([key, value]) => row[key] !== value);
@@ -105,6 +113,8 @@ beforeEach(() => {
   payment = null;
   receipts = new Map();
   faults = {};
+  missingReference = false; missingReceipts = false; writes = [];
+  deps.readiness.mockResolvedValue({ data: true, error: null });
   deps.guestId = 'guest';
   deps.db = database();
   deps.cancelOrder.mockResolvedValue(undefined);
@@ -277,7 +287,7 @@ describe('payment guest ownership', () => {
   it('returns only guest-safe payment fields, never merchant references or receipt details', async () => {
     deps.createOrder.mockResolvedValue(order('A'));
     const response = await post();
-    expect(await response.json()).toEqual({ payment: {
+    expect(await response.json()).toEqual({ checkout_availability: 'ready', payment: {
       status: 'pending', amount_paise: 50000, redirect_url: order('A').redirectUrl, checkout_state: 'ready',
     } });
   });
@@ -288,7 +298,109 @@ describe('payment guest ownership', () => {
     deps.guestId = 'other-guest';
     const response = await GET(new Request('https://example.test/api/rooms/token/pay'), { params: Promise.resolve({ token: 'token' }) });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ payment: null });
+    expect(await response.json()).toEqual({ payment: null, checkout_availability: 'ready' });
     expect(deps.getOrderStatus).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('payment schema rollout readiness', () => {
+  const oldPayment = (status = 'pending', id = 'legacy-order') => ({
+    id: 'payment', meetup_id: 'room', attendee_id: 'guest', status, amount_paise: 50000,
+    pine_order_id: id, redirect_url: id ? 'https://pay.example/legacy' : null,
+    updated_at: new Date(now).toISOString(),
+  });
+  it.each(['PGRST202', '42883'])('blocks creation before any write for a missing readiness RPC (%s)', async code => {
+    deps.readiness.mockResolvedValue({ data: null, error: { code, message: 'private schema details' } });
+    for (let i = 0; i < 2; i++) {
+      const response = await post();
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: expect.stringContaining('operator completes the payment safety upgrade') });
+    }
+    expect(writes).toEqual([]);
+    expect(deps.createOrder).not.toHaveBeenCalled();
+    expect(deps.getOrderStatus).not.toHaveBeenCalled();
+  });
+  it.each(['pending', 'paid'])('keeps legacy %s status available with no schema/provider writes or checkout links', async status => {
+    missingReference = true;
+    payment = oldPayment(status);
+    const original = { ...payment };
+    deps.readiness.mockResolvedValue({ data: false, error: null });
+    deps.getOrderStatus.mockResolvedValue('paid');
+    const response = await get();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      payment: { status: 'paid', amount_paise: 50000, redirect_url: null, checkout_state: 'ready' },
+      checkout_availability: 'setup_required', message: expect.stringContaining('operator completes'),
+    });
+    expect(payment).toEqual(original);
+    expect(writes).toEqual([]);
+    expect(deps.getOrderStatus).toHaveBeenCalledTimes(status === 'pending' ? 1 : 0);
+    expect(deps.createOrder).not.toHaveBeenCalled();
+  });
+  it('detects a missing reference column even after a stale successful probe and reads legacy status only', async () => {
+    missingReference = true;
+    payment = oldPayment();
+    const response = await get();
+    expect((await response.json()).checkout_availability).toBe('setup_required');
+    expect((await post()).status).toBe(503);
+    expect(writes).toEqual([]);
+    expect(deps.createOrder).not.toHaveBeenCalled();
+  });
+  it('keeps an old schema with no payment explicit and unavailable, without creating a claim', async () => {
+    missingReference = true;
+    deps.readiness.mockResolvedValue({ data: false, error: null });
+    const body = await (await get()).json();
+    expect(body.payment).toBeNull();
+    expect(body.checkout_availability).toBe('setup_required');
+    expect((await post()).status).toBe(503);
+    expect(writes).toEqual([]);
+  });
+  it('does not turn a legacy unknown outcome into permission for a new payment', async () => {
+    payment = oldPayment('failed', null);
+    deps.readiness.mockResolvedValue({ data: false, error: null });
+    const body = await (await get()).json();
+    expect(body.payment.checkout_state).toBe('reconciliation_required');
+    expect((await post()).status).toBe(503);
+    expect(writes).toEqual([]);
+    expect(deps.getOrderStatus).not.toHaveBeenCalled();
+    expect(deps.createOrder).not.toHaveBeenCalled();
+  });
+  it('stops before provider creation if the receipts table disappears after the probe', async () => {
+    missingReceipts = true;
+    expect((await post()).status).toBe(503);
+    expect(deps.createOrder).not.toHaveBeenCalled();
+    const body = await (await get()).json();
+    expect(body.checkout_availability).toBe('setup_required');
+    expect(body.payment.checkout_state).toBe('reconciliation_required');
+  });
+  it.each([
+    { data: null, error: { code: '08006', message: 'lost acknowledgement' } },
+    { data: null, error: null },
+    { data: null, error: { message: 'unknown schema failure' } },
+  ])('does not misclassify an inconclusive readiness result as setup-needed', async result => {
+    deps.readiness.mockResolvedValue(result);
+    for (const invoke of [get, post]) {
+      const response = await invoke();
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ error: expect.stringContaining('temporarily unavailable') });
+    }
+    expect(writes).toEqual([]);
+    expect(deps.createOrder).not.toHaveBeenCalled();
+  });
+  it('does not retry or misclassify a thrown readiness transport failure', async () => {
+    deps.readiness.mockRejectedValue(new Error('lost read acknowledgement'));
+    const body = await (await get()).json();
+    expect(body.error).toContain('temporarily unavailable');
+    expect(body.checkout_availability).toBeUndefined();
+    expect(deps.readiness).toHaveBeenCalledTimes(1);
+    expect(writes).toEqual([]);
+  });
+  it('does not misclassify a lost legacy status read as a confirmed setup result', async () => {
+    deps.readiness.mockResolvedValue({ data: false, error: null });
+    faults['meetup_payments:read'] = ['before-error'];
+    const response = await get();
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: expect.stringContaining('temporarily unavailable') });
   });
 });

@@ -100,7 +100,7 @@ describe('private data isolation with real PostgreSQL RLS', () => {
           values ($1, $2, 'synthetic-hash') returning id`, [tenants[name].meetup.id, `${name} guest`])).rows[0].id;
         await tx.query('insert into venue_votes (meetup_id, attendee_id, venue_id) values ($1, $2, $3)',
           [tenants[name].meetup.id, attendee, identities.venue]);
-        await tx.query('insert into meetup_payments (meetup_id, attendee_id, amount_paise) values ($1, $2, 50000)',
+        await tx.query('insert into meetup_payments (meetup_id, attendee_id, amount_paise, merchant_order_reference) values ($1, $2::uuid, 50000, ($2::uuid)::text)',
           [tenants[name].meetup.id, attendee]);
       });
     }
