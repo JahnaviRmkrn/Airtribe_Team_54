@@ -12,7 +12,7 @@ function organizer(overrides = {}) {
   const document = {
     getElementById(id) {
       if (!nodes.has(id)) nodes.set(id, { innerHTML: '', value: '', textContent: '', disabled: false,
-        addEventListener() {}, setAttribute() {}, removeAttribute() {},
+        addEventListener() {}, setAttribute() {}, removeAttribute() {}, focus() {},
         querySelectorAll() { return this.controls || []; }, classList: { add() {}, remove() {}, toggle() {} } });
       return nodes.get(id);
     },

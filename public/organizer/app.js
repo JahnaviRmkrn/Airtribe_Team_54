@@ -1125,16 +1125,26 @@ async function contactDetailView(id) {
 }
 
 function editContactForm(id, c) {
-  const nav = ++navGen;
+  const nav = ++navGen, hash = location.hash;
+  const current = () => !stale(nav) && location.hash === hash;
+  let pending = false;
+  const returnToDetail = async () => {
+    if (!current()) return;
+    const loading = contactDetailView(id), detailNav = navGen;
+    await loading;
+    if (!stale(detailNav) && location.hash === hash) el('c-edit')?.focus();
+  };
+  el('c-edit').disabled = true;
   // Editing invalidates this detail view's save callbacks but leaves its log
   // form visible. Make that temporary pause explicit until Save or Cancel.
   el('log-form').querySelectorAll('input, button').forEach((control) => { control.disabled = true; });
   el('log-status').textContent = 'Save or cancel contact edits before logging a check-in.';
   const card = el('profile-card');
   card.innerHTML = `
+    <form id="e-form">
     <h2>Edit ${esc(c.name)}</h2>
     <div class="form-grid">
-      <label>Name <input id="e-name" value="${esc(c.name)}"></label>
+      <label>Name <input id="e-name" required value="${esc(c.name)}"></label>
       <label>Category
         <select id="e-cat">${CATEGORIES.map((x) => `<option value="${x}" ${x === c.category ? 'selected' : ''}>${catLabel(x)}</option>`).join('')}</select>
       </label>
@@ -1144,13 +1154,24 @@ function editContactForm(id, c) {
       <label>Email <input id="e-email" type="email" value="${esc(c.email || '')}" placeholder="name@example.com"></label>
       <label class="full">Notes <input id="e-notes" value="${esc(c.notes || '')}"></label>
     </div>
-    <p class="error" id="e-error"></p>
+    <p class="error" id="e-error" role="alert" tabindex="-1"></p>
+    <p class="muted" id="e-status" role="status"></p>
     <div class="actions">
-      <button class="primary" id="e-save">Save</button>
-      <button id="e-cancel">Cancel</button>
-    </div>`;
-  el('e-cancel').onclick = () => contactDetailView(id);
-  el('e-save').onclick = async () => {
+      <button class="primary" id="e-save" type="submit">Save</button>
+      <button id="e-cancel" type="button">Cancel</button>
+    </div></form>`;
+  el('e-name').focus();
+  el('e-cancel').onclick = () => { if (!pending) return returnToDetail(); };
+  const form = el('e-form');
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    if (pending || !current()) return;
+    pending = true;
+    const controls = [...new Set([el('e-save'), el('e-cancel'), ...form.querySelectorAll('input, select, button')])];
+    const disabled = controls.map((control) => control.disabled);
+    controls.forEach((control) => { control.disabled = true; });
+    form.setAttribute('aria-busy', 'true');
+    el('e-status').textContent = 'Saving contact...';
     el('e-error').textContent = '';
     const patch = {};
     const name = el('e-name').value.trim();
@@ -1169,10 +1190,19 @@ function editContactForm(id, c) {
     const oldNext = followupDay(c.next_followup_at);
     try {
       if (nextVal !== oldNext) patch.next_followup_at = nextVal ? followupISO(nextVal) : null;
-      if (!Object.keys(patch).length) return contactDetailView(id);
+      if (!Object.keys(patch).length) return await returnToDetail();
       await api('/api/me/contacts/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(patch) });
-      if (!stale(nav)) contactDetailView(id);
-    } catch (err) { if (!stale(nav)) el('e-error').textContent = err.message; }
+      if (current()) await returnToDetail();
+    } catch (err) {
+      if (current()) { el('e-error').textContent = err.message; el('e-error').focus(); }
+    } finally {
+      pending = false;
+      if (current()) {
+        controls.forEach((control, index) => { control.disabled = disabled[index]; });
+        form.removeAttribute('aria-busy');
+        el('e-status').textContent = '';
+      }
+    }
   };
 }
 

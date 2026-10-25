@@ -222,9 +222,9 @@ describe.each(zones)('follow-up date policy on %s devices', (zone) => {
       contactDetailView = async () => {};
       editContactForm(saved.id, saved); const prefill = el('e-next').value;
       const writes = []; api = async (_path, opts) => { writes.push(JSON.parse(opts.body)); return {}; };
-      el('e-notes').value = 'Changed note'; await el('e-save').onclick();
-      editContactForm(saved.id, saved); el('e-next').value = '2026-11-02'; await el('e-save').onclick();
-      editContactForm(saved.id, saved); el('e-next').value = ''; await el('e-save').onclick();
+      el('e-notes').value = 'Changed note'; await el('e-form').onsubmit({ preventDefault() {} });
+      editContactForm(saved.id, saved); el('e-next').value = '2026-11-02'; await el('e-form').onsubmit({ preventDefault() {} });
+      editContactForm(saved.id, saved); el('e-next').value = ''; await el('e-form').onsubmit({ preventDefault() {} });
       return { saved, prefill, writes };
     `, { contact });
     expect(result.saved.next_followup_at).toBe('2026-11-01T06:30:00.000Z');
@@ -239,8 +239,8 @@ describe.each(zones)('follow-up date policy on %s devices', (zone) => {
       contactDetailView = async () => {};
       editContactForm(c.id, c); const prefill = el('e-next').value;
       const writes = []; api = async (_path, opts) => { if (opts) writes.push(JSON.parse(opts.body)); return { contacts: [] }; };
-      await el('e-save').onclick();
-      editContactForm(c.id, c); el('e-notes').value = 'Notes only'; await el('e-save').onclick();
+      await el('e-form').onsubmit({ preventDefault() {} });
+      editContactForm(c.id, c); el('e-notes').value = 'Notes only'; await el('e-form').onsubmit({ preventDefault() {} });
       pendingContactIntent = () => ({ body: c });
       await contactsView(); const retryDay = el('c-next').value;
       let retry;
@@ -282,7 +282,7 @@ describe.each(zones)('follow-up date policy on %s devices', (zone) => {
       const row = { innerHTML: '', querySelector: (selector) => fields[selector.match(/data-fu="([^\"]+)"/)[1]] };
       markDoneForm({ dataset: { done: data.contact.id, name: data.contact.name }, closest: () => row });
       fields.next.value = '2026-02-30'; await fields.save.onclick();
-      editContactForm(data.contact.id, data.contact); el('e-next').value = 'invalid'; await el('e-save').onclick();
+      editContactForm(data.contact.id, data.contact); el('e-next').value = 'invalid'; await el('e-form').onsubmit({ preventDefault() {} });
       return { writes, doneError: fields.error.textContent, disabled: fields.save.disabled, editError: el('e-error').textContent };
     `, { contact });
     expect(result.writes).toEqual([]);
