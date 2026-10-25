@@ -19,6 +19,8 @@ const rpcDefinitions = {
 };
 
 export function pgliteClient(db, role, uid = null, options = {}) {
+  const maxLimit = options.maxLimit ?? 100;
+  if (!Number.isInteger(maxLimit) || maxLimit < 1 || maxLimit > 1001) throw new Error('Unsupported test limit ceiling');
   const allowedRpcs = new Set(options.allowedRpcs ?? ['payment_checkout_ready']);
   for (const name of allowedRpcs) if (!Object.hasOwn(rpcDefinitions, name)) throw new Error('Unknown test RPC allowlist entry');
   const allowedTables = options.allowedTables ? new Set(options.allowedTables) : null;
@@ -63,6 +65,11 @@ export function pgliteClient(db, role, uid = null, options = {}) {
       const query = {
         select(columns = '*') { state.columns = columns; state.returning = true; return query; },
         eq(key, value) { state.filters.push([key, value, '=']); return query; },
+        in(key, values) {
+          advanced();
+          if (!Array.isArray(values) || !values.length || values.length > 100) throw new Error('Unsupported test IN values');
+          state.filters.push([key, [...values], 'in']); return query;
+        },
         is(key, value) {
           if (value !== null) throw new Error('Test adapter only supports IS NULL');
           state.filters.push([key, value, 'is']); return query;
@@ -84,7 +91,7 @@ export function pgliteClient(db, role, uid = null, options = {}) {
           state.filters.push(['starts_at', match[1], 'null or >=']); return query;
         },
         order(key, orderOptions = {}) { state.order.push([key, orderOptions.ascending !== false, orderOptions.nullsFirst]); return query; },
-        limit(value) { advanced(); if (!Number.isInteger(value) || value < 1 || value > 100) throw new Error('Unsupported test limit'); state.limit = value; return query; },
+        limit(value) { advanced(); if (!Number.isInteger(value) || value < 1 || value > maxLimit) throw new Error('Unsupported test limit'); state.limit = value; return query; },
         insert(values) { state.operation = 'insert'; state.values = values; return query; },
         update(values) { state.operation = 'update'; state.values = values; return query; },
         upsert(values, upsertOptions = {}) {
@@ -122,6 +129,7 @@ export function pgliteClient(db, role, uid = null, options = {}) {
         }
         if (state.filters.length) sql += ' where ' + state.filters.map(([key, value, operator]) => {
           const field = identifier(key);
+          if (operator === 'in') return `${field} in (${value.map(bind).join(', ')})`;
           if (operator === 'is') return `${field} is null`;
           if (operator === 'not null') return `${field} is not null`;
           if (operator === 'null or >=') return `(${field} is null or ${field} >= ${bind(value)})`;
