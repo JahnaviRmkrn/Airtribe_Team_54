@@ -101,6 +101,63 @@ synthetic identity, not production security or a claim about Supabase sessions.
 
 ## Exact source versus fixture boundary
 
+### Fixed large-contact scenario and one-shot read failure
+
+The controls page adds **Reset with 1,001 Alice contacts**, **Fail next Contacts
+second page**, and **Fail next Dashboard contact second page**. These controls
+modify only this in-memory fixture; organizer/room assets and application routes
+remain unchanged.
+
+The bulk reset uses the existing reset endpoint with the exact body
+`{ "confirm": "reset-local-fixture", "scenario": "bulk1001" }` and accepts no
+extra fields. It seeds exactly 1,001 Alice contacts, not 1,001 additional contacts:
+
+- Personal: 334; professional: 334; community: 333.
+- Names: `Alice Bulk 0001` through `Alice Bulk 1000`, then
+  `ZZZ Synthetic Alice 1001` (professional).
+- Final marker UUID: `44444444-4444-4444-8444-000000001001`.
+- Exactly two overdue check-ins: contacts 1 and 2, reset-day IST minus 3 and
+  minus 1 calendar days. Exactly two upcoming check-ins: contact 3 at plus 2
+  days and the final contact at plus 7 days. None is due today. All other
+  contacts have no scheduled check-in.
+- Alice's original contact and its interaction are replaced, leaving zero
+  Alice recorded interactions. Her seeded goals and meetup remain. Bob keeps
+  his one private seeded contact and interaction, goals and meetup. Aggregate
+  fixture counts are 1,002 contacts, one interaction and six goal rows.
+
+`bulk_expectations` in visible status supplies these expected seed counts,
+synthetic due dates, reset IST day and final marker. It describes the reset
+baseline, not fresh expected totals after an operator edits or deletes contacts.
+Ordinary seeded and empty-Alice reset scenarios retain their original behavior.
+
+The failure endpoint is `POST /__harness/read-failure`, with exactly
+`{ "confirm": "fail-next-contact-page2", "target": "contacts" }` or the same
+body with target `"dashboard"`. It requires the bulk fixture; invalid targets,
+extra fields and arbitrary page/count/SQL input are rejected. A pending fault
+cannot be overwritten. Every reset clears it and its counters.
+
+Choose Alice, arm one target, then open/reload the matching screen. The Contacts
+target matches only `GET /api/me/contacts`; Dashboard matches only
+`GET /api/me/dashboard`. Bob, signed-out requests and the other API do not
+consume it. A Dashboard screen can itself request the Contacts API for its
+graph, so do not open Dashboard after arming the Contacts target if you intend
+to exercise the Contacts screen specifically.
+
+The first contact page executes real PostgreSQL under Alice's RLS role. The
+test-only query adapter returns one database-style error on the second cursor
+page, and the actual application handler produces the explicit 503. This is
+not a fabricated whole-API failure response. `contact_read_failure` in status
+shows `pending_target`, cumulative `armed_count`/`consumed_count`, and
+`last_failure` with the target path, page 2 and `first_page_rows: 100`.
+The next normal request succeeds without rearming. No real backend fault or
+PostgREST transport is simulated beyond this explicit adapter boundary.
+
+Both smoke modes retain all existing seeded/empty checks, additionally verify
+the fixed bulk counts, Bob isolation, target scoping, real first-page evidence,
+one-shot consumption, retry success and reset cleanup, then restore the normal
+seeded fixture before browser serving. All existing external-service, secret,
+origin/host, file and network guards remain active.
+
 Actual handlers dispatched:
 
 - `GET /api/me`, `GET /api/me/dashboard`, `GET /api/me/followups`

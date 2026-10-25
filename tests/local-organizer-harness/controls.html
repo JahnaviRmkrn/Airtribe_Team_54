@@ -16,6 +16,12 @@
 <p>Reset replaces only this server's in-memory fixture, invalidates its former guest sessions, and clears this browser's organizer draft/retry storage. Reload all organizer and room tabs after a reset or role switch. The empty-Alice scenario removes Alice's contacts, goals and meetups while preserving Bob's seeded data; Alice's seeded room link then returns 404.</p>
 <button class="btn" id="reset">Reset seeded fixture</button>
 <button class="btn" id="reset-empty">Reset with empty Alice</button>
+<button class="btn" id="reset-bulk">Reset with 1,001 Alice contacts</button>
+<p>The bulk fixture has exactly 334 personal, 334 professional and 333 community Alice contacts, with 2 overdue and 2 upcoming check-ins. The last contact is “ZZZ Synthetic Alice 1001”. Bob keeps his private seeded contact. Exact synthetic dates and counts appear in status.</p>
+<h2>One-shot paginated-read failure</h2>
+<p>Load the bulk fixture and choose Alice first. Arm the desired API, then open or reload that screen. Only Alice's selected API consumes the fault, after its first real 100-row contact page; the second page fails through the actual route. Other APIs and Bob do not consume it. Status shows whether it is armed or consumed. A retry then loads normally. Reset clears the fault and counters.</p>
+<button class="btn" id="fail-contacts">Fail next Contacts second page</button>
+<button class="btn" id="fail-dashboard">Fail next Dashboard contact second page</button>
 <button class="btn" id="refresh">Refresh status</button>
 <button class="btn" id="stop">Stop local server</button>
 <p>The server stops automatically after 30 minutes. Stop or Ctrl-C also closes the listener and discards the database. Receipts are disabled by default; optional receipt mode invokes actual local SQL functions, never a fake successful save.</p>

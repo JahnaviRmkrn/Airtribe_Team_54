@@ -150,6 +150,9 @@ const providerPath = (path) => ['/api/extract', '/api/assistant', '/api/voice/li
   || /^\/api\/me\/integrations\/google\/(?:contacts|gmail|calendar|sheets-import|sheets-export)(?:\/(?:start|callback|preview|import|cancel))?$/.test(path);
 let db, server, origin, tenants, timeout, stopResolve, stopPromise, queue = Promise.resolve();
 let stopped = false, servedRequests = 0, resets = 0, scenario = 'seeded';
+let bulkExpectations = null;
+const contactReadFailure = { pending_target: null, armed_count: 0, consumed_count: 0, last_failure: null };
+const contactReadTargets = { contacts: '/api/me/contacts', dashboard: '/api/me/dashboard' };
 const issuedGuestCookies = new Set();
 const cookieHeader = (name, value, options = {}) => [
   `${name}=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax',
@@ -180,18 +183,79 @@ function clearBrowserGuests(context) {
   }
 }
 async function resetFixture(nextScenario = 'seeded') {
-  if (!['seeded', 'empty'].includes(nextScenario)) throw new Error('Invalid fixture scenario');
+  if (!['seeded', 'empty', 'bulk1001'].includes(nextScenario)) throw new Error('Invalid fixture scenario');
   tenants = await seedPrivateData(db);
   scenario = nextScenario;
+  bulkExpectations = null;
+  Object.assign(contactReadFailure, { pending_target: null, armed_count: 0, consumed_count: 0, last_failure: null });
   if (scenario === 'empty') await asRole(db, 'authenticated', identities.alice, async (tx) => {
     await tx.query('delete from contacts');
     await tx.query('delete from balance_goals');
     await tx.query('delete from meetups');
   });
+  if (scenario === 'bulk1001') {
+    const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const midnight = Date.parse(`${day}T00:00:00+05:30`);
+    const due = [-3, -1, 2, 7].map((days) => new Date(midnight + days * 86_400_000).toISOString());
+    // Fixed SQL and exactly 1,001 synthetic rows. No control accepts a count,
+    // SQL, name, UUID, timestamp or other arbitrary fixture input.
+    await asRole(db, 'authenticated', identities.alice, async (tx) => {
+      await tx.query('delete from contacts');
+      await tx.query(`insert into contacts (id, name, category, next_followup_at)
+        select ('44444444-4444-4444-8444-' || lpad(n::text, 12, '0'))::uuid,
+          case when n = 1001 then 'ZZZ Synthetic Alice 1001' else 'Alice Bulk ' || lpad(n::text, 4, '0') end,
+          (case mod(n - 1, 3) when 0 then 'personal' when 1 then 'professional' else 'community' end)::life_category,
+          case n when 1 then $1::timestamptz when 2 then $2::timestamptz when 3 then $3::timestamptz when 1001 then $4::timestamptz else null end
+        from generate_series(1, 1001) as series(n)`, due);
+    });
+    bulkExpectations = {
+      alice_contacts: 1001, bob_contacts: 1,
+      contact_counts: { personal: 334, professional: 334, community: 333 },
+      followups: { overdue: 2, upcoming: 2, due_today: 0 },
+      alice_recorded_activity: 0,
+      final_contact: { id: '44444444-4444-4444-8444-000000001001', name: 'ZZZ Synthetic Alice 1001', category: 'professional', next_followup_at: due[3] },
+      reset_day_ist: day,
+      due_contacts: [1, 2, 3, 1001].map((number, index) => ({
+        id: `44444444-4444-4444-8444-${String(number).padStart(12, '0')}`, next_followup_at: due[index],
+      })),
+    };
+  }
   for (const name of ['alice', 'bob']) {
     await asRole(db, 'service_role', null, (tx) => tx.query('update meetups set room_token = $1 where id = $2', [tokens[name], tenants[name].meetup.id]));
   }
   resets++;
+}
+
+function withContactReadFailure(client, context) {
+  if (context?.role !== 'owner' || context.requestMethod !== 'GET'
+    || context.requestPath !== contactReadTargets[contactReadFailure.pending_target]) return client;
+  let successfulPages = 0, firstPageRows = 0;
+  return { ...client, from(table) {
+    const query = client.from(table);
+    if (table !== 'contacts') return query;
+    let isHead = false, hasIdCursor = false, executed;
+    const select = query.select.bind(query), gt = query.gt.bind(query), then = query.then.bind(query);
+    query.select = (columns, options) => { isHead = options?.head === true; return select(columns, options); };
+    query.gt = (column, value) => { if (column === 'id') hasIdCursor = true; return gt(column, value); };
+    const execute = async () => {
+      if (!isHead && hasIdCursor && successfulPages === 1 && firstPageRows > 0
+        && context.requestPath === contactReadTargets[contactReadFailure.pending_target]) {
+        const target = contactReadFailure.pending_target;
+        contactReadFailure.pending_target = null;
+        contactReadFailure.consumed_count++;
+        contactReadFailure.last_failure = { target, path: context.requestPath, page: 2, first_page_rows: firstPageRows };
+        return { data: null, error: { code: 'XX000', message: 'Synthetic second contact page read failure' } };
+      }
+      const result = await new Promise((resolve, reject) => then(resolve, reject));
+      if (!isHead && !result.error && Array.isArray(result.data) && result.data.length) {
+        successfulPages++;
+        if (successfulPages === 1) firstPageRows = result.data.length;
+      }
+      return result;
+    };
+    query.then = (resolve, reject) => { executed ??= execute(); return executed.then(resolve, reject); };
+    return query;
+  } };
 }
 async function status(context) {
   const counts = await asRole(db, 'service_role', null, async (tx) => (await tx.query(`select
@@ -203,6 +267,7 @@ async function status(context) {
     (select count(*)::int from meetups where status = 'closed') as closed_rooms,
     (select count(*)::int from meetups where final_venue_id is not null) as confirmed_rooms`)).rows[0]);
   return { mode: 'local-organizer-real-handler-fixture', role: context.role, scenario, contact_receipts: RECEIPTS ? 'real-local-rpc' : 'disabled-legacy', ...counts, served_requests: servedRequests, resets,
+    bulk_expectations: bulkExpectations, contact_read_failure: { ...contactReadFailure },
     external_fetch_attempts: deps.externalFetchAttempts, provider_attempts: deps.providerAttempts,
     secret_access_attempts: deps.secretAccessAttempts, internal_errors: deps.errorCount,
     live_auth: false, live_postgrest: false, payments: 'disabled', voice: 'disabled' };
@@ -241,9 +306,10 @@ async function dispatch(req, res) {
     return respond(res, 200, readFileSync(new URL(asset[0], root)), context, asset[1]);
   }
   if (path === '/__harness/status' && req.method === 'GET') return respond(res, 200, await status(context), context);
-  if (['/__harness/role', '/__harness/reset', '/__harness/stop'].includes(path) && req.method === 'POST') {
+  if (['/__harness/role', '/__harness/reset', '/__harness/stop', '/__harness/read-failure'].includes(path) && req.method === 'POST') {
     let payload;
     try { payload = JSON.parse(await bodyBytes(req)); } catch { return respond(res, 400, { error: 'Invalid local control body' }); }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return respond(res, 400, { error: 'Invalid local control body' });
     if (path.endsWith('/role')) {
       if (!['observer', 'owner', 'other'].includes(payload.role)) return respond(res, 400, { error: 'Invalid fixture role' });
       clearBrowserGuests(context);
@@ -251,8 +317,16 @@ async function dispatch(req, res) {
       context.cookies.set('__organizer_harness_role', payload.role);
     } else if (path.endsWith('/reset')) {
       if (payload.confirm !== 'reset-local-fixture') return respond(res, 400, { error: 'Explicit fixture reset required' });
-      if (payload.scenario !== undefined && !['seeded', 'empty'].includes(payload.scenario)) return respond(res, 400, { error: 'Invalid fixture scenario' });
+      if (payload.scenario !== undefined && !['seeded', 'empty', 'bulk1001'].includes(payload.scenario)) return respond(res, 400, { error: 'Invalid fixture scenario' });
+      if (payload.scenario === 'bulk1001' && Object.keys(payload).some((key) => !['confirm', 'scenario'].includes(key))) return respond(res, 400, { error: 'The bulk fixture is fixed; extra inputs are not allowed' });
       await resetFixture(payload.scenario); clearBrowserGuests(context);
+    } else if (path.endsWith('/read-failure')) {
+      if (payload.confirm !== 'fail-next-contact-page2' || typeof payload.target !== 'string' || !Object.hasOwn(contactReadTargets, payload.target)
+        || Object.keys(payload).some((key) => !['confirm', 'target'].includes(key))) return respond(res, 400, { error: 'Explicit fixed contact-read failure target required' });
+      if (scenario !== 'bulk1001') return respond(res, 409, { error: 'Load the bulk1001 fixture before arming a second-page failure' });
+      if (contactReadFailure.pending_target !== null) return respond(res, 409, { error: 'A contact-read failure is already armed; consume it or reset the fixture' });
+      contactReadFailure.pending_target = payload.target;
+      contactReadFailure.armed_count++;
     } else {
       if (payload.confirm !== 'stop-local-fixture') return respond(res, 400, { error: 'Explicit fixture stop required' });
       respond(res, 200, { stopped: true }, context); setImmediate(stop); return;
@@ -285,6 +359,7 @@ async function dispatch(req, res) {
   // comes only from the separate local harness cookie, not from production auth.
   for (const name of ['content-type', 'x-guest-secret', 'idempotency-key', 'x-contact-owner']) if (req.headers[name]) headers.set(name, req.headers[name]);
   const request = new Request(new URL(req.url, origin), { method: req.method, headers, ...(body?.length ? { body } : {}) });
+  context.requestPath = path; context.requestMethod = req.method;
   const response = await storage.run(context, () => handler(request, { params: Promise.resolve(params) }));
   return respond(res, response.status, Buffer.from(await response.arrayBuffer()), context, response.headers.get('content-type') || 'application/json');
 }
@@ -339,9 +414,9 @@ beforeAll(async () => {
   deps.admin = pgliteClient(db, 'service_role', null, roomAdapter);
   deps.context = () => storage.getStore();
   deps.userClient = () => {
-    const role = storage.getStore()?.role;
+    const context = storage.getStore(), role = context?.role;
     const uid = role === 'owner' ? identities.alice : role === 'other' ? identities.bob : null;
-    return pgliteClient(db, uid ? 'authenticated' : 'anon', uid, organizerAdapter);
+    return withContactReadFailure(pgliteClient(db, uid ? 'authenticated' : 'anon', uid, organizerAdapter), context);
   };
   await resetFixture();
   stopPromise = new Promise((resolve) => { stopResolve = resolve; });
@@ -454,6 +529,7 @@ it('serves unchanged organizer/room assets and real routes with safe HTTP cookie
   expect(summary.external_fetch_attempts).toBe(0); expect(summary.provider_attempts).toBe(0);
   expect(summary.secret_access_attempts).toBe(0); expect(summary.internal_errors).toBe(0);
   await organizerSmoke({ owner, other, observer, statusIs, mutate });
+  await bulkReadSmoke({ owner, other, observer, statusIs, mutate });
   // Leave a clean fixture for a browser operator, never the smoke's credentials.
   statusIs(await owner('/__harness/reset', mutate('POST', { confirm: 'reset-local-fixture' })), 200);
   statusIs(await guestA(room + '/me'), 401);
@@ -626,6 +702,85 @@ async function organizerSmoke({ owner, other, observer, statusIs, mutate }) {
   statusIs(await owner(contactsPath, { ...mutate('POST', { contacts: [{ name: 'Synthetic Onboarding Person', category: 'community', interests: ['games'], preferred_frequency_days: 14 }] }), headers: ownerHeaders }), 201);
   expect((await owner('/api/me/dashboard')).data).toMatchObject({ is_empty: false, goals: goalBody, contact_counts: { personal: 0, professional: 0, community: 1 } });
   const summary = (await observer('/__harness/status')).data;
+  expect(summary.external_fetch_attempts).toBe(0); expect(summary.provider_attempts).toBe(0);
+  expect(summary.secret_access_attempts).toBe(0); expect(summary.internal_errors).toBe(0);
+}
+
+async function bulkReadSmoke({ owner, other, observer, statusIs, mutate }) {
+  const reset = (scenario, extra = {}) => owner('/__harness/reset', mutate('POST', { confirm: 'reset-local-fixture', scenario, ...extra }));
+  const arm = (target, extra = {}) => owner('/__harness/read-failure', mutate('POST', { confirm: 'fail-next-contact-page2', target, ...extra }));
+  const fixtureStatus = async () => (await observer('/__harness/status')).data;
+  statusIs(await arm('contacts'), 409);
+  statusIs(await reset('bulk1001', { count: 1002 }), 400);
+  statusIs(await reset('bulk1002'), 400);
+  const seeded = await reset('bulk1001'); statusIs(seeded, 200);
+  const expected = seeded.data.bulk_expectations;
+  expect(seeded.data).toMatchObject({ scenario: 'bulk1001', contacts: 1002, interactions: 1, goals: 6 });
+  expect(expected).toMatchObject({ alice_contacts: 1001, bob_contacts: 1,
+    contact_counts: { personal: 334, professional: 334, community: 333 }, followups: { overdue: 2, upcoming: 2, due_today: 0 } });
+  expect(seeded.data.contact_read_failure).toEqual({ pending_target: null, armed_count: 0, consumed_count: 0, last_failure: null });
+
+  const alice = await owner('/api/me/contacts'); statusIs(alice, 200);
+  expect(alice.data.contacts).toHaveLength(1001);
+  expect(new Set(alice.data.contacts.map((row) => row.id)).size).toBe(1001);
+  expect(alice.data.contacts.every((row) => row.user_id === identities.alice)).toBe(true);
+  expect(alice.data.contacts.at(-1)).toMatchObject({ id: expected.final_contact.id, name: expected.final_contact.name, category: 'professional' });
+  for (const [category, count] of Object.entries(expected.contact_counts)) {
+    const filtered = await owner('/api/me/contacts?category=' + category); statusIs(filtered, 200);
+    expect(filtered.data.contacts).toHaveLength(count);
+    expect(filtered.data.contacts.every((row) => row.category === category)).toBe(true);
+  }
+  const bob = await other('/api/me/contacts'); statusIs(bob, 200);
+  expect(bob.data.contacts).toHaveLength(1);
+  expect(bob.data.contacts[0]).toMatchObject({ user_id: identities.bob, name: 'bob contact', notes: 'bob private contact note' });
+  statusIs(await owner('/api/me/contacts/' + bob.data.contacts[0].id), 404);
+  statusIs(await other('/api/me/contacts/' + expected.final_contact.id), 404);
+
+  const dashboard = await owner('/api/me/dashboard'); statusIs(dashboard, 200);
+  expect(dashboard.data).toMatchObject({ contact_counts: expected.contact_counts, is_empty: false, recorded_activity: { total: 0 } });
+  expect(dashboard.data.followups.overdue).toHaveLength(2);
+  expect(dashboard.data.followups.upcoming).toHaveLength(2);
+  expect(dashboard.data.followups.upcoming.some((row) => row.id === expected.final_contact.id)).toBe(true);
+  const followups = await owner('/api/me/followups'); statusIs(followups, 200);
+  expect(followups.data.overdue).toHaveLength(2); expect(followups.data.upcoming).toHaveLength(2);
+  expect([...followups.data.overdue, ...followups.data.upcoming].map((row) => row.id).sort())
+    .toEqual(expected.due_contacts.map((row) => row.id).sort());
+
+  for (const target of ['contacts', 'dashboard']) {
+    const armed = await arm(target); statusIs(armed, 200);
+    const before = armed.data.contact_read_failure.consumed_count;
+    expect(armed.data.contact_read_failure.pending_target).toBe(target);
+    statusIs(await arm(target), 409);
+    // Neither the other API, another owner, nor an unauthenticated request
+    // may consume the fault intended for Alice's selected route.
+    statusIs(await owner(contactReadTargets[target === 'contacts' ? 'dashboard' : 'contacts']), 200);
+    statusIs(await other(contactReadTargets[target]), 200);
+    statusIs(await observer(contactReadTargets[target]), 401);
+    expect((await fixtureStatus()).contact_read_failure).toMatchObject({ pending_target: target, consumed_count: before });
+    const failed = await owner(contactReadTargets[target]); statusIs(failed, 503);
+    expect(Object.keys(failed.data)).toEqual(['error']);
+    expect(failed.data.error).toMatch(/Complete data could not be loaded/);
+    expect((await fixtureStatus()).contact_read_failure).toMatchObject({
+      pending_target: null, consumed_count: before + 1,
+      last_failure: { target, path: contactReadTargets[target], page: 2, first_page_rows: 100 },
+    });
+    const retried = await owner(contactReadTargets[target]); statusIs(retried, 200);
+    if (target === 'contacts') expect(retried.data.contacts).toHaveLength(1001);
+    else expect(retried.data.contact_counts).toEqual(expected.contact_counts);
+    expect((await fixtureStatus()).contact_read_failure.consumed_count).toBe(before + 1);
+  }
+  for (const target of ['followups', '/api/me/contacts', {}, null]) statusIs(await arm(target), 400);
+  statusIs(await arm('contacts', { page: 3 }), 400);
+  statusIs(await arm('contacts', { sql: 'not accepted' }), 400);
+  statusIs(await owner('/__harness/read-failure', mutate('POST', {})), 400);
+  statusIs(await owner('/__harness/read-failure', mutate('POST', null)), 400);
+  statusIs(await arm('contacts'), 200);
+  const empty = await reset('empty'); statusIs(empty, 200);
+  expect(empty.data.bulk_expectations).toBeNull();
+  expect(empty.data.contact_read_failure).toEqual({ pending_target: null, armed_count: 0, consumed_count: 0, last_failure: null });
+  expect((await owner('/api/me/contacts')).data.contacts).toEqual([]);
+  expect((await other('/api/me/contacts')).data.contacts).toHaveLength(1);
+  const summary = await fixtureStatus();
   expect(summary.external_fetch_attempts).toBe(0); expect(summary.provider_attempts).toBe(0);
   expect(summary.secret_access_attempts).toBe(0); expect(summary.internal_errors).toBe(0);
 }

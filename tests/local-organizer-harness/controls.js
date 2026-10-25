@@ -26,6 +26,9 @@ document.querySelectorAll('[data-role]').forEach((button) => {
 });
 document.getElementById('reset').addEventListener('click', () => reset('seeded'));
 document.getElementById('reset-empty').addEventListener('click', () => reset('empty'));
+document.getElementById('reset-bulk').addEventListener('click', () => reset('bulk1001'));
+document.getElementById('fail-contacts').addEventListener('click', () => request('read-failure', { confirm: 'fail-next-contact-page2', target: 'contacts' }));
+document.getElementById('fail-dashboard').addEventListener('click', () => request('read-failure', { confirm: 'fail-next-contact-page2', target: 'dashboard' }));
 document.getElementById('stop').addEventListener('click', () => request('stop', { confirm: 'stop-local-fixture' }));
 document.getElementById('refresh').addEventListener('click', () => request('status'));
 request('status');
