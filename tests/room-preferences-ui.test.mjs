@@ -25,7 +25,7 @@ function room(initialView = view(), { navigator = {}, middle = false } = {}) {
     if (!nodes.has(id)) {
       const classes = new Set();
       nodes.set(id, {
-        innerHTML: '', textContent: '', open: false,
+        innerHTML: '', textContent: '', open: false, isConnected: true,
         querySelectorAll: () => [], querySelector: (selector) => node(selector),
         classList: {
           contains: (name) => classes.has(name), add: (name) => classes.add(name), remove: (name) => classes.delete(name),
@@ -38,7 +38,7 @@ function room(initialView = view(), { navigator = {}, middle = false } = {}) {
   const document = {
     getElementById: (id) => id === 'loc-clear' && !node('prefs-form').innerHTML.includes('id="loc-clear"') ? null : node(id),
     querySelectorAll: (selector) => selector.startsWith('#prefs-form') ? controls : [],
-    createElement: (tag) => ({ tag }),
+    createElement: (tag) => ({ tag, remove() {} }),
     head: { appendChild(element) { if (element.tag === 'script') queueMicrotask(() => element.onerror()); } },
   };
   let form = {};
@@ -121,10 +121,20 @@ describe('shipped guest preference form boundaries', () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(app.node('.meet-map').classList.contains('hidden')).toBe(true);
     expect(app.node('.meet-body').innerHTML).toContain('The middle is near');
+    expect(app.node('.meet-body').innerHTML).toContain('Map unavailable');
     expect(app.controls.every((control) => !control.disabled)).toBe(true);
     app.form({ guest_name: 'Map-free guest', area: 'Whitefield' });
     await app.save();
     expect(app.requests[0].body.preferences).toEqual({ area: 'Whitefield' });
+  });
+
+  it('clears the map view before replacing a missing room', () => {
+    const app = room();
+    const renders = [];
+    app.context.window.MeetMiddle = { render: (next) => renders.push(next) };
+    app.run('renderMissing()');
+    expect(renders).toEqual([null]);
+    expect(app.node('main').innerHTML).toContain("This room link isn't valid");
   });
 
   it('does not let a late location result undo an explicit Stop sharing', async () => {

@@ -216,6 +216,7 @@ function renderMissing() {
   stopPolling();
   locationGeneration++;
   pendingLocation = undefined;
+  if (window.MeetMiddle) window.MeetMiddle.render(null);
   $('main').innerHTML = `
     <section class="card hero">
       <p class="eyebrow">Hmm</p>

@@ -175,6 +175,10 @@ Arindom Chetia's PR #3 (`static/room.*`) and runs on the room API above.
 - The page shows the confirmed venue and the closed state. API errors
   (401/404/409/410/429) show the API's `{ error }` message. All
   guest-provided text is escaped.
+- Meet in the middle keeps the middle and trip details readable while its map
+  loads or is unavailable. Failed or stalled map assets are cleaned up and only
+  retried with **Retry map**, not on room polls. A successful map keeps its
+  approximate pins and does not refit unchanged points on each poll.
 
 `preferences`: `{ budget_min?, budget_max?, area?, food?: string[], activities?: string[] }`
 `availability`: `string[]`, e.g. `["Sat evening", "Sun lunch"]`
