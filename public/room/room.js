@@ -256,7 +256,7 @@ function renderOrganizer() {
           : 'This room is closed.'}</div>
       </div>
       <div class="org-actions">
-        ${open && leader && (!view.meetup.final_venue || view.meetup.final_venue.id !== leader.id)
+        ${open && leader && !view.meetup.final_venue
           ? `<button class="btn primary sm" data-confirm="${esc(leader.id)}">Confirm ${esc(leader.name)}</button>` : ''}
         ${open ? '<button class="btn danger sm" id="org-close">Close room</button>' : ''}
       </div>
@@ -313,8 +313,11 @@ function renderPeople() {
 function tallySlots() {
   const counts = new Map();
   for (const a of view.attendees) {
-    for (const s of new Set((a.availability || []).map((x) => String(x).trim()).filter(Boolean))) {
+    const seen = new Set();
+    for (const s of (a.availability || []).map((x) => String(x).trim()).filter(Boolean)) {
       const k = s.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
       const cur = counts.get(k) || { slot: s, count: 0 };
       cur.count++;
       counts.set(k, cur);
@@ -373,7 +376,7 @@ function renderShortlist() {
           ${voteCtl}
           <span class="vote-bar"><i style="width:${Math.round((n / maxVotes) * 100)}%"></i></span>
         </div>
-        ${view.is_organizer && open && finalId !== v.id ? `<button class="btn sm" data-confirm="${esc(v.id)}">Confirm this venue</button>` : ''}
+        ${view.is_organizer && open && !finalId ? `<button class="btn sm" data-confirm="${esc(v.id)}">Confirm this venue</button>` : ''}
       </article>`;
   }).join('') : '<div class="empty">No suggestions yet. They appear once guests share an area, budget or food/activity preferences.</div>';
 
