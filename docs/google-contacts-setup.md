@@ -115,12 +115,18 @@ cover secure credentials/tokens, state checking and purpose-specific consent.
 
 `lib/google/connector.ts` contains the server-only helpers. Contacts uses purpose
 `contacts`. Other explicitly implemented features may use `sheets-import`
-(`spreadsheets.readonly`) or `sheets-export` (`drive.file`), each with independent
+(`spreadsheets.readonly`), `sheets-export` (`drive.file`), `gmail` (`gmail.send`),
+or `calendar` (`calendar.events.owned`), each with independent
 cookie/state/callback and an explicit scope allowlist. Merely reserving a purpose
 in SQL does not grant its scope or expose a feature. There is no automatic scope
 union, cross-purpose token reuse, login change, or refresh operation.
+These later purposes use their own `GOOGLE_SHEETS_*`, `GOOGLE_GMAIL_*`, and
+`GOOGLE_CALENDAR_*` client settings and purpose-specific consent UI. Their scope
+entries do not enable them or imply approval to send messages/create events.
 
 - `createGoogleSession(config, owner, payload)` stores an encrypted new session.
+- `googleAccessToken(session)` is a server-only expiry check after acquiring the
+  authenticated owner's session; it never refreshes or makes a provider request.
 - `acquireGoogleSession<T>(config, owner)` returns
   `{ id, owner, lease, expiresAt, payload }` and acquires a short lease.
 - `consumeGoogleAuthorization(config, session)` invalidates stored state before

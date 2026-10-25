@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 vi.mock('server-only', () => ({}));
 vi.mock('../supabase/admin', () => ({ adminClient: vi.fn(() => { throw new Error('No database access permitted in this unit test'); }) }));
 vi.mock('next/headers', () => ({ cookies: vi.fn() }));
-import { authorization, CONTACTS_SCOPE, exchangeCode, googleConfig, googleJson, googleRoute, sameOrigin, seal, unseal, validState, type GoogleConfig } from './connector';
+import { authorization, CONTACTS_SCOPE, exchangeCode, googleAccessToken, googleConfig, googleJson, googleRoute, sameOrigin, seal, unseal, validState, type GoogleConfig } from './connector';
 import { contactKey, loadContactsPage, normalizePeople, selectionsSchema, type ReadyContacts } from './contacts';
 
 const config: GoogleConfig = { purpose: 'contacts', clientId: 'synthetic-client', clientSecret: 'synthetic-secret', origin: 'https://example.test', redirectUri: 'https://example.test/api/me/integrations/google/contacts/callback', key: Buffer.alloc(32, 42), scope: CONTACTS_SCOPE };
@@ -38,6 +38,33 @@ describe('purpose-bound Google OAuth security', () => {
     const { state } = authorization(config);
     expect(validState(state, state)).toBe(true);
     for (const wrong of [null, '', state.slice(1), 'é'.repeat(43), 'a'.repeat(43)]) expect(validState(wrong, state)).toBe(false);
+  });
+  it('isolates future connector scopes rather than adding them to Contacts', () => {
+    vi.stubEnv('GOOGLE_CONNECTOR_ORIGIN', config.origin); vi.stubEnv('GOOGLE_CONNECTOR_ENCRYPTION_KEY', config.key.toString('base64'));
+    for (const prefix of ['GOOGLE_CONTACTS', 'GOOGLE_SHEETS', 'GOOGLE_GMAIL', 'GOOGLE_CALENDAR']) {
+      vi.stubEnv(prefix + '_CLIENT_ID', prefix + '-synthetic-client'); vi.stubEnv(prefix + '_CLIENT_SECRET', 'synthetic-secret');
+    }
+    expect(googleConfig('contacts')?.scope).toBe(CONTACTS_SCOPE);
+    for (const [purpose, scope] of [['sheets-import', 'spreadsheets.readonly'], ['sheets-export', 'drive.file'], ['gmail', 'gmail.send'], ['calendar', 'calendar.events.owned']] as const) {
+      const purposeConfig = googleConfig(purpose)!;
+      expect(purposeConfig.scope).toBe('https://www.googleapis.com/auth/' + scope);
+      expect(purposeConfig.redirectUri).toBe(config.origin + '/api/me/integrations/google/' + purpose + '/callback');
+      expect(new URL(authorization(purposeConfig).url).searchParams.get('scope')).toBe(purposeConfig.scope);
+    }
+  });
+  it('retrieves only unexpired server-side access tokens without a network call', () => {
+    const session = { id: 'id', owner: 'owner', lease: 'lease', expiresAt: new Date(Date.now() + 60000).toISOString(), payload: { token: 'synthetic-token', tokenExpiresAt: Date.now() + 60000 } };
+    expect(googleAccessToken(session)).toBe('synthetic-token');
+    expect(() => googleAccessToken({ ...session, payload: { token: null, tokenExpiresAt: Date.now() + 60000 } })).toThrow('expired');
+    expect(() => googleAccessToken({ ...session, expiresAt: new Date(0).toISOString() })).toThrow('expired');
+    expect(() => googleAccessToken({ ...session, payload: { token: 'synthetic', tokenExpiresAt: 0 } })).toThrow('expired');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('refuses unexpected API destinations before transmitting any credentials', async () => {
+    for (const url of ['https://evil.test', 'http://people.googleapis.com', 'https://user:pass@people.googleapis.com', 'https://people.googleapis.com:444']) {
+      await expect(googleJson(url, { headers: { Authorization: 'Bearer synthetic' } })).rejects.toThrow('Unsupported');
+    }
+    expect(fetch).not.toHaveBeenCalled();
   });
   it('rejects spoofed Host/forwarding or absent Origin on mutations', () => {
     expect(() => sameOrigin(new Request('https://internal.test', { headers: { origin: config.origin } }), config)).not.toThrow();

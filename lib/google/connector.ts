@@ -7,12 +7,14 @@ import { adminClient } from '../supabase/admin';
 
 // Each purpose has its own OAuth client, cookie, callback and scope allowlist.
 // Adding another connector must not silently broaden Contacts authorization.
-export type GooglePurpose = 'contacts' | 'sheets-import' | 'sheets-export';
+export type GooglePurpose = 'contacts' | 'sheets-import' | 'sheets-export' | 'gmail' | 'calendar';
 export const CONTACTS_SCOPE = 'https://www.googleapis.com/auth/contacts.readonly';
 const PURPOSES = {
   contacts: { prefix: 'GOOGLE_CONTACTS', scope: CONTACTS_SCOPE },
   'sheets-import': { prefix: 'GOOGLE_SHEETS', scope: 'https://www.googleapis.com/auth/spreadsheets.readonly' },
   'sheets-export': { prefix: 'GOOGLE_SHEETS', scope: 'https://www.googleapis.com/auth/drive.file' },
+  gmail: { prefix: 'GOOGLE_GMAIL', scope: 'https://www.googleapis.com/auth/gmail.send' },
+  calendar: { prefix: 'GOOGLE_CALENDAR', scope: 'https://www.googleapis.com/auth/calendar.events.owned' },
 } satisfies Record<GooglePurpose, { prefix: string; scope: string }>;
 export const SESSION_SECONDS = 15 * 60;
 const CALLBACK_ROOT = '/api/me/integrations/google';
@@ -91,6 +93,16 @@ export function unseal<T>(value: string, config: GoogleConfig, id: string, owner
 }
 
 export interface Session<T> { id: string; owner: string; lease: string; expiresAt: string; payload: T }
+// Only call after acquiring an authenticated owner's purpose-bound session.
+// Returns to server code only; it performs no network request or token refresh.
+export function googleAccessToken(session: Session<{ token: string | null; tokenExpiresAt: number }>) {
+  const sessionExpiry = Date.parse(session.expiresAt);
+  if (!session.payload.token || !Number.isFinite(session.payload.tokenExpiresAt) || !Number.isFinite(sessionExpiry)
+    || session.payload.tokenExpiresAt <= Date.now() || sessionExpiry <= Date.now()) {
+    throw new HttpError(410, 'Google access expired. Connect Google again before continuing.');
+  }
+  return session.payload.token;
+}
 export async function createGoogleSession(config: GoogleConfig, owner: string, payload: unknown) {
   const handle = randomBytes(32).toString('base64url');
   const id = hashHandle(handle);
