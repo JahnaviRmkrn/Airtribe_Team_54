@@ -18,6 +18,15 @@
   // Pinned version + Subresource Integrity, loaded only when the mic is tapped.
   const SDK_URL = 'https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.27.0/dist/lib.iife.js';
   const SDK_SRI = 'sha384-ekuWfdL0BkeVAWv24yeCWtzVwYDQd4pCkPL5TKVDLmwDBeVxS2cTwo0wfsUNaFkJ';
+  // Match the pinned SDK above. Its default blob:/data: worklets are blocked
+  // by our strict CSP. Self-host the processors and its conditional resampler;
+  // no additional script origins, blob:, eval, or WebAssembly are needed.
+  // See docs/voice-csp-worklets.md for upstream provenance and checksums.
+  const WORKLET_PATHS = Object.freeze({
+    rawAudioProcessor: '/vendor/elevenlabs/1.27.0/rawAudioProcessor.js',
+    audioConcatProcessor: '/vendor/elevenlabs/1.27.0/audioConcatProcessor.js',
+  });
+  const LIBSAMPLERATE_PATH = '/vendor/libsamplerate/2.1.2/libsamplerate.worklet.js';
   const EXAMPLE = 'e.g. I want to call my sister Priya every week, catch up with my colleague Arjun about climbing, '
     + 'and see my neighbour Meera. Personal 50%, professional 30%, community 20%.';
 
@@ -233,21 +242,24 @@
         if (left) return;
         const session = await sdk.Conversation.startSession({
           signedUrl: signed.signed_url,
+          workletPaths: WORKLET_PATHS,
+          libsampleratePath: LIBSAMPLERATE_PATH,
           onConnect: () => {
+            if (left) return;
             status('Go ahead. Tell me about the people who matter.');
             setMode('live');
             $('end').classList.remove('hidden');
           },
           onDisconnect: () => {
+            if (left) return;
             convo = null;
             $('end').classList.add('hidden');
-            if (left) return;
             if (lines.some((l) => l.who === 'user')) extract(transcriptText());
             else { status('Call ended. Tap the mic to try again.'); setMode('idle'); }
           },
-          onMessage: (m) => addLine((m.role || m.source) === 'user' ? 'user' : 'agent', m.message),
-          onModeChange: ({ mode }) => { if (convo) setMode(mode === 'speaking' ? 'speaking' : 'live'); },
-          onError: (msg) => error('Voice error: ' + (msg && msg.message ? msg.message : msg)),
+          onMessage: (m) => { if (!left) addLine((m.role || m.source) === 'user' ? 'user' : 'agent', m.message); },
+          onModeChange: ({ mode }) => { if (!left && convo) setMode(mode === 'speaking' ? 'speaking' : 'live'); },
+          onError: (msg) => { if (!left) error('Voice error: ' + (msg && msg.message ? msg.message : msg)); },
         });
         // Left while connecting: close the call so the mic doesn't stay on.
         if (left) { session.endSession().catch(() => {}); return; }

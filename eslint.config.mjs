@@ -31,6 +31,9 @@ const eslintConfig = [
       // FastAPI runner's own frontend (compiled into static/), not part of the Next app.
       "src/**",
       "static/**",
+      // Unmodified, checksum-pinned upstream AudioWorklet assets (see docs/voice-csp-worklets.md).
+      "public/vendor/elevenlabs/1.27.0/*.js",
+      "public/vendor/libsamplerate/2.1.2/*.js",
     ],
   },
 ];

@@ -1,0 +1,28 @@
+{
+  "sdk": {
+    "package": "@elevenlabs/client",
+    "version": "1.27.0",
+    "url": "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.27.0/dist/lib.iife.js",
+    "integrity": "sha384-ekuWfdL0BkeVAWv24yeCWtzVwYDQd4pCkPL5TKVDLmwDBeVxS2cTwo0wfsUNaFkJ"
+  },
+  "assets": [
+    {
+      "path": "/vendor/elevenlabs/1.27.0/rawAudioProcessor.js",
+      "url": "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.27.0/worklets/rawAudioProcessor.js",
+      "bytes": 3953,
+      "sha256": "6731b766e9e6176d56b9c6964975dd7dd045db88ce3b2b0b787f5fbeb9f1325d"
+    },
+    {
+      "path": "/vendor/elevenlabs/1.27.0/audioConcatProcessor.js",
+      "url": "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.27.0/worklets/audioConcatProcessor.js",
+      "bytes": 2814,
+      "sha256": "e352f9c0e6e540baed2c16247015b997aa9f46767b3c6b0fc41afd3a5053870b"
+    },
+    {
+      "path": "/vendor/libsamplerate/2.1.2/libsamplerate.worklet.js",
+      "url": "https://cdn.jsdelivr.net/npm/@alexanderolsen/libsamplerate-js@2.1.2/dist/libsamplerate.worklet.js",
+      "bytes": 2016428,
+      "sha256": "ca6e162f194d3ee5a2d2cd3c3b49641d31e56845aeae507feca1cdf8aa8116cb"
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 // Run the actual browser assets, with synthetic providers and microphone only.
 const liveSource = readFileSync(new URL('../public/organizer/live.js', import.meta.url), 'utf8');
 const voiceSource = readFileSync(new URL('../public/organizer/voice.js', import.meta.url), 'utf8');
+const voiceAssets = JSON.parse(readFileSync(new URL('../public/vendor/voice-assets.json', import.meta.url), 'utf8'));
 const unavailable = () => ({ ok: false, status: 503, json: async () => ({ error: 'Not configured' }) });
 const denied = () => Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' });
 const deferred = () => {
@@ -73,11 +74,17 @@ function widget(options = {}) {
   const window = {
     MediaRecorder: options.noRecorder ? undefined : Recorder,
     addEventListener: (name, fn) => events.set(name, fn),
+    ElevenLabsClient: options.sdk,
   };
+  const scripts = [];
   const context = vm.createContext({
     window, MediaRecorder: window.MediaRecorder,
     navigator: { mediaDevices: options.noMediaDevices ? undefined : options.noGetUserMedia ? {} : { getUserMedia } },
-    document: { readyState: 'complete', createElement: element, head: { appendChild() { throw new Error('Unexpected SDK load'); } } },
+    document: { readyState: 'complete', createElement: () => ({ ...element(), remove: vi.fn() }), head: { appendChild(script) {
+      scripts.push(script);
+      if (options.loadSdk) options.loadSdk(script, window);
+      else throw new Error('Unexpected SDK load');
+    } } },
     location: { origin: 'https://example.test', href: '' },
     URL, Blob, fetch,
     setTimeout(fn) { timers.set(++nextTimer, fn); return nextTimer; },
@@ -88,7 +95,7 @@ function widget(options = {}) {
   const onResult = vi.fn();
   const voice = window.Voice.mount(root, onResult);
   const node = (key) => root.querySelector('[data-vx="' + key + '"]');
-  return { voice, window, node, box: root.querySelector('.vx'), getUserMedia, recorders, timers, fetch, extraction, onResult,
+  return { voice, window, node, scripts, box: root.querySelector('.vx'), getUserMedia, recorders, timers, fetch, extraction, onResult,
     click: () => node('orb').onclick(), leave: () => events.get('hashchange')(),
     paths: () => fetch.mock.calls.map(([url]) => new URL(url, 'https://example.test').pathname),
   };
@@ -229,5 +236,118 @@ describe('leaving during recording fallback startup', () => {
     expect(app.node('err').textContent).toBe('');
     expect(app.recorders).toHaveLength(0);
     expect(app.timers.size).toBe(0);
+  });
+});
+
+describe('ElevenLabs strict-CSP startup and recovery', () => {
+  const signedUrl = 'wss://synthetic.elevenlabs.io/conversation?token=mock';
+  const signed = (path) => path === '/api/voice/signed-url'
+    ? { ok: true, status: 200, json: async () => ({ signed_url: signedUrl }) } : undefined;
+  const expectedWorklets = {
+    rawAudioProcessor: '/vendor/elevenlabs/1.27.0/rawAudioProcessor.js',
+    audioConcatProcessor: '/vendor/elevenlabs/1.27.0/audioConcatProcessor.js',
+  };
+
+  it('lazily loads the pinned SRI SDK and passes both same-origin worklets plus the conditional resampler', async () => {
+    const session = { endSession: vi.fn(async () => {}) };
+    const startSession = vi.fn(async (options) => { options.onConnect(); return session; });
+    const app = widget({ fetch: signed, loadSdk: (script, window) => {
+      window.ElevenLabsClient = { Conversation: { startSession } };
+      script.onload();
+    } });
+    expect(app.scripts).toHaveLength(0);
+    expect(startSession).not.toHaveBeenCalled();
+    await app.click();
+    expect(app.scripts).toHaveLength(1);
+    expect(app.scripts[0]).toMatchObject({ src: voiceAssets.sdk.url, integrity: voiceAssets.sdk.integrity, crossOrigin: 'anonymous', async: true });
+    expect(startSession).toHaveBeenCalledTimes(1);
+    expect(startSession.mock.calls[0][0]).toMatchObject({
+      signedUrl, workletPaths: expectedWorklets,
+      libsampleratePath: '/vendor/libsamplerate/2.1.2/libsamplerate.worklet.js',
+    });
+    const options = startSession.mock.calls[0][0];
+    expect([...Object.values(options.workletPaths), options.libsampleratePath]).toEqual(voiceAssets.assets.map((asset) => asset.path));
+    expect(app.box.dataset.mode).toBe('live');
+    expect(app.getUserMedia).not.toHaveBeenCalled(); // provider is mocked, no real device access
+    app.voice.stop();
+    expect(session.endSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps typed extraction and a clean voice retry after a worklet-load failure', async () => {
+    const session = { endSession: vi.fn(async () => {}) };
+    const startSession = vi.fn().mockRejectedValueOnce(new Error('AudioWorklet module failed to load'))
+      .mockImplementationOnce(async (options) => { options.onConnect(); return session; });
+    const app = widget({ fetch: signed, sdk: { Conversation: { startSession } } });
+    await expect(app.click()).resolves.toBeUndefined();
+    expect(app.box.dataset.mode).toBe('idle');
+    expect(app.node('err').textContent).toBe('AudioWorklet module failed to load');
+    expect(app.node('fallback').open).toBe(true);
+    expect(app.node('orb').disabled).toBe(false);
+    app.node('text').value = 'Call Alice weekly';
+    await app.node('extract').onclick();
+    expect(app.onResult).toHaveBeenCalledWith(app.extraction);
+    await app.click();
+    expect(startSession).toHaveBeenCalledTimes(2);
+    expect(app.box.dataset.mode).toBe('live');
+    expect(app.node('err').textContent).toBe('');
+    expect(app.getUserMedia).not.toHaveBeenCalled();
+    expect(app.paths()).not.toContain('/api/voice/transcribe');
+    app.voice.stop();
+    expect(session.endSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start two SDK sessions while module loading is pending', async () => {
+    const pending = deferred();
+    const session = { endSession: vi.fn(async () => {}) };
+    const startSession = vi.fn(() => pending.promise);
+    const app = widget({ fetch: signed, sdk: { Conversation: { startSession } } });
+    const first = app.click();
+    await flush();
+    await app.click();
+    expect(startSession).toHaveBeenCalledTimes(1);
+    pending.resolve(session);
+    await first;
+    app.voice.stop();
+    expect(session.endSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['stop', 'hashchange'])('closes a late SDK session and ignores callbacks after %s', async (action) => {
+    const pending = deferred();
+    const session = { endSession: vi.fn(async () => {}) };
+    const startSession = vi.fn(() => pending.promise);
+    const app = widget({ fetch: signed, sdk: { Conversation: { startSession } } });
+    const started = app.click();
+    await flush();
+    if (action === 'stop') app.voice.stop(); else app.leave();
+    const status = app.node('status').textContent;
+    const options = startSession.mock.calls[0][0];
+    options.onConnect();
+    options.onMessage({ role: 'user', message: 'Ignore this stale transcript' });
+    options.onError('Ignore this stale error');
+    options.onModeChange({ mode: 'speaking' });
+    pending.resolve(session);
+    await started;
+    options.onDisconnect();
+    expect(session.endSession).toHaveBeenCalledTimes(1);
+    expect(app.node('status').textContent).toBe(status);
+    expect(app.node('log').children).toHaveLength(0);
+    expect(app.node('err').textContent).toBe('');
+    expect(app.node('end').classList.contains('hidden')).toBe(true);
+    expect(app.onResult).not.toHaveBeenCalled();
+    expect(app.paths()).not.toContain('/api/extract');
+    await app.click();
+    expect(startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('abandons a pending script load before creating an SDK session', async () => {
+    const startSession = vi.fn();
+    const app = widget({ fetch: signed, loadSdk: () => {} });
+    const started = app.click();
+    await flush();
+    app.voice.stop();
+    app.window.ElevenLabsClient = { Conversation: { startSession } };
+    app.scripts[0].onload();
+    await started;
+    expect(startSession).not.toHaveBeenCalled();
   });
 });

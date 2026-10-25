@@ -1,3 +1,8 @@
 
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads
+
+# Preserve checksum-pinned upstream bytes, including their original whitespace.
+public/vendor/elevenlabs/1.27.0/*.js -text
+public/vendor/libsamplerate/2.1.2/*.js -text
+public/vendor/elevenlabs/1.27.0/rawAudioProcessor.js whitespace=-blank-at-eol
