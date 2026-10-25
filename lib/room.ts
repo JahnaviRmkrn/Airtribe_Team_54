@@ -4,6 +4,8 @@ import { cookies } from 'next/headers';
 import { adminClient } from './supabase/admin';
 import { HttpError } from './http';
 import { amountPaise } from './pinelabs';
+import { checkoutConfigured } from './checkout-config';
+import { settleView, type SettleConfig, type SettlementRow } from './settle';
 import { shortlist, type GuestPreferences, type Venue } from './shortlist';
 import { areaCoords, centroid, isLatLng, nearestArea, roundTo, travel, type LatLng } from './geo';
 
@@ -86,8 +88,24 @@ export async function requireGuest(req: Request, room: MeetupRow) {
   return g;
 }
 
+// Settle-up config and claims. Before the settle-up migration is applied the
+// columns do not exist: rooms keep working, just without settle-up.
+const missingSchema = (error: { code?: string } | null) =>
+  !!error && ['42P01', '42703', 'PGRST204', 'PGRST205'].includes(error.code ?? '');
+async function loadSettle(meetupId: string): Promise<{ cfg: SettleConfig | null; rows: SettlementRow[] }> {
+  const db = adminClient();
+  const [{ data: cfg, error: cErr }, { data: rows, error: rErr }] = await Promise.all([
+    db.from('meetups').select('upi_vpa, upi_payee, settle_amount_paise').eq('id', meetupId).maybeSingle(),
+    db.from('meetup_settlements').select('attendee_id, status, amount_paise').eq('meetup_id', meetupId),
+  ]);
+  if (missingSchema(cErr) || missingSchema(rErr)) return { cfg: null, rows: [] };
+  if (cErr || rErr) throw new HttpError(503, 'Could not load room, please retry');
+  return { cfg: cfg as SettleConfig | null, rows: (rows ?? []) as SettlementRow[] };
+}
+
 // Public view of a room: only meetup details, attendees, shortlist and votes.
 // Never organizer identity, contacts, notes, guest secrets or payment details.
+// The organiser's UPI ID (settle_up) goes only to joined guests and the organiser.
 export async function roomView(req: Request, room: MeetupRow, isOrganizer = false) {
   const db = adminClient();
   const [{ data: attendees, error: aErr }, { data: votes, error: vErr }, { data: venues, error: venErr }, { data: payments, error: pErr }, me] = await Promise.all([
@@ -97,6 +115,7 @@ export async function roomView(req: Request, room: MeetupRow, isOrganizer = fals
     db.from('meetup_payments').select('attendee_id, status').eq('meetup_id', room.id),
     currentGuest(req, room),
   ]);
+  const settle = await loadSettle(room.id);
   // Never build a room (and shortlist) from partial data.
   if (aErr || vErr || venErr || pErr) throw new HttpError(503, 'Could not load room, please retry');
 
@@ -161,6 +180,9 @@ export async function roomView(req: Request, room: MeetupRow, isOrganizer = fals
     votes: counts,
     payments: paymentStatus,
     amount_due_paise: amountPaise(finalVenue?.price_per_person),
+    // false = no card checkout on this deployment; the room hides the Pine Labs card.
+    checkout_configured: checkoutConfigured(),
+    settle_up: settleView(settle.cfg, settle.rows, { title: room.title, canSeeVpa: !!me || isOrganizer }),
     leading_venue_id: leading?.[0] ?? null,
     me: me ? { attendee_id: me.id, voted_venue_id: (votes ?? []).find((v) => v.attendee_id === me.id)?.venue_id ?? null } : null,
     is_organizer: isOrganizer,

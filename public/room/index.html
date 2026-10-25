@@ -47,9 +47,32 @@
       <button id="pay-btn" class="btn primary" type="button">Pay with Pine Labs</button>
       <button id="payment-check" class="btn ghost" type="button">Check payment status</button>
     </section>
+    <section id="settle-card" class="card hidden" aria-label="Settle up">
+      <h2>Settle up</h2>
+      <p id="settle-amount" class="settle-amount"></p>
+      <div class="settle-actions">
+        <a id="settle-pay" class="btn primary" href="#" rel="noopener">Pay in a UPI app</a>
+        <button id="settle-qr-btn" class="btn ghost" type="button">Show QR</button>
+        <button id="settle-copy" class="btn ghost" type="button">Copy UPI ID</button>
+      </div>
+      <div id="settle-qr" class="qr-box hidden"></div>
+      <p id="settle-status" role="status" aria-live="polite"></p>
+      <div class="settle-actions">
+        <button id="settle-claim" class="btn" type="button">I've paid</button>
+        <button id="settle-undo" class="btn ghost sm hidden" type="button">Undo</button>
+      </div>
+      <p class="muted">Goes straight from your UPI app to the organiser's account. muop never handles the money.</p>
+    </section>
     <p id="conn" class="conn hidden" role="status"></p>
 
     <section id="org-panel" class="card org hidden" aria-label="Organiser controls"></section>
+
+    <section id="org-settle" class="card hidden" aria-label="Collect money">
+      <div class="card-head"><h2>Collect money</h2><span id="org-settle-count" class="muted"></span></div>
+      <div id="org-settle-form"></div>
+      <ul id="org-settle-list" class="people"></ul>
+      <p id="org-settle-error" class="error" role="alert"></p>
+    </section>
 
     <section id="join-card" class="card hidden">
       <h2>Join with your name</h2>
