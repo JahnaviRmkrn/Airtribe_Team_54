@@ -182,4 +182,70 @@ describe('organizer authentication navigation ownership', () => {
     expect(app.node('app').innerHTML).not.toContain('Try again');
     expect(app.context.window.onhashchange).toBeUndefined();
   });
+
+  it.each(['/api/me/dashboard', '/api/me'].flatMap((authPath) => [200, 401, 503].map((otherStatus) => [authPath, otherStatus])))('redirects a boot %s 401 after a hash change with the other read returning %i', async (authPath, otherStatus) => {
+    const requests = new Map(['/api/me/dashboard', '/api/me'].map((path) => [path, deferred()]));
+    const app = setup({ autoBoot: true, fetch: (path) => requests.get(path).promise });
+    expect(app.context.window.onhashchange).toBeUndefined();
+    expect(app.node('app').innerHTML).toContain('Loading...');
+    app.context.location.hash = '#/contacts?next=https://evil.test/&label=A%20B';
+    const otherPath = authPath === '/api/me' ? '/api/me/dashboard' : '/api/me';
+    requests.get(otherPath).resolve(response({ user: { id: owner }, is_empty: false, error: 'Temporarily unavailable' }, otherStatus));
+    await requests.get(otherPath).promise;
+    if (otherStatus === 503) {
+      await app.result;
+      expect(app.node('app').innerHTML).toContain('Try again');
+    }
+    requests.get(authPath).resolve(response({}, 401));
+    await app.result;
+    // Promise.all can finish on the other error first. Let this auth response
+    // settle too, rather than assuming boot's rejected promise awaited it.
+    await requests.get(authPath).promise;
+    expect(app.context.location.href).toBe('/login?next=' + encodeURIComponent('/organizer/' + app.context.location.hash));
+    const login = new URL(app.context.location.href, app.context.location.origin);
+    expect(new URL(login.searchParams.get('next'), login).origin).toBe(app.context.location.origin);
+    expect(app.run('contactCreateOwner')).toBeNull();
+    expect(app.run('contactCreateRetryEnabled')).toBe(false);
+    expect(app.context.window.onhashchange).toBeUndefined();
+    expect(app.calls.map(({ path }) => path)).toEqual(['/api/me/dashboard', '/api/me']);
+    for (const { opts } of app.calls) expect(Object.keys(opts).sort()).toEqual(['credentials', 'headers']);
+  });
+
+  it.each([200, 503])('keeps a boot redirect when the other read finishes later with %i', async (status) => {
+    const auth = deferred(), other = deferred();
+    const app = setup({ autoBoot: true, fetch: (path) => path === '/api/me' ? auth.promise : other.promise });
+    app.context.location.hash = '#/calendar';
+    auth.resolve(response({}, 401)); await app.result;
+    const login = '/login?next=' + encodeURIComponent('/organizer/#/calendar');
+    expect(app.context.location.href).toBe(login);
+    other.resolve(response({ is_empty: false, error: 'Unavailable' }, status));
+    await other.promise;
+    expect(app.context.location.href).toBe(login);
+    expect(app.context.window.onhashchange).toBeUndefined();
+    expect(app.calls).toHaveLength(2);
+  });
+
+  it('still installs routing at the latest hash after successful boot reads', async () => {
+    const pending = deferred();
+    const app = setup({ autoBoot: true, fetch: (path) => path === '/api/me/contacts' ? response({ contacts: [] }) : pending.promise });
+    app.context.MutationObserver = class { observe() {} };
+    app.context.location.hash = '#/contacts';
+    pending.resolve(response({ user: { id: owner }, capabilities: { contact_create_retry: true }, is_empty: false }));
+    await app.result;
+    expect(app.context.location.href).toBeUndefined();
+    expect(app.context.window.onhashchange).toBeTypeOf('function');
+    expect(app.run('contactCreateOwner')).toBe(owner);
+    expect(app.run('contactCreateRetryEnabled')).toBe(true);
+    expect(app.calls.map(({ path }) => path)).toEqual(['/api/me/dashboard', '/api/me', '/api/me/contacts']);
+  });
+
+  it('does not let obsolete boot reads redirect after a newer navigation generation', async () => {
+    const pending = deferred();
+    const app = setup({ autoBoot: true, fetch: () => pending.promise });
+    app.context.location.hash = '#/contacts'; app.run("renderLoading('New view')");
+    pending.resolve(response({}, 401)); await app.result;
+    expect(app.context.location.href).toBeUndefined();
+    expect(app.node('app').innerHTML).toContain('New view');
+    expect(app.calls).toHaveLength(2);
+  });
 });

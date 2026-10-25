@@ -39,7 +39,7 @@ const parseInterests = (text) => String(text || '').split(',').map((s) => s.trim
 
 class AuthError extends Error {}
 
-async function api(path, opts = {}) {
+async function api(path, opts = {}, authContext = 'view') {
   // A late auth failure belongs to the view that started this request, not
   // a newer navigation (including a hash change before hashchange runs).
   const requestNav = navGen;
@@ -50,8 +50,11 @@ async function api(path, opts = {}) {
     ...opts,
   });
   if (res.status === 401) {
-    if (!stale(requestNav) && (location.hash || '') === requestHash) {
-      const next = '/organizer/' + requestHash;
+    const currentHash = location.hash || '';
+    // Boot reads authenticate before the hash router exists. A hash-only
+    // change still belongs to that boot, but a newer generation never does.
+    if (!stale(requestNav) && (authContext === 'boot' || currentHash === requestHash)) {
+      const next = '/organizer/' + currentHash;
       location.href = '/login?next=' + encodeURIComponent(next);
     }
     throw new AuthError('Not signed in - redirecting to login.');
@@ -1844,7 +1847,7 @@ async function boot() {
   renderLoading();
   let d;
   try {
-    const [dashboard, me] = await Promise.all([api('/api/me/dashboard'), api('/api/me')]);
+    const [dashboard, me] = await Promise.all([api('/api/me/dashboard', {}, 'boot'), api('/api/me', {}, 'boot')]);
     if (!me?.user?.id) throw new Error('Could not verify your account. Please reload.');
     contactCreateOwner = me.user.id;
     contactCreateRetryEnabled = me.capabilities?.contact_create_retry === true;
