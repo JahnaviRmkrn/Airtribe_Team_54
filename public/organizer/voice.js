@@ -208,7 +208,7 @@
     }
 
     async function start() {
-      if (starting || convo || live || rec) return;
+      if (left || starting || convo || live || rec) return;
       starting = true;
       error('');
       try {
@@ -217,12 +217,16 @@
         if (window.LiveVoice) {
           try { await startLive(); return; } catch (e) { if (e.status !== 503) throw e; } // 503: no Gemini key -> next option
         }
+        if (left) return;
         let signed;
         try {
           signed = await getJSON('/api/voice/signed-url');
           if (left) return;
         } catch (e) {
-          if (e.status === 503) return startRecording(); // no ElevenLabs: record + Gemini
+          if (left) return;
+          // Await so microphone/recorder failures reach the recovery UI and
+          // repeated taps cannot start another recording while this is pending.
+          if (e.status === 503) return await startRecording(); // no ElevenLabs: record + Gemini
           throw e;
         }
         const sdk = await loadSdk();
@@ -249,6 +253,7 @@
         if (left) { session.endSession().catch(() => {}); return; }
         convo = session;
       } catch (e) {
+        if (left) return;
         convo = null;
         setMode('idle');
         status('Voice did not start - you can type instead.');
@@ -264,16 +269,29 @@
     const MAX_RECORD_MS = 90_000;
 
     async function startRecording() {
-      if (!window.MediaRecorder || !navigator.mediaDevices) return voiceUnavailable('This browser cannot record audio.');
+      if (!window.MediaRecorder || typeof navigator.mediaDevices?.getUserMedia !== 'function') return voiceUnavailable('This browser cannot record audio.');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (left) { stream.getTracks().forEach((t) => t.stop()); return; }
-      const mimeType = RECORD_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      const chunks = [];
-      recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
-      recorder.onstop = () => uploadRecording(chunks, recorder.mimeType || mimeType || 'audio/webm');
-      recorder.start();
-      rec = { recorder, stream, timer: setTimeout(() => stop(), MAX_RECORD_MS) };
+      let recorder;
+      try {
+        const mimeType = RECORD_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
+        recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        const chunks = [];
+        recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+        recorder.onstop = () => uploadRecording(chunks, recorder.mimeType || mimeType || 'audio/webm');
+        recorder.start();
+        rec = { recorder, stream, timer: setTimeout(() => stop(), MAX_RECORD_MS) };
+      } catch (e) {
+        // The stream is already acquired, but endRecording cannot see it yet.
+        // Do not leave the mic on or upload a failed recording during cleanup.
+        if (recorder) {
+          recorder.ondataavailable = null;
+          recorder.onstop = null;
+          try { if (recorder.state !== 'inactive') recorder.stop(); } catch { /* already stopped */ }
+        }
+        stream.getTracks().forEach((t) => t.stop());
+        throw e;
+      }
       status('Listening - tell me about the people who matter, then tap "Done talking".');
       setMode('live');
       $('end').classList.remove('hidden');
