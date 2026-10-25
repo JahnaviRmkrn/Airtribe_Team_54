@@ -45,6 +45,7 @@ export function contentSecurityPolicy(kind: 'static' | 'next', env: Env = {}): s
     'connect-src': [
       "'self'",
       ...supabaseSources(env.supabaseUrl),
+      'https://generativelanguage.googleapis.com',
       'wss://generativelanguage.googleapis.com',
       'https://api.elevenlabs.io',
       'wss://api.elevenlabs.io',
