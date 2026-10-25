@@ -15,7 +15,8 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            args: --mac dmg zip
+            # Universal binary: one dmg/zip runs on Intel and Apple Silicon.
+            args: --mac dmg zip --universal
             artifact: macos
           - os: windows-latest
             args: --win nsis portable
@@ -80,4 +81,28 @@ jobs:
         with:
           name: muop-android
           path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      # Signed release APK, only when the keystore secrets exist (mobile/README.md).
+      - name: Check for release keystore secret
+        id: ks
+        run: echo "present=${{ secrets.MUOP_KEYSTORE_BASE64 != '' }}" >> "$GITHUB_OUTPUT"
+      - name: Restore release keystore
+        if: steps.ks.outputs.present == 'true'
+        run: echo "$MUOP_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/muop-release.jks"
+        env:
+          MUOP_KEYSTORE_BASE64: ${{ secrets.MUOP_KEYSTORE_BASE64 }}
+      - name: Build signed release APK
+        if: steps.ks.outputs.present == 'true'
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease
+        env:
+          MUOP_KEYSTORE_FILE: ${{ runner.temp }}/muop-release.jks
+          MUOP_KEYSTORE_PASSWORD: ${{ secrets.MUOP_KEYSTORE_PASSWORD }}
+          MUOP_KEY_ALIAS: ${{ secrets.MUOP_KEY_ALIAS }}
+          MUOP_KEY_PASSWORD: ${{ secrets.MUOP_KEY_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        if: steps.ks.outputs.present == 'true'
+        with:
+          name: muop-android-release
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error

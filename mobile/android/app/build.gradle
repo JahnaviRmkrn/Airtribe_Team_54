@@ -16,10 +16,24 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Release signing comes from CI secrets (see mobile/README.md). Without
+    // them the release build stays unsigned and CI skips publishing it —
+    // a debug-signed APK must never be offered for download.
+    signingConfigs {
+        release {
+            if (System.getenv('MUOP_KEYSTORE_FILE')) {
+                storeFile file(System.getenv('MUOP_KEYSTORE_FILE'))
+                storePassword System.getenv('MUOP_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('MUOP_KEY_ALIAS')
+                keyPassword System.getenv('MUOP_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (System.getenv('MUOP_KEYSTORE_FILE')) signingConfig signingConfigs.release
         }
     }
 }

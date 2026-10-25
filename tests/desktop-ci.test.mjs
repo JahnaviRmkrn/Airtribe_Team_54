@@ -5,7 +5,7 @@ const workflow = readFileSync(new URL('../.github/workflows/desktop.yml', import
 
 describe('desktop CI workflow', () => {
   it('builds installers for macOS, Windows and Linux plus the Android APK', () => {
-    for (const needle of ['macos-latest', '--mac dmg zip', 'windows-latest', '--win nsis portable', 'ubuntu-latest', '--linux AppImage', 'assembleDebug']) {
+    for (const needle of ['macos-latest', '--mac dmg zip --universal', 'windows-latest', '--win nsis portable', 'ubuntu-latest', '--linux AppImage', 'assembleDebug', 'assembleRelease', 'MUOP_KEYSTORE_BASE64']) {
       expect(workflow).toContain(needle);
     }
   });

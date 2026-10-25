@@ -16,7 +16,19 @@ cd android && ./gradlew assembleDebug
 # -> app/build/outputs/apk/debug/app-debug.apk (debug-signed, sideloadable)
 ```
 
-For a Play Store release build, create a keystore and run
-`./gradlew assembleRelease` with signing configured in `android/app/build.gradle`.
+For a signed release build (the only APK that may be offered for download —
+debug builds are debuggable and debug-signed):
+
+```bash
+keytool -genkeypair -v -keystore muop-release.jks -alias muop \
+  -keyalg RSA -keysize 2048 -validity 10000
+base64 -w0 muop-release.jks   # keep the .jks itself out of git, forever
+```
+
+Set these GitHub Actions secrets: `MUOP_KEYSTORE_BASE64` (output above),
+`MUOP_KEYSTORE_PASSWORD`, `MUOP_KEY_ALIAS` (`muop`), `MUOP_KEY_PASSWORD`.
+CI then builds `app-release.apk` alongside the debug APK. Locally, export
+the same four values as env vars (`MUOP_KEYSTORE_FILE` = path to the .jks)
+and run `./gradlew assembleRelease`.
 This machine's toolchain used here lives in `~/.local/share/android-dev/`
 (JDK 21 + SDK, not committed).
