@@ -15,7 +15,8 @@ jobs:
       matrix:
         include:
           - os: macos-latest
-            args: --mac dmg zip
+            # Universal binary: one dmg/zip runs on Intel and Apple Silicon.
+            args: --mac dmg zip --universal
             artifact: macos
           - os: windows-latest
             args: --win nsis portable
