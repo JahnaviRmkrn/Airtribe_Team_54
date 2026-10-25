@@ -54,6 +54,7 @@ async function api(path, opts = {}) {
     const err = await res.json().catch(() => ({}));
     const error = new Error(err.error || ('Request failed (' + res.status + ')'));
     error.code = err.code;
+    error.status = res.status;
     throw error;
   }
   if (res.status === 201 && opts.method === 'POST' && path === '/api/me/meetups') {
@@ -238,6 +239,8 @@ function route() {
   }
   const contactMatch = hash.match(/^#\/contacts\/(.+)$/);
   if (contactMatch) return contactDetailView(decodeURIComponent(contactMatch[1]));
+  const meetupEditMatch = hash.match(/^#\/meetups\/([^/]+)\/edit$/);
+  if (meetupEditMatch) return meetupEditView(decodeURIComponent(meetupEditMatch[1]));
   const views = {
     '#/dashboard': dashboardView,
     '#/contacts': contactsView,
@@ -1052,6 +1055,8 @@ function editContactForm(id, c) {
 
 // --- meetups -----------------------------------------------------------------
 
+let meetupNotice = '';
+
 async function meetupsView(created) {
   const nav = renderLoading('Loading meetups...');
   let meetups;
@@ -1063,6 +1068,7 @@ async function meetupsView(created) {
   if (stale(nav)) return;
   el('app').innerHTML = `
     <h1>Meetups</h1>
+    ${meetupNotice ? `<p class="card" role="status">${esc(meetupNotice)}</p>` : ''}
     ${created ? createdCard(created) : ''}
     <section class="card">
       <h2>Plan a meetup</h2>
@@ -1087,6 +1093,7 @@ async function meetupsView(created) {
       <h2>Planned</h2>
       ${meetups.length ? meetups.slice().sort((x, y) => ((x.status || 'open') !== 'open') - ((y.status || 'open') !== 'open')).map(meetupRow).join('') : '<p class="muted empty">No meetups yet. Plan one above and share the room link with your people.</p>'}
     </section>`;
+  meetupNotice = '';
 
   if (window.PlanByVoice) window.PlanByVoice.mount(el('plan-voice'));
   const pre = sessionStorage.getItem('org_meetup_title');
@@ -1128,20 +1135,150 @@ function meetupRow(m) {
   const url = m.room_url || (m.room_token ? roomUrl(m.room_token) : '');
   const closed = (m.status || 'open') !== 'open';
   return `
-    <div class="row${closed ? ' is-closed' : ''}">
+    <div class="row meetup-row${closed ? ' is-closed' : ''}">
       <div><strong>${esc(m.title)}</strong>
         ${m.activity ? `<span class="tag">${esc(m.activity)}</span>` : ''}
         <span class="tag ${closed ? 'status-closed' : 'status-open'}">${esc(m.status || 'open')}</span>
-        <div class="muted">${esc([m.area, fmtDate(m.starts_at), m.budget ? '₹' + m.budget + ' per person' : ''].filter(Boolean).join(' · '))}</div>
+        <div class="muted">${esc([m.area, fmtDate(m.starts_at), m.budget != null ? '₹' + m.budget + ' per person' : ''].filter(Boolean).join(' · '))}</div>
         ${url ? `<div class="muted mono">${esc(url)}</div>` : ''}
       </div>
       <div class="actions">
+        ${!closed ? `<a class="button" href="#/meetups/${encodeURIComponent(m.id)}/edit">Edit / reschedule</a>` : ''}
         ${url ? `<button data-copy="${esc(url)}">Copy link</button>` : ''}
         ${url && !closed ? `<button data-qr="${esc(url)}">QR code</button>` : ''}
         ${url && !closed ? `<a class="button" href="${esc(meetupInviteEmail(m, url))}">Email invite</a>` : ''}
         ${!closed ? `<button class="danger" data-close="${esc(m.id)}">Close</button>` : ''}
       </div>
     </div>`;
+}
+
+// The editor deliberately uses UTC, not the device's local wall clock. That
+// avoids silently selecting one of two DST-fold instants or normalizing a gap.
+function meetupUtcInput(iso) {
+  if (!iso) return '';
+  return new Date(iso).toISOString().slice(0, -1)
+    .replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '').replace(/:00$/, '');
+}
+
+function meetupUtcISO(value) {
+  if (!value) return null;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(value);
+  if (!parts) throw new Error('Enter a valid date and time in UTC.');
+  const [, year, month, day, hour, minute, second = '0', fraction = ''] = parts;
+  const date = new Date(value + 'Z');
+  if (+year < 1 || !Number.isFinite(date.getTime()) ||
+      date.getUTCFullYear() !== +year || date.getUTCMonth() + 1 !== +month || date.getUTCDate() !== +day ||
+      date.getUTCHours() !== +hour || date.getUTCMinutes() !== +minute || date.getUTCSeconds() !== +second ||
+      date.getUTCMilliseconds() !== +(fraction.padEnd(3, '0'))) {
+    throw new Error('Enter a real calendar date and time in UTC; invalid dates are not adjusted automatically.');
+  }
+  return date.toISOString();
+}
+
+function meetupEditPatch(meetup, values, originalTime) {
+  const patch = {};
+  for (const [field, max, required] of [['title', 120, true], ['activity', 40, true], ['area', 80, false], ['notes', 2000, false]]) {
+    const value = values[field].trim();
+    if ((required && !value) || value.length > max) throw new Error(`${catLabel(field)} ${required ? 'must contain 1 to' : 'must not exceed'} ${max} characters.`);
+    if (value !== (meetup[field] ?? '')) patch[field] = required ? value : (value || null);
+  }
+  const budgetText = values.budget.trim();
+  if (budgetText && (!/^\d+$/.test(budgetText) || Number(budgetText) > 1000000)) {
+    throw new Error('Budget must be a whole number from ₹0 to ₹1,000,000, or left blank.');
+  }
+  const budget = budgetText ? Number(budgetText) : null;
+  if (budget !== (meetup.budget ?? null)) patch.budget = budget;
+  // Never round-trip an unchanged timestamp through Date: the stored offset,
+  // seconds and sub-millisecond precision must survive unrelated detail edits.
+  if (values.starts_at !== originalTime) patch.starts_at = meetupUtcISO(values.starts_at);
+  return patch;
+}
+
+async function meetupEditView(id) {
+  const nav = renderLoading('Loading meetup details...');
+  const editHash = location.hash;
+  // hashchange runs later than a link/Back click. Check the URL too so a
+  // response settling in that gap cannot redirect over the user's navigation.
+  const isCurrent = () => !stale(nav) && location.hash === editHash;
+  let meetup;
+  try {
+    const result = await api('/api/me/meetups/' + encodeURIComponent(id));
+    meetup = result.meetup;
+    if (!meetup || !meetup.updated_at) throw new Error('Could not load the current meetup version. Try again.');
+  } catch (error) { if (isCurrent()) renderError(error, () => meetupEditView(id)); return; }
+  if (!isCurrent()) return;
+  const back = '<a class="button" href="#/meetups">Back to meetups</a>';
+  if (meetup.status !== 'open') {
+    el('app').innerHTML = `<h1>Meetup closed</h1><section class="card"><p>Closed rooms cannot be edited or reopened.</p>${back}</section>`;
+    return;
+  }
+  const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'device timezone';
+  const localTime = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'long' }) : 'Not scheduled';
+  el('app').innerHTML = `
+    <h1>Edit / reschedule meetup</h1>
+    <p>${back}</p>
+    <section class="card">
+      <p>Keep the same room link, guests, votes and confirmed venue. Guests are not automatically notified of changes; tell them yourself.</p>
+      <p class="muted">No email, calendar update or message is sent when you save.</p>
+      <p><strong>Current schedule in ${esc(localZone)}:</strong> ${esc(localTime(meetup.starts_at))}</p>
+      <form id="me-form">
+        <div class="form-grid">
+          <label class="full">Title <input id="me-title" required maxlength="120"></label>
+          <label>Activity <input id="me-activity" required maxlength="40" list="me-activities"><datalist id="me-activities">${ACTIVITIES.map((a) => `<option value="${a}">`).join('')}</datalist></label>
+          <label>Area (optional) <input id="me-area" maxlength="80"></label>
+          <label>Date &amp; time (UTC, optional) <input id="me-when" type="datetime-local" step="0.001" min="0001-01-01T00:00" max="9999-12-31T23:59:59.999" aria-describedby="me-timezone"></label>
+          <label>Budget per person (₹, optional) <input id="me-budget" type="number" min="0" max="1000000" step="1"></label>
+          <p class="muted full" id="me-timezone">This date and time is in UTC (UTC+00:00), not your device's local timezone. Clear it to remove the scheduled time.</p>
+          <p class="full" id="me-local-preview" role="status" aria-live="polite"></p>
+          <label class="full">Private organizer notes (optional) <textarea id="me-notes" maxlength="2000" rows="3"></textarea></label>
+        </div>
+        <p class="error" id="me-error" role="alert"></p>
+        <p class="muted" id="me-status" role="status"></p>
+        <div class="quick-actions"><button class="primary" id="me-submit" type="submit">Save changes</button><button id="me-cancel" type="button">Cancel</button><button id="me-reload" type="button" hidden>Reload latest details</button></div>
+      </form>
+    </section>`;
+  for (const field of ['title', 'activity', 'area', 'budget', 'notes']) el('me-' + field).value = meetup[field] ?? '';
+  el('me-when').value = meetupUtcInput(meetup.starts_at);
+  const originalTime = el('me-when').value;
+  const previewTime = () => {
+    if (!isCurrent()) return;
+    try {
+      const value = el('me-when').value;
+      const iso = value === originalTime ? meetup.starts_at : meetupUtcISO(value);
+      el('me-local-preview').textContent = `Proposed schedule in ${localZone}: ${localTime(iso)}`;
+    } catch (error) { el('me-local-preview').textContent = error.message; }
+  };
+  el('me-when').oninput = previewTime;
+  previewTime();
+  el('me-cancel').onclick = () => { if (isCurrent()) { navGen++; go('#/meetups'); } };
+  el('me-reload').onclick = () => {
+    if (isCurrent() && confirm('Reload the latest meetup details? Your unsaved edits will be discarded.')) return meetupEditView(id);
+  };
+  let blocked = false;
+  wireCreateForm('me-form', 'me', nav, 'Saving changes...', async () => {
+    if (!isCurrent()) return;
+    if (blocked) throw new Error('Reload the latest details before saving again. Your edits have not been discarded.');
+    const patch = meetupEditPatch(meetup, {
+      title: el('me-title').value, activity: el('me-activity').value, area: el('me-area').value,
+      starts_at: el('me-when').value, budget: el('me-budget').value, notes: el('me-notes').value,
+    }, originalTime);
+    if (Object.keys(patch).length) {
+      try {
+        await api('/api/me/meetups/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify({ ...patch, expected_updated_at: meetup.updated_at }) });
+      } catch (error) {
+        if (isCurrent() && [404, 409, 410].includes(error.status)) {
+          blocked = true;
+          el('me-reload').hidden = false;
+        }
+        throw error;
+      }
+    }
+    if (isCurrent()) {
+      meetupNotice = Object.keys(patch).length ? 'Meetup updated. Guests are not automatically notified; tell them about the changes yourself.' : 'No meetup changes to save.';
+      navGen++;
+      go('#/meetups');
+    }
+  });
 }
 
 function wireMeetupRows() {

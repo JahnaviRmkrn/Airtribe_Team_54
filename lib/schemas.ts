@@ -52,6 +52,8 @@ export const meetupCreate = meetupBase.partial().required({ title: true }).exten
   activity: meetupBase.shape.activity.default('dinner'),
 });
 export const meetupUpdate = meetupBase.partial().extend({
+  // Optional optimistic concurrency token; never written as a meetup column.
+  expected_updated_at: z.iso.datetime({ offset: true }).optional(),
   status: z.enum(['open', 'closed']).optional(),
   final_venue_id: z.uuid().nullable().optional(),
 });

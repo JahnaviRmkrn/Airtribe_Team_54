@@ -90,6 +90,10 @@ button:disabled { opacity: 0.6; cursor: default; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid #f3ecdc; }
 .row.spread { border-top: none; }
 .row .actions { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+/* Editing adds another action; wrap meetup rows at tablet widths too. */
+.meetup-row { flex-wrap: wrap; }
+.meetup-row > :first-child { flex: 1 1 240px; }
+.meetup-row .actions { flex-shrink: 1; max-width: 100%; }
 
 .inline-form { display: grid; grid-template-columns: 2fr 1fr 2fr auto; gap: 8px; align-items: end; }
 .goals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
@@ -151,6 +155,7 @@ fieldset legend { font-family: "Newsreader", Georgia, serif; font-size: 15px; pa
   .ob-row .remove-row { margin-bottom: 0; }
   .form-grid { grid-template-columns: 1fr; }
   .row { flex-direction: column; align-items: flex-start; }
+  .meetup-row > :first-child { flex: initial; }
   .container { margin: 14px auto; }
   button { padding: 11px 16px; }
 }

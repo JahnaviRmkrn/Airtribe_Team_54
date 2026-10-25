@@ -95,6 +95,14 @@ Ported from Arindom Chetia's PR #3 (FastAPI `routers/voice.py`, `static/voice.*`
 Contact fields: `name, category, interests[], notes, preferred_frequency_days,
 last_interaction_at, next_followup_at` (ISO timestamps with offset).
 
+Meetup detail edits accept `title, activity, area, starts_at, budget, notes`.
+Send only changed fields, and optionally `expected_updated_at` with the exact
+timestamp returned by GET for an atomic version check. A stale version returns
+409; reload and review instead of overwriting newer changes. Detail edits to
+closed rooms return 410. Clearing nullable fields uses `null`; budget `0` is
+valid. Changing `starts_at` recalculates room expiry. An edit never sends guest
+notifications or changes the room link, guests, votes, or confirmed venue.
+
 ## Public room API (no account; scoped to the room token)
 
 | Method | Path | Body | Who |
@@ -250,7 +258,13 @@ http://localhost:3000/organizer/ . Any 401 from `/api/me/*` redirects to
 - **Meetups** - create (title, activity, area, optional date/time and budget
   in INR - no contact picker; guests join via the link), then Copy link / Copy
   invite text. The room page `/m/<token>` is Person C's (see Guest room page);
-  the app only links to it. Meetups can be closed via PATCH `{ status: "closed" }`.
+  the app only links to it. Open meetups have **Edit / reschedule** with current
+  details, Save and Cancel. Its date/time input is explicitly UTC to avoid DST
+  ambiguity, with current/proposed local times and the device timezone shown
+  beside it. Unchanged timestamps keep their exact stored precision. Saves use
+  a version check; conflicts require explicitly reloading the latest details.
+  Guests are never notified automatically. Meetups can be closed via PATCH
+  `{ status: "closed" }`; closed rooms cannot be edited or reopened.
 - Errors render the API's `{ "error": "message" }`; every list has loading,
   empty and error states; everything survives a refresh and works at phone and
   desktop widths.
