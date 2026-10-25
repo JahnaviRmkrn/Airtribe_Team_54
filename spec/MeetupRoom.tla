@@ -12,10 +12,13 @@
 (*               record_interaction runs in one locked transaction.        *)
 (* Fixed = FALSE models PR #1: only the API snapshot check, then an        *)
 (*               unconditional write; read-modify-write for interactions.  *)
+(* ConfirmFreezesVotes = TRUE models 20261024130000_room_state_guards.sql: *)
+(*               the vote-DELETE trigger also refuses once a venue is      *)
+(*               confirmed (before it, only the API snapshot checked).     *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets
 
-CONSTANTS Guests, Venues, MaxGuests, Times, Fixed, UnvoteGuarded
+CONSTANTS Guests, Venues, MaxGuests, Times, Fixed, UnvoteGuarded, ConfirmFreezesVotes
 
 None == "none"
 NoOp == [op |-> "none"]   \* empty pending request
@@ -66,7 +69,7 @@ StartVote(g, v) ==
   /\ UNCHANGED <<status, expired, final, joined, votes, bad, last, inflight, recorded>>
 
 StartUnvote(g) ==
-  /\ pending[g] = NoOp /\ g \in joined /\ RoomOpen
+  /\ pending[g] = NoOp /\ g \in joined /\ RoomOpen /\ final = None
   /\ pending' = [pending EXCEPT ![g] = [op |-> "unvote"]]
   /\ UNCHANGED <<status, expired, final, joined, votes, bad, last, inflight, recorded>>
 
@@ -76,12 +79,14 @@ Guard(p) ==
   CASE p.op = "join"   -> RoomOpen /\ Cardinality(joined) < MaxGuests
     [] p.op = "edit"   -> RoomOpen
     [] p.op = "vote"   -> RoomOpen /\ final = None
-    [] p.op = "unvote" -> UnvoteGuarded => RoomOpen   \* DELETE has no trigger unless UnvoteGuarded
+    [] p.op = "unvote" -> UnvoteGuarded =>            \* DELETE has no trigger unless UnvoteGuarded
+                            RoomOpen /\ (ConfirmFreezesVotes => final = None)
 
 Violations(p) ==
   (IF RoomOpen THEN {} ELSE {"write-to-closed-room"})
   \cup (IF p.op = "join" /\ Cardinality(joined) >= MaxGuests THEN {"over-capacity"} ELSE {})
   \cup (IF p.op = "vote" /\ final # None THEN {"vote-after-confirm"} ELSE {})
+  \cup (IF p.op = "unvote" /\ final # None THEN {"unvote-after-confirm"} ELSE {})
 
 Commit(g) ==
   LET p == pending[g] IN
@@ -150,6 +155,8 @@ TypeOK ==
 NoWriteToClosedRoom == "write-to-closed-room" \notin bad
 CapacityRespected   == Cardinality(joined) <= MaxGuests /\ "over-capacity" \notin bad
 NoVoteAfterConfirm  == "vote-after-confirm" \notin bad
+\* Confirmed vote totals never change: no withdrawal commits after confirmation.
+NoUnvoteAfterConfirm == "unvote-after-confirm" \notin bad
 OnlyMembersVote     == \A g \in Guests : votes[g] # None => g \in joined
 \* One vote per guest holds by construction: votes is a function (DB unique key).
 LastIsLatest        == last = Max(recorded)
