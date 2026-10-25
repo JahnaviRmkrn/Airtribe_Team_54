@@ -290,6 +290,28 @@ describe('committed state changes between handler read and database write', () =
     expect((await sql('select id from meetups where id = $1', [tenants.alice.meetup.id])).rows).toEqual([]);
   });
 
+  it('keeps a close database failure generic instead of echoing internal details', async () => {
+    const before = (await sql('select * from meetups where id = $1', [tenants.alice.meetup.id])).rows;
+    const from = deps.user.from;
+    deps.user.from = (table) => {
+      const query = from(table);
+      if (table === 'meetups') {
+        const update = query.update;
+        query.update = (body) => {
+          query.then = (resolve, reject) => Promise.resolve({
+            data: null, error: { code: '42501', message: 'Synthetic internal permission detail that must not be echoed' },
+          }).then(resolve, reject);
+          return update(body);
+        };
+      }
+      return query;
+    };
+    const response = await invoke(closeRoom);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: 'Could not close' });
+    expect((await sql('select * from meetups where id = $1', [tenants.alice.meetup.id])).rows).toEqual(before);
+  });
+
   it('does not expose an expired room if it expires between lookup and close', async () => {
     const before = await guestState();
     const interleave = beforeWrite(deps.user, 'meetups', 'update', () => changeRoom('expired'));

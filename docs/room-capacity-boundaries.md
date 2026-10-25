@@ -55,7 +55,8 @@ is claimed for those organizer metadata updates.
 
 Focused, single-worker tests pass:
 
-- `tests/room-capacity-routes.test.mjs`: 28 tests.
+- `tests/room-capacity-routes.test.mjs`: 29 tests, including generic close-error
+  responses that do not expose internal database details.
 - `tests/room-state.test.mjs`: 7 tests.
 - `tests/room-preferences.test.mjs`: 18 tests.
 - `tests/room-privacy.test.mjs`: 10 tests.
