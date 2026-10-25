@@ -330,6 +330,9 @@ a.button:hover { border-color: #75e4de; }
   background: #fffdf8; border: 1px solid #e3d8c4; border-radius: 10px; resize: vertical;
 }
 .draft-box .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.copy-probe { position: fixed; left: -9999px; top: 0; }
+.copy-fallback { flex: 1 1 100%; min-width: 0; width: 100%; padding: 10px 0; }
+.copy-fallback textarea { display: block; width: 100%; margin: 8px 0; }
 .button-link {
   display: inline-block; padding: 8px 14px; border-radius: 999px; font-size: 14px; font-weight: 500;
   color: #0b5d57; background: rgba(117, 228, 222, 0.35); text-decoration: none;

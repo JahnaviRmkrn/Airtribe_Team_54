@@ -377,22 +377,70 @@ async function toggleQr(btn) {
   }
 }
 
-function copyText(text, btn, label) {
-  const done = () => {
+const copyAttempts = new WeakMap();
+let copyFallbackId = 0;
+async function copyText(text, btn, label) {
+  const previous = copyAttempts.get(btn);
+  clearTimeout(previous?.timer);
+  previous?.panel?.remove();
+  const attempt = {}, nav = navGen, hash = location.hash;
+  copyAttempts.set(btn, attempt);
+  const current = () => copyAttempts.get(btn) === attempt && btn.isConnected && !stale(nav) && location.hash === hash;
+  btn.textContent = label;
+  btn.setAttribute('aria-live', 'polite');
+  let copied = false;
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } else {
+      const t = document.createElement('textarea');
+      t.value = text;
+      t.readOnly = true;
+      t.className = 'copy-probe';
+      document.body.appendChild(t);
+      try {
+        t.focus();
+        t.select();
+        copied = document.execCommand('copy') === true;
+      } finally {
+        t.remove();
+        if (current()) btn.focus();
+      }
+    }
+  } catch { /* Denied or unsupported: offer manual copy, never claim success. */ }
+  if (!current()) return;
+  if (copied) {
     btn.textContent = 'Copied!';
-    setTimeout(() => { btn.textContent = label; }, 1500);
-  };
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(done);
-  } else {
-    const t = document.createElement('textarea');
-    t.value = text;
-    document.body.appendChild(t);
-    t.select();
-    document.execCommand('copy');
-    t.remove();
-    done();
+    attempt.timer = setTimeout(() => { if (current()) btn.textContent = label; }, 1500);
+    return;
   }
+  // A textarea preserves multiline drafts; a native prompt's one-line input
+  // does not. This is only a local copy aid, not an external sharing action.
+  const panel = document.createElement('div');
+  panel.className = 'copy-fallback';
+  attempt.panel = panel;
+  const status = panel.appendChild(document.createElement('p'));
+  status.id = 'copy-status-' + ++copyFallbackId;
+  status.setAttribute('role', 'status');
+  status.textContent = 'Automatic copy was unavailable. Copy the selected text with Ctrl+C, Command+C, or your device’s Copy action.';
+  const fieldLabel = panel.appendChild(document.createElement('label'));
+  fieldLabel.textContent = 'Text to copy';
+  const field = fieldLabel.appendChild(document.createElement('textarea'));
+  field.value = text;
+  field.readOnly = true;
+  field.rows = 4;
+  field.setAttribute('aria-describedby', status.id);
+  const close = panel.appendChild(document.createElement('button'));
+  close.type = 'button';
+  close.textContent = 'Close';
+  close.onclick = () => { panel.remove(); if (current()) btn.focus(); };
+  panel.onkeydown = (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); close.onclick(); }
+  };
+  btn.after(panel);
+  field.focus();
+  field.select();
 }
 
 const roomUrl = (token) => location.origin + '/m/' + token;
