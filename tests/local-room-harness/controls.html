@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Local real-route fixture controls</title><link rel="stylesheet" href="/room/room.css"><script src="/__harness/controls.js" defer></script></head>
+<body><main class="r-wrap">
+<h1>Local real-route fixture controls</h1>
+<p>This is synthetic, local-only test data. The room uses real route handlers and a local PostgreSQL/RLS adapter. It does not use Supabase Auth, PostgREST or any live provider.</p>
+<p>Payments, voice tokens, microphone, camera, geolocation, external fonts, maps and network connections are disabled. Do not enter real personal information.</p>
+<p><a href="/m/local_harness_room_alice_0001">Open Alice's fixture room</a> · <a href="/m/local_harness_room_bob_000001">Open Bob's fixture room</a></p>
+<h2>Choose this browser's synthetic role</h2>
+<p>Each role choice clears this browser's guest cookies. Existing synthetic guests remain in the room. To test simultaneous guests, use independent browser profiles; normal tabs share cookies.</p>
+<button class="btn" data-role="observer">Observer / new guest</button>
+<button class="btn" data-role="owner">Alice fixture organizer</button>
+<button class="btn" data-role="other">Bob fixture organizer (non-owner of Alice's room)</button>
+<h2>Fixture lifecycle</h2>
+<p>Reset replaces only this server's in-memory fixture data. It invalidates every old guest session. Reload room tabs after a reset. Stop closes the listener and discards the database. Automatic stop: 30 minutes after startup.</p>
+<button class="btn" id="reset">Reset local fixture</button>
+<button class="btn" id="refresh">Refresh status</button>
+<button class="btn" id="stop">Stop local server</button>
+<pre id="status" role="status" aria-live="polite">Loading aggregate status…</pre>
+</main></body></html>
