@@ -1,5 +1,18 @@
 # Pine Labs toolkit checkout
 
+**Current rollout requirement:** follow the
+[payment safety upgrade checklist](../payment-safety-rollout.md) before enabling
+checkout. Both `20261025120000_payment_attempt_receipts.sql` and the additive
+`20261025122000_payment_checkout_readiness.sql` must be reviewed/applied by an
+authorized operator, with old instances stopped/drained and every serving API
+upgraded. Code publication does not apply either migration. The historical UAT
+steps below are not sufficient by themselves.
+
+Until readiness is verified, Pay stays disabled. Existing known pending/paid
+status may be read without returning checkout links or writing status/receipts;
+unknown status errors keep checkout unavailable. No provider create fallback is
+permitted. The normal ready-mode behavior is described below.
+
 The user selected completion of toolkit-backed checkout. The app calls `@plural_pinelabs/agent-toolkit` server-side; an LLM does not decide payment actions.
 
 Both guest-room implementations now expose Your payment after joining and venue confirmation. Guests explicitly click Pay to POST `/api/rooms/:token/pay`; the server determines their INR amount from the confirmed venue, creates or resumes the toolkit order, and supplies its HTTPS checkout URL. Check payment status performs GET and shows pending/paid/failed/cancelled. Page load checks status, including on return from checkout, but never initiates an order or trusts `?payment=done` as proof of payment. Closed rooms allow status checks but disable new checkout. Duplicate clicks are suppressed.
@@ -14,7 +27,7 @@ Neither checkout contains `PINE_CLIENT_ID` or `PINE_CLIENT_SECRET`. The hackatho
 
 ## UAT completion checklist
 
-1. Put merchant UAT credentials in ignored `.env.local` and later server-only Vercel env vars; set `PINE_ENV=uat`. Set `NEXT_PUBLIC_SITE_URL` to the verified HTTPS deployment. Apply hosted migrations including `meetup_payments` and `hit_rate_limit`.
+1. Obtain approval for the exact test project, credential configuration and provider actions. Resolve exposed credentials before adding new ones. Follow the current payment safety upgrade checklist above; then use approved server-only UAT settings with `PINE_ENV=uat` and the verified HTTPS `NEXT_PUBLIC_SITE_URL`. Do not configure or use live credentials merely to check readiness.
 2. Create a dedicated test meetup, join with a fictional guest, and confirm a priced venue. Click Pay; inspect the merchant dashboard order and ensure amount/currency match. Use only provider-documented test payment details.
 3. Return to the room and check status. Verify pending does not become paid from URL parameters, successful captured payment becomes paid from getOrder, and repeat Pay does not create a second order. Rehearse failed/cancelled outcomes and retry.
 4. Verify another guest cannot see or resume the first guest's payment. Close the room; new checkout must fail while status checks remain available.
@@ -24,7 +37,11 @@ Known operational limits: there is no webhook or background reconciliation worke
 
 ## Creation uncertainty and receipt recovery (2026-10-25)
 
-Apply `20261025120000_payment_attempt_receipts.sql` with this application version before enabling checkout. This change has only been exercised locally with synthetic providers and in-memory PostgreSQL, not against hosted databases, merchant accounts, UAT, real charges, or deployments.
+The receipt foundation is `20261025120000_payment_attempt_receipts.sql`; current
+checkout additionally requires `20261025122000_payment_checkout_readiness.sql`
+and its positive read-only probe. This work has been exercised with synthetic
+providers and in-memory PostgreSQL, not hosted databases, merchant accounts,
+UAT or real charges. A successful deployment does not verify those services.
 
 - Each guest attempt reserves a unique merchant reference on `meetup_payments` and a `meetup_payment_attempts` row before calling the provider. The provider receives that exact persisted reference and server-computed amount. References and provider order IDs are excluded from guest API responses.
 - A timeout, malformed success response, connection failure, or process crash is an unknown outcome, not proof of failure. The claim never expires. The two-minute threshold changes only the guest-facing message to `reconciliation_required`; it never starts another order.
