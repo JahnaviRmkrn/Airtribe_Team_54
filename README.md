@@ -104,6 +104,25 @@ the current time, excluding any previously stored future-dated entries.
 This guard is API-only: direct SQL/RPC writers must validate their own occurrence
 times. Existing future-dated history or contact schedules are not rewritten.
 
+### Follow-up date policy
+
+Follow-ups use the calendar day in **Asia/Kolkata (IST)**, regardless of the
+organizer's device timezone. A check-in due today is not overdue, even after its
+stored time has passed. Due badges, date labels, graph buckets, and follow-up
+calendar markers use the same rule as the server's `lib/due.ts`.
+
+Date-only follow-up inputs are labelled IST and save noon IST on the selected
+day (`06:30Z`). Existing stored timestamps are not migrated or rewritten: an
+unchanged date in an edit or restored create retry preserves the exact original
+instant, including fractional seconds. Explicitly choosing another date uses
+the IST policy; clearing an existing date removes it.
+
+The calendar's current month and Today indicator use IST. Meetup calendar
+entries keep device-local dates/times, with the device timezone shown beside
+the calendar policy. General meetup/history timestamps also remain device-local;
+the meetup editor continues to take explicit UTC input with a device-local
+preview. These display/input rules do not change server queries or storage.
+
 Meetup detail edits accept `title, activity, area, starts_at, budget, notes`.
 Send only changed fields, and optionally `expected_updated_at` with the exact
 timestamp returned by GET for an atomic version check. A stale version returns

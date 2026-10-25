@@ -315,8 +315,11 @@ describe('organizer navigation races', () => {
 
 describe('latest dashboard reconciliation', () => {
   it('retains calendar events and safely renders them when a day is selected', () => {
-    const { context, document } = organizer();
-    const today = new Date().toISOString();
+    // Keep this rendering fixture away from the device/IST midnight boundary;
+    // timezone policy itself is covered by followup-dates-ui.test.mjs.
+    const today = '2026-10-25T10:00:00Z';
+    const ClockDate = class extends Date { constructor(...args) { super(...(args.length ? args : [today])); } };
+    const { context, document } = organizer({ Date: ClockDate });
     context.contacts = [{ name: '<img src=x onerror=alert(1)>', next_followup_at: today }];
     context.meetups = [{ title: 'Coffee meetup', starts_at: today }];
     vm.runInContext('calendarHTML(contacts, meetups); wireCalendar()', context);

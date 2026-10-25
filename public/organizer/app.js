@@ -22,15 +22,40 @@ const fmtDay = (iso) => {
   const d = new Date(iso);
   return isNaN(d) ? String(iso) : d.toLocaleDateString(undefined, { dateStyle: 'medium' });
 };
-// Whole days from today to a check-in date: < 0 overdue, 0 due today, null
-// unscheduled. Every screen uses this one rule (the API's lib/due.ts matches),
-// so a check-in due today never shows as overdue.
-const dueIn = (iso) => {
-  if (!iso) return null;
+// Follow-ups are calendar dates in Bengaluru (Asia/Kolkata), matching
+// lib/due.ts. Keep these separate from device-local meetup/history timestamps.
+const FOLLOWUP_TIME_ZONE = 'Asia/Kolkata';
+const followupDayFormatter = new Intl.DateTimeFormat('en', {
+  timeZone: FOLLOWUP_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+});
+const followupDay = (iso) => {
+  if (!iso) return '';
   const d = new Date(iso);
-  if (isNaN(d)) return null;
-  const today = new Date(); today.setHours(0, 0, 0, 0); d.setHours(0, 0, 0, 0);
-  return Math.round((d - today) / 864e5);
+  if (isNaN(d)) return '';
+  const parts = followupDayFormatter.formatToParts(d);
+  const part = (type) => parts.find((p) => p.type === type).value;
+  return `${part('year').padStart(4, '0')}-${part('month')}-${part('day')}`;
+};
+const fmtFollowupDay = (iso) => {
+  if (!followupDay(iso)) return '';
+  return new Date(iso).toLocaleDateString(undefined, { timeZone: FOLLOWUP_TIME_ZONE, dateStyle: 'medium' });
+};
+// A date-only input means noon IST, never noon in the device's timezone.
+// Existing instants stay untouched when an edit/retry leaves the date unchanged.
+const followupISO = (day) => {
+  if (!day) return undefined;
+  const d = new Date(day + 'T12:00:00+05:30');
+  if (!/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(day) || followupDay(d) !== day) {
+    throw new Error('Choose a valid follow-up date.');
+  }
+  return d.toISOString();
+};
+// Whole IST calendar days: < 0 overdue, 0 today, null unscheduled/invalid.
+// UTC midnight is only arithmetic on date labels, not a stored due instant.
+const dueIn = (iso, now = new Date()) => {
+  const due = followupDay(iso), today = followupDay(now);
+  if (!due || !today) return null;
+  return Math.round((Date.parse(due + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 864e5);
 };
 const toISO = (local) => (local ? new Date(local).toISOString() : undefined);
 const parseInterests = (text) => String(text || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -492,7 +517,7 @@ async function dashboardView() {
     <div class="row" data-fu-name="${esc(f.name || '')}">
       <div><strong>${esc(f.name || 'Someone')}</strong>
         ${f.category ? `<span class="tag">${esc(catLabel(f.category))}</span>` : ''}${n < 0 ? ' <span class="tag overdue">Overdue</span>' : ''}
-        <div class="muted">${n < 0 ? `Was due ${esc(fmtDay(f.next_followup_at))}` : n === 0 ? 'Due today' : `Due ${esc(fmtDay(f.next_followup_at))}`}</div>
+        <div class="muted">${n === null ? 'No check-in scheduled' : n < 0 ? `Was due ${esc(fmtFollowupDay(f.next_followup_at))}` : n === 0 ? 'Due today' : `Due ${esc(fmtFollowupDay(f.next_followup_at))}`}</div>
       </div>${followupActions(f)}
     </div>`;
   };
@@ -633,7 +658,7 @@ function networkGraphSVG(contacts) {
       const angleDeg = ci * 120 - 90 - HALF + step * (k + 0.5) + (rows > 1 ? (row % 2 ? 1 : -1) * step / 4 : 0);
       const a = angleDeg * Math.PI / 180;
       const x = C + r * Math.cos(a), y = C + r * Math.sin(a);
-      const sub = c.next_followup_at ? ' · next check-in ' + fmtDay(c.next_followup_at) : ' · no check-in date';
+      const sub = followupDay(c.next_followup_at) ? ' · next check-in ' + fmtFollowupDay(c.next_followup_at) : ' · no check-in date';
       const first = String(c.name || '').split(/\s+/)[0].slice(0, 9);
       return `<g class="g-dot" data-gcontact="${esc(c.id || '')}" data-gname="${esc(c.name || 'Someone')}" data-gsub="${esc(catLabel(c.category) + sub)}" tabindex="0" role="link" aria-label="${esc((c.name || 'Someone') + sub)}"><circle class="g-hit" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="20" fill="transparent"/><circle class="g-vis" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8" fill="${DOT_FILL[c.category] || '#9a9a9a'}" stroke="#fff" stroke-width="2"><title>${esc((c.name || 'Someone') + sub)}</title></circle>${showLabels ? `<text x="${x.toFixed(1)}" y="${(y + 20).toFixed(1)}" text-anchor="middle" class="graph-dot-label">${esc(first)}</text>` : ''}</g>`;
     }).join('');
@@ -683,46 +708,55 @@ function calLine(e) {
 
 function calendarHTML(contacts, meetups) {
   const now = new Date();
-  const year = now.getFullYear(), month = now.getMonth();
-  const monthName = now.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-  const first = new Date(year, month, 1);
-  const startOffset = first.getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const today = followupDay(now);
+  // The grid's current month and Today follow the check-in policy. Meetup
+  // entries keep their device-local dates/times, explicitly labelled below.
+  const first = new Date(today.slice(0, 7) + '-01T00:00:00Z');
+  const monthName = first.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'long', year: 'numeric' });
+  const startOffset = first.getUTCDay();
+  const last = new Date(first); last.setUTCMonth(last.getUTCMonth() + 1); last.setUTCDate(0);
+  const daysInMonth = last.getUTCDate();
   const events = {};
-  const add = (t, ev) => {
-    if (t.getFullYear() !== year || t.getMonth() !== month) return;
-    (events[t.getDate()] = events[t.getDate()] || []).push(ev);
+  const add = (day, ev) => {
+    if (day.slice(0, 7) !== today.slice(0, 7)) return;
+    const n = Number(day.slice(8, 10));
+    (events[n] = events[n] || []).push(ev);
   };
   const overdue = [];
   (contacts || []).forEach((c) => {
     const n = dueIn(c.next_followup_at);
     if (n === null) return;
-    const t = new Date(c.next_followup_at);
+    const day = followupDay(c.next_followup_at);
     const late = -n;
     const ev = { kind: 'followup', status: late > 0 ? 'overdue' : 'soon', id: c.id, cat: c.category, label: c.name || 'Someone', late };
     if (late > 0) overdue.push(ev);
-    add(t, ev);
+    add(day, ev);
   });
   (meetups || []).forEach((m) => {
     const t = m.starts_at && new Date(m.starts_at);
-    if (t && !isNaN(t)) add(t, { kind: 'meetup', label: m.title || 'Meetup', time: t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) });
+    if (t && !isNaN(t)) {
+      const day = [t.getFullYear(), String(t.getMonth() + 1).padStart(2, '0'), String(t.getDate()).padStart(2, '0')].join('-');
+      add(day, { kind: 'meetup', label: m.title || 'Meetup', time: t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) });
+    }
   });
   overdue.sort((x, y) => y.late - x.late);
   // Read by wireCalendar() for the day detail panel.
   window.__calEvents = events;
+  window.__calToday = today;
 
   const cells = [];
   for (let i = 0; i < startOffset; i++) cells.push('<div class="cal-cell cal-pad"></div>');
   for (let day = 1; day <= daysInMonth; day++) {
     const evs = events[day] || [];
-    const isToday = day === now.getDate();
+    const isToday = day === Number(today.slice(8, 10));
     const cls = (isToday ? ' cal-today' : '') + (evs.length ? ' has-ev' : '') + (evs.some((e) => e.status === 'overdue') ? ' cal-late' : '');
     const marks = evs.slice(0, 3).map(calMarker).join('') + (evs.length > 3 ? `<span class="cal-more">+${evs.length - 3}</span>` : '');
     const tip = evs.map((e) => (e.kind === 'meetup' ? 'Meetup: ' : e.status === 'overdue' ? 'Not connected: ' : 'Check-in: ') + e.label).join('; ');
     cells.push(`<button type="button" class="cal-cell${cls}" data-day="${day}"${isToday ? ' aria-current="date"' : ''} aria-label="${esc(monthName.split(' ')[0] + ' ' + day + (tip ? ': ' + tip : ': nothing planned'))}"><span class="cal-day">${day}</span><span class="cal-dots">${marks}</span></button>`);
   }
   const names = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => `<div class="cal-head">${d}</div>`).join('');
-  const todayLabel = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const todayLabel = now.toLocaleDateString(undefined, { timeZone: FOLLOWUP_TIME_ZONE, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const meetupZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   // Overdue people get the same Draft message / Mark done actions as the
   // Follow-ups card, so you can act straight from "Today".
   const lines = overdue.map((e) => `<li class="late row"><span class="cal-line">${calMarker(e)}<span>${calLine(e)}</span></span>${e.id ? `
@@ -731,6 +765,7 @@ function calendarHTML(contacts, meetups) {
         <button data-done="${esc(e.id)}" data-name="${esc(e.label)}">Mark done</button>
       </div>` : ''}</li>`);
   return `<div class="calendar">
+    <p class="muted">Check-ins and Today: IST (Asia/Kolkata). Meetup dates and times: your device (${esc(meetupZone)}).</p>
     <div class="cal-todaybar"><strong>Today</strong> ${esc(todayLabel)}
       ${overdue.length ? `<span class="cal-overdue-count">${overdue.length} overdue</span>` : '<span class="cal-ok">All caught up</span>'}</div>
     ${lines.length ? `<ul class="cal-todaylist">${lines.join('')}</ul>` : ''}
@@ -746,18 +781,19 @@ function calendarHTML(contacts, meetups) {
 
 function wireCalendar() {
   const ev = window.__calEvents || {};
+  const today = window.__calToday || followupDay(new Date());
   const box = el('cal-detail');
   if (!box) return;
   const show = (day) => {
     const list = ev[day] || [];
     document.querySelectorAll('.cal-cell[data-day]').forEach((b) => b.classList.toggle('selected', Number(b.dataset.day) === Number(day)));
-    const when = new Date(new Date().getFullYear(), new Date().getMonth(), Number(day)).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+    const when = new Date(today.slice(0, 8) + String(day).padStart(2, '0') + 'T00:00:00Z').toLocaleDateString(undefined, { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
     box.innerHTML = `<strong>${esc(when)}</strong>` + (list.length
       ? list.map((e) => `<div class="cal-item${e.status === 'overdue' ? ' late' : ''}">${calMarker(e)}<span>${calLine(e)}</span></div>`).join('')
       : '<div class="muted">Nothing planned.</div>');
   };
   document.querySelectorAll('.cal-cell[data-day]').forEach((b) => { b.onclick = () => show(b.dataset.day); });
-  show(new Date().getDate());
+  show(Number(today.slice(8, 10)));
 }
 
 function goalsComparison(goals, act) {
@@ -789,7 +825,7 @@ function markDoneForm(btn) {
     <div style="flex:1">
       <strong>${esc(btn.dataset.name || 'Follow-up')}</strong>
       <label>Note <input data-fu="note" placeholder="How was the check-in?"></label>
-      <label>Next follow-up (optional) <input data-fu="next" type="date"></label>
+      <label>Next follow-up (IST, optional) <input data-fu="next" type="date"></label>
       <p class="muted">Leave the date blank to schedule by this person's check-in frequency.</p>
       <p class="error" data-fu="error"></p>
       <div class="actions">
@@ -802,8 +838,8 @@ function markDoneForm(btn) {
     field('save').disabled = true;
     const body = { contact_id: contactId, type: 'check_in', notes: field('note').value.trim() };
     const next = field('next').value;
-    if (next) body.next_followup_at = new Date(next + 'T12:00:00').toISOString();
     try {
+      if (next) body.next_followup_at = followupISO(next);
       await api('/api/me/interactions', { method: 'POST', body: JSON.stringify(body) });
       if (!stale(nav)) dashboardView();
     } catch (e) {
@@ -829,8 +865,7 @@ async function contactsView() {
   const retry = pendingContactIntent('add');
   const createAction = { entry: retry, owner: contactCreateOwner };
   const retryNext = retry?.body?.next_followup_at;
-  const retryDate = retryNext ? new Date(retryNext) : null;
-  const retryDay = retryDate ? [retryDate.getFullYear(), String(retryDate.getMonth() + 1).padStart(2, '0'), String(retryDate.getDate()).padStart(2, '0')].join('-') : '';
+  const retryDay = followupDay(retryNext);
   const openForm = !!browserStore('sessionStorage', 'getItem', 'org_new_contact') || !contacts.length || !!retry;
   el('app').innerHTML = `
     <div class="page-head"><div><h1>Contacts</h1><p class="muted lede">${contacts.length} ${contacts.length === 1 ? 'person' : 'people'}${filter ? ' in ' + esc(filter) : ''}</p></div></div>
@@ -855,7 +890,7 @@ async function contactsView() {
           </label>
           <label class="full">Interests <input id="c-interests" placeholder="hiking, chai, board games (comma-separated)"></label>
           <label>Check in every (days) <input id="c-freq" type="number" min="1" value="14"></label>
-          <label>Next follow-up <input id="c-next" type="date"></label>
+          <label>Next follow-up (IST) <input id="c-next" type="date"></label>
           <label>Email <input id="c-email" type="email" placeholder="name@example.com"></label>
           <label class="full">Notes <input id="c-notes" placeholder="Notes"></label>
         </div>
@@ -906,7 +941,7 @@ async function contactsView() {
     const next = el('c-next').value;
     // Preserve the original instant when retrying an unchanged restored date,
     // including after a timezone change. Editing the date is a changed body.
-    if (next) body.next_followup_at = retryNext && next === retryDay ? retryNext : new Date(next + 'T12:00:00').toISOString();
+    if (next) body.next_followup_at = retryNext && next === retryDay ? retryNext : followupISO(next);
     const receipt = await createContactsOnce('add', body, createAction);
     if (stale(nav)) return;
     acknowledgeContactIntent('add', createAction);
@@ -925,8 +960,8 @@ async function contactsView() {
 function contactRow(c) {
   const n = dueIn(c.next_followup_at);
   const overdue = n !== null && n < 0;
-  const when = n === null ? 'No check-in scheduled' : overdue ? 'Was due ' + esc(fmtDay(c.next_followup_at))
-    : n === 0 ? 'Check-in due today' : 'Next check-in ' + esc(fmtDay(c.next_followup_at));
+  const when = n === null ? 'No check-in scheduled' : overdue ? 'Was due ' + esc(fmtFollowupDay(c.next_followup_at))
+    : n === 0 ? 'Check-in due today' : 'Next check-in ' + esc(fmtFollowupDay(c.next_followup_at));
   return `
     <div class="row contact-row">
       <div><strong>${esc(c.name)}</strong> <span class="tag">${esc(catLabel(c.category))}</span>${overdue ? ' <span class="tag overdue">Overdue</span>' : ''}
@@ -963,7 +998,7 @@ async function contactDetailView(id) {
         </div>
       </div>
       <div class="due-banner ${dueCls}"><strong>${esc(dueText)}</strong>
-        <span class="muted">${contact.next_followup_at ? esc(fmtDay(contact.next_followup_at)) + ' · ' : ''}every ${contact.preferred_frequency_days || 14} days${contact.last_interaction_at ? ' · last spoke ' + esc(fmtDay(contact.last_interaction_at)) : ''}</span></div>
+        <span class="muted">${contact.next_followup_at ? esc(fmtFollowupDay(contact.next_followup_at)) + ' · ' : ''}every ${contact.preferred_frequency_days || 14} days${contact.last_interaction_at ? ' · last spoke ' + esc(fmtDay(contact.last_interaction_at)) : ''}</span></div>
       ${(contact.interests || []).length ? `<p class="interest-pills">${contact.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}</p>` : ''}
       ${contact.notes ? `<p class="notes">${esc(contact.notes)}</p>` : ''}
     </section>
@@ -971,7 +1006,7 @@ async function contactDetailView(id) {
       <h2>Log a check-in</h2>
       <form id="log-form">
         <label>What happened? <input id="log-note" placeholder="Coffee, a call, a message..."></label>
-        <label>Next follow-up (optional) <input id="log-next" type="date"></label>
+        <label>Next follow-up (IST, optional) <input id="log-next" type="date"></label>
         <p class="muted">Leave the date blank to schedule by their check-in frequency.</p>
         <p class="error" id="log-error" role="alert"></p>
         <p class="muted" id="log-status" role="status"></p>
@@ -1002,7 +1037,7 @@ async function contactDetailView(id) {
   wireCreateForm('log-form', 'log', nav, 'Saving check-in...', async () => {
     const body = { contact_id: id, type: 'check_in', notes: el('log-note').value.trim() };
     const next = el('log-next').value;
-    if (next) body.next_followup_at = new Date(next + 'T12:00:00').toISOString();
+    if (next) body.next_followup_at = followupISO(next);
     await api('/api/me/interactions', { method: 'POST', body: JSON.stringify(body) });
     if (stale(nav)) return;
     flash('Check-in saved. Your next reminder is set.', [['Back to dashboard', '#/dashboard']]);
@@ -1026,7 +1061,7 @@ function editContactForm(id, c) {
       </label>
       <label class="full">Interests <input id="e-interests" value="${esc((c.interests || []).join(', '))}"></label>
       <label>Check in every (days) <input id="e-freq" type="number" min="1" value="${c.preferred_frequency_days || 14}"></label>
-      <label>Next follow-up <input id="e-next" type="date" value="${c.next_followup_at ? esc(new Date(c.next_followup_at).toISOString().slice(0, 10)) : ''}"></label>
+      <label>Next follow-up (IST) <input id="e-next" type="date" value="${esc(followupDay(c.next_followup_at))}"></label>
       <label>Email <input id="e-email" type="email" value="${esc(c.email || '')}" placeholder="name@example.com"></label>
       <label class="full">Notes <input id="e-notes" value="${esc(c.notes || '')}"></label>
     </div>
@@ -1052,10 +1087,10 @@ function editContactForm(id, c) {
     const freq = parseInt(el('e-freq').value, 10);
     if (freq > 0 && freq !== c.preferred_frequency_days) patch.preferred_frequency_days = freq;
     const nextVal = el('e-next').value;
-    const oldNext = c.next_followup_at ? new Date(c.next_followup_at).toISOString().slice(0, 10) : '';
-    if (nextVal !== oldNext) patch.next_followup_at = nextVal ? new Date(nextVal + 'T12:00:00').toISOString() : null;
-    if (!Object.keys(patch).length) return contactDetailView(id);
+    const oldNext = followupDay(c.next_followup_at);
     try {
+      if (nextVal !== oldNext) patch.next_followup_at = nextVal ? followupISO(nextVal) : null;
+      if (!Object.keys(patch).length) return contactDetailView(id);
       await api('/api/me/contacts/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(patch) });
       if (!stale(nav)) contactDetailView(id);
     } catch (err) { if (!stale(nav)) el('e-error').textContent = err.message; }
