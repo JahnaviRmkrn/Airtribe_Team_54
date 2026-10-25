@@ -47,7 +47,9 @@ function renderPayment() {
   const panel = $('payment-card');
   if (!panel || !view) return;
   // No card checkout on this deployment (or UPI settle-up is on): no dead-end card.
-  const eligible = !!view.me && !!view.meetup.final_venue && view.checkout_configured !== false && !view.settle_up;
+  // A guest with any card payment keeps it, so its status and "do not pay again"
+  // guidance never disappear.
+  const eligible = !!view.me && !!view.meetup.final_venue && (!!cardPayment() || (view.checkout_configured !== false && !view.settle_up));
   panel.classList.toggle('hidden', !eligible);
   if (!eligible) return;
   const price = view.meetup.final_venue.price_per_person;
@@ -122,29 +124,39 @@ function loadQr() {
   return qrLoading;
 }
 
+// This guest's card (Pine Labs) payment status, if they ever started one.
+const cardPayment = () => (view && view.me && view.payments ? view.payments[view.me.attendee_id] || null : null);
+
 // Only upi://pay links built by the server are ever used as an href.
 const safeUpi = (uri) => (typeof uri === 'string' && uri.startsWith('upi://pay?') ? uri : null);
 let settleQrFor = null;
 
 function renderSettle() {
-  const card = $('settle-card');
+  const panel = $('settle-card');
   const su = view.settle_up;
   const show = !!(view.me && su && su.upi_vpa);
-  card.classList.toggle('hidden', !show);
+  panel.classList.toggle('hidden', !show);
   if (!show) { settleQrFor = null; $('settle-qr').classList.add('hidden'); return; }
   const amount = rupees(su.amount_paise / 100);
   const mine = su.status[view.me.attendee_id];
+  const card = cardPayment();
+  // Already paid, or mid-way, by card: never offer a second way to pay.
+  const blocked = mine === 'confirmed' || !!card;
   const uri = safeUpi(su.upi_uri);
   $('settle-amount').innerHTML = `<strong>${esc(amount)}</strong> each to <strong>${esc(su.payee)}</strong> <span class="muted mono">${esc(su.upi_vpa)}</span>`;
   $('settle-pay').textContent = 'Pay ' + amount + ' in a UPI app';
   if (uri) $('settle-pay').setAttribute('href', uri); else $('settle-pay').removeAttribute('href');
-  $('settle-pay').classList.toggle('hidden', mine === 'confirmed');
-  $('settle-qr-btn').classList.toggle('hidden', mine === 'confirmed');
-  $('settle-status').textContent = mine === 'confirmed' ? '✓ ' + su.payee + ' confirmed your payment. You are settled.'
+  $('settle-pay').classList.toggle('hidden', blocked);
+  $('settle-qr-btn').classList.toggle('hidden', blocked);
+  $('settle-copy').classList.toggle('hidden', blocked);
+  if (blocked && settleQrFor) toggleSettleQr();
+  $('settle-status').textContent = card === 'paid' ? '✓ You already paid by card. Nothing more to pay.'
+    : card ? 'You have a card payment in progress. Check its status in "Your payment" and do not pay again by UPI.'
+    : mine === 'confirmed' ? '✓ ' + su.payee + ' confirmed your payment. You are settled.'
     : mine === 'claimed' ? 'Marked as paid. Waiting for ' + su.payee + ' to confirm it arrived.'
     : 'After paying, tap "I\'ve paid" so ' + su.payee + ' knows.';
-  $('settle-claim').classList.toggle('hidden', !!mine);
-  $('settle-undo').classList.toggle('hidden', mine !== 'claimed');
+  $('settle-claim').classList.toggle('hidden', !!mine || !!card);
+  $('settle-undo').classList.toggle('hidden', mine !== 'claimed' || !!card);
   // A changed amount or UPI ID makes an open QR stale: rebuild it.
   if (settleQrFor && settleQrFor !== uri) showSettleQr(uri);
 }
@@ -181,11 +193,12 @@ function toggleSettleQr() {
 
 // Organiser side. The form is rebuilt only when its state changes, so the
 // 4-second poll never wipes what the organiser is typing; the list is live.
+// The UPI ID prefill lives in sessionStorage only: it never outlasts the tab.
 let orgSettleKey = null;
 let orgSettleEditing = false;
 const SETTLE_PREFS = 'muop_settle_payee';
 function savedPayee() {
-  try { return JSON.parse(localStorage.getItem(SETTLE_PREFS) || 'null') || {}; } catch { return {}; }
+  try { return JSON.parse(sessionStorage.getItem(SETTLE_PREFS) || 'null') || {}; } catch { return {}; }
 }
 
 function renderOrgSettle() {
@@ -210,7 +223,9 @@ function renderOrgSettle() {
   }
   $('org-settle-list').innerHTML = su ? people.map((a) => {
     const st = su.status[a.id];
-    const label = st === 'confirmed' ? '<span class="tag">✓ Received</span>' : st === 'claimed' ? '<span class="tag wait">Says paid - check your UPI app</span>' : '<span class="tag wait">Not yet</span>';
+    const card = view.payments && view.payments[a.id];
+    if (card === 'paid') return `<li class="person">${avatar(a.guest_name)}<div><div class="person-name">${esc(a.guest_name)}</div><div class="person-tags"><span class="tag">✓ Paid by card</span></div></div></li>`;
+    const label = card ? `<span class="tag wait">Card payment ${esc(card)} - check before collecting</span>` : st === 'confirmed' ? '<span class="tag">✓ Received</span>' : st === 'claimed' ? '<span class="tag wait">Says paid - check your UPI app</span>' : '<span class="tag wait">Not yet</span>';
     const btn = st === 'confirmed'
       ? `<button type="button" class="btn ghost sm" data-settle="${esc(a.id)}" data-ok="0">Undo</button>`
       : `<button type="button" class="btn sm" data-settle="${esc(a.id)}" data-ok="1">${st === 'claimed' ? 'Confirm received' : 'Mark received'}</button>`;
@@ -278,7 +293,7 @@ function bindOrgSettleForm() {
     }
     const saved = await act(() => send('POST', '/settle', { upi_vpa, upi_payee, amount_paise: Math.round(rupeesEach * 100) }), 'Guests can now pay you by UPI');
     if (saved) {
-      try { localStorage.setItem(SETTLE_PREFS, JSON.stringify({ upi_vpa, upi_payee })); } catch { /* private mode: just no prefill next time */ }
+      try { sessionStorage.setItem(SETTLE_PREFS, JSON.stringify({ upi_vpa, upi_payee })); } catch { /* private mode: just no prefill next time */ }
       orgSettleEditing = false;
       renderOrgSettle();
     }

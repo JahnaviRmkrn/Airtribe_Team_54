@@ -105,7 +105,7 @@ async function loadSettle(meetupId: string): Promise<{ cfg: SettleConfig | null;
 
 // Public view of a room: only meetup details, attendees, shortlist and votes.
 // Never organizer identity, contacts, notes, guest secrets or payment details.
-// The organiser's UPI ID (settle_up) goes only to joined guests and the organiser.
+// Settle-up (organiser's payee name and UPI ID) goes only to joined guests and the organiser.
 export async function roomView(req: Request, room: MeetupRow, isOrganizer = false) {
   const db = adminClient();
   const [{ data: attendees, error: aErr }, { data: votes, error: vErr }, { data: venues, error: venErr }, { data: payments, error: pErr }, me] = await Promise.all([
@@ -182,7 +182,7 @@ export async function roomView(req: Request, room: MeetupRow, isOrganizer = fals
     amount_due_paise: amountPaise(finalVenue?.price_per_person),
     // false = no card checkout on this deployment; the room hides the Pine Labs card.
     checkout_configured: checkoutConfigured(),
-    settle_up: settleView(settle.cfg, settle.rows, { title: room.title, canSeeVpa: !!me || isOrganizer }),
+    settle_up: settleView(settle.cfg, settle.rows, { title: room.title, canSee: !!me || isOrganizer }),
     leading_venue_id: leading?.[0] ?? null,
     me: me ? { attendee_id: me.id, voted_venue_id: (votes ?? []).find((v) => v.attendee_id === me.id)?.venue_id ?? null } : null,
     is_organizer: isOrganizer,

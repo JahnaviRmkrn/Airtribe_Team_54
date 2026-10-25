@@ -71,11 +71,11 @@ describe('settle-up helpers', () => {
     expect(() => upiUri('javascript:alert(1)', 'x', 100, 'x')).toThrow();
     for (const bad of ['a@', '@bank', 'a b@bank', 'x@1bank', 'a@b']) expect(VPA_RE.test(bad)).toBe(false);
   });
-  it('hides the UPI ID from people who have not joined', () => {
+  it('shows nothing about settle-up to people who have not joined', () => {
     const cfg = { upi_vpa: 'a.b@ybl', upi_payee: 'A', settle_amount_paise: 1000 };
-    expect(settleView(cfg, [], { title: 't', canSeeVpa: false })).toMatchObject({ upi_vpa: null, upi_uri: null, amount_paise: 1000 });
-    expect(settleView(cfg, [], { title: 't', canSeeVpa: true }).upi_vpa).toBe('a.b@ybl');
-    expect(settleView({ upi_vpa: null, upi_payee: null, settle_amount_paise: null }, [], { title: 't', canSeeVpa: true })).toBeNull();
+    expect(settleView(cfg, [{ attendee_id: 'x', status: 'claimed', amount_paise: 1000 }], { title: 't', canSee: false })).toBeNull();
+    expect(settleView(cfg, [], { title: 't', canSee: true }).upi_vpa).toBe('a.b@ybl');
+    expect(settleView({ upi_vpa: null, upi_payee: null, settle_amount_paise: null }, [], { title: 't', canSee: true })).toBeNull();
   });
 });
 
@@ -94,7 +94,7 @@ describe('UPI settle-up routes', () => {
     expect(mine.settle_up.upi_uri).toContain('pa=alice.k%40okhdfcbank');
     expect(mine.settle_up.upi_uri).toContain('am=750.00');
     const stranger = await (await invoke(viewRoom)).json();
-    expect(stranger.settle_up).toMatchObject({ upi_vpa: null, upi_uri: null });
+    expect(stranger.settle_up).toBeNull();
     expect(JSON.stringify(stranger)).not.toContain('okhdfcbank');
 
     const claimed = await invoke(claimPaid, { session: guest, method: 'POST' });

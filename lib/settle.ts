@@ -40,17 +40,17 @@ export function upiUri(vpa: string, payee: string, amountPaise: number, note: st
   return 'upi://pay?' + q.toString().replace(/\+/g, '%20');
 }
 
-// What the room shows. The UPI ID goes only to joined guests and the organiser;
-// everyone in the room sees who has settled (like the vote counts).
-export function settleView(cfg: SettleConfig | null, rows: SettlementRow[], opts: { title: string; canSeeVpa: boolean }) {
-  if (!cfg?.upi_vpa || !cfg.upi_payee || !cfg.settle_amount_paise) return null;
+// What the room shows. Settle-up (payee name, UPI ID, amount, who has paid) goes
+// only to joined guests and the organiser; anyone else holding the link gets null.
+export function settleView(cfg: SettleConfig | null, rows: SettlementRow[], opts: { title: string; canSee: boolean }) {
+  if (!opts.canSee || !cfg?.upi_vpa || !cfg.upi_payee || !cfg.settle_amount_paise) return null;
   const status: Record<string, SettlementRow['status']> = {};
   for (const r of rows) status[r.attendee_id] = r.status;
   return {
     amount_paise: cfg.settle_amount_paise,
     payee: cfg.upi_payee,
-    upi_vpa: opts.canSeeVpa ? cfg.upi_vpa : null,
-    upi_uri: opts.canSeeVpa ? upiUri(cfg.upi_vpa, cfg.upi_payee, cfg.settle_amount_paise, opts.title) : null,
+    upi_vpa: cfg.upi_vpa,
+    upi_uri: upiUri(cfg.upi_vpa, cfg.upi_payee, cfg.settle_amount_paise, opts.title),
     status,
   };
 }
