@@ -4,20 +4,16 @@
 // Reads NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY from the real env
 // or ENV_FILE (default .env.local). Only names in lib/secrets.ts are pushed.
 // Never prints values.
-import { existsSync, readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { relative, resolve, isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
 import { createClient } from '@supabase/supabase-js';
 
-const parse = (file) =>
-  existsSync(file)
-    ? Object.fromEntries(
-        readFileSync(file, 'utf8')
-          .split('\n')
-          .map((l) => l.trim())
-          .filter((l) => l.includes('=') && !l.startsWith('#'))
-          .map((l) => [l.slice(0, l.indexOf('=')).replace(/^export\s+/, ''), l.slice(l.indexOf('=') + 1).replace(/^(['"])(.*)\1$/, '$2')]),
-      )
-    : {};
+// Node's dotenv-compatible parser: handles `KEY = value`, quotes, `export`
+// and trailing `# comments`, so a value never silently carries junk.
+const parse = (file) => (existsSync(file) ? parseEnv(readFileSync(file, 'utf8')) : {});
 
 const src = process.argv[2];
 if (!src || !existsSync(src)) {
@@ -25,15 +21,15 @@ if (!src || !existsSync(src)) {
   process.exit(1);
 }
 // The source holds live keys: refuse one that git would happily commit.
-// check-ignore exits 1 for a tracked-able path; 128 means outside the repo (fine).
-try {
-  execFileSync('git', ['check-ignore', '-q', src], { stdio: 'ignore' });
-} catch (e) {
-  if (e.status === 1) {
-    console.error(`${src} is not git-ignored; name it secrets.env (or .env.*) or keep it outside the repo`);
-    process.exit(1);
-  }
-  if (e.status !== 128) throw e;
+// Anchored to this repo (not the caller's cwd): a file outside it is fine,
+// one inside must be git-ignored and untracked, and any git error fails closed.
+const repo = realpathSync(fileURLToPath(new URL('..', import.meta.url)));
+const rel = relative(repo, realpathSync(resolve(src)));
+const git = (...args) => spawnSync('git', ['-C', repo, ...args], { stdio: 'ignore' }).status;
+// check-ignore: 0 = ignored. ls-files --error-unmatch: 1 = untracked. Anything else blocks.
+if (!rel.startsWith('..') && !isAbsolute(rel) && !(git('check-ignore', '-q', '--no-index', rel) === 0 && git('ls-files', '--error-unmatch', rel) === 1)) {
+  console.error(`${src} is inside the repo but not git-ignored (or is tracked); name it secrets.env (or .env.*) or keep it outside the repo`);
+  process.exit(1);
 }
 const names = [...readFileSync(new URL('../lib/secrets.ts', import.meta.url), 'utf8').matchAll(/^\s+'([A-Z0-9_]+)',$/gm)].map((m) => m[1]);
 const target = { ...parse(process.env.ENV_FILE ?? '.env.local'), ...process.env };
