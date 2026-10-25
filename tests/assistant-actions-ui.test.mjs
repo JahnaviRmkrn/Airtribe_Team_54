@@ -9,7 +9,8 @@ function harness({ fetch: fetcher, controls = [], inputs = [], people = [], meet
   const events = new Map();
   const links = [];
   const location = { hash: '#/contacts', origin: 'https://example.test', href: '' };
-  const window = { confirm: vi.fn(() => true), dispatchEvent: vi.fn(), addEventListener: (type, fn) => {
+  let owner = 'owner-a';
+  const window = { OrganizerAccount: { currentOwner: () => owner }, confirm: vi.fn(() => true), dispatchEvent: vi.fn(), addEventListener: (type, fn) => {
     if (!events.has(type)) events.set(type, []); events.get(type).push(fn);
   }, speechSynthesis: { cancel: vi.fn(), getVoices: () => [], speak: vi.fn() } };
   const document = { getElementById: () => null, querySelectorAll: (s) => s.includes('#app button') ? controls : s.includes('#app input') ? inputs : [],
@@ -24,13 +25,42 @@ function harness({ fetch: fetcher, controls = [], inputs = [], people = [], meet
   const clipboard = { writeText: vi.fn(async () => {}) };
   vm.runInNewContext(source, { window, document, location, fetch, navigator: { clipboard }, Event, HashChangeEvent: class {}, SpeechSynthesisUtterance: class { constructor(text) { this.text = text; } }, AbortController });
   const leave = () => { location.hash = '#/dashboard'; for (const fn of events.get('hashchange') || []) fn(); };
-  return { assistant: window.Assistant, window, location, fetch, links, clipboard, leave };
+  return { assistant: window.Assistant, window, location, fetch, links, clipboard, leave, setOwner: (value) => { owner = value; } };
 }
 const control = (text, extra = {}) => ({ innerText: text, offsetWidth: 10, click: vi.fn(), id: '', dataset: {}, getAttribute: () => null, ...extra });
 const alice = { id: 'alice-id', name: 'Alice Jones', category: 'personal', email: 'alice@example.test' };
 const meetup = { title: 'Brunch', room_token: 'owned-token' };
 
 describe('assistant action boundaries in the shipped browser asset', () => {
+  it('reads the organizer account captured by boot without exposing a setter', () => {
+    const appSource = readFileSync(new URL('../public/organizer/app.js', import.meta.url), 'utf8').replace(/\nboot\(\);\s*$/, '');
+    const window = {}, context = vm.createContext({ window }); vm.runInContext(appSource, context);
+    expect(window.OrganizerAccount.currentOwner()).toBeNull(); expect(Object.isFrozen(window.OrganizerAccount)).toBe(true);
+    vm.runInContext("contactCreateOwner = 'owner-a'", context); expect(window.OrganizerAccount.currentOwner()).toBe('owner-a');
+  });
+  it('binds an explicit local write to the displayed account', async () => {
+    const h = harness({ fetch: (url, opts) => url === '/api/me/contacts' && opts.method === 'POST' ? response({ contacts: [alice] }) : undefined });
+    await h.assistant.call('add_contact', { name: 'Alice', category: 'personal' });
+    expect(h.fetch.mock.calls[0][1].headers['X-Contact-Owner']).toBe('owner-a');
+  });
+  it('rejects action creation while the displayed account is not loaded', async () => {
+    const h = harness(); h.setOwner(null);
+    expect((await h.assistant.call('create_meetup', { title: 'Brunch' })).error).toMatch(/account|reload/i);
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+  it('does not finish a name-based mutation if the displayed account changes during the lookup', async () => {
+    const waiting = deferred(); const h = harness({ fetch: (_url, opts) => !opts.method ? waiting.promise : response({ contact: alice }) });
+    const pending = h.assistant.call('update_contact', { name: 'Alice', notes: 'Old-account intent' });
+    h.setOwner('owner-b'); waiting.resolve(response({ contacts: [alice] })); await pending;
+    expect(h.fetch.mock.calls.filter(([, opts]) => opts.method === 'PATCH')).toHaveLength(0);
+  });
+  it('keeps the initial text-request owner rather than adopting a new owner after the model response', async () => {
+    const waiting = deferred(); const h = harness({ fetch: (url) => url === '/api/assistant' ? waiting.promise : response({ meetup }) });
+    const pending = h.assistant.ask('Create brunch', [], { speakReply: false }); h.setOwner('owner-b');
+    waiting.resolve(response({ tool_calls: [{ id: 'a', name: 'create_meetup', arguments: '{"title":"Brunch"}' }] })); await pending;
+    expect(h.fetch.mock.calls.filter(([url]) => url === '/api/me/meetups')).toHaveLength(0);
+    expect(h.fetch.mock.calls[0][1].headers['X-Contact-Owner']).toBe('owner-a');
+  });
   it('requires both explicit confirmation and the real dialog before deleting', async () => {
     const h = harness({ people: [alice], fetch: (url, opts) => opts.method === 'DELETE' ? response(null, 204) : undefined });
     expect((await h.assistant.call('delete_contact', { name: 'Alice', confirmed: false })).error).toMatch(/confirm/);

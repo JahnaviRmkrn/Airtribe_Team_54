@@ -101,6 +101,8 @@ async function api(path, opts = {}, authContext = 'view') {
 // A retry is a saved create intent, not a name match. Keep only the current
 // intent for each owner/surface; never adopt another account's pending payload.
 let contactCreateOwner = null;
+// Read-only access to the account captured by boot, for async assistant intents.
+window.OrganizerAccount = Object.freeze({ currentOwner: () => contactCreateOwner });
 let contactCreateRetryEnabled = false;
 const contactIntentMemory = new Map();
 function browserStore(kind, operation, ...args) {

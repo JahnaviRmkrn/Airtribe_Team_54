@@ -40,6 +40,10 @@ export async function requireUser(req: Request) {
   const supabase = await userClient(req);
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) throw new HttpError(401, 'Not signed in');
+  // Optional intent binding, also used by legacy contact/goals forms. RLS
+  // authorizes the current session, not the account shown when an action began.
+  const expectedOwner = req.headers.get('X-Contact-Owner');
+  if (expectedOwner !== null && expectedOwner !== data.user.id) throw new HttpError(409, 'Your signed-in account changed. Reload before saving.');
   return { supabase, user: data.user };
 }
 

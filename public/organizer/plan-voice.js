@@ -113,7 +113,7 @@
       void links;
     }
 
-    async function save(args, active) {
+    async function save(args, active, owner) {
       if (!active()) return { error: 'Voice plan cancelled or ended.', cancelled: true };
       if (creationUncertain) return { error: 'The previous creation outcome is unknown. Check your meetups before creating another.', uncertain: true };
       const body = { title: String(args.title || '').slice(0, 120) || 'Meetup', activity: ACTIVITIES.includes(args.activity) ? args.activity : 'dinner' };
@@ -131,7 +131,7 @@
       try {
         // Stopping voice cannot undo a request already sent. Do not abort or
         // repeat this mutation; retain the first outcome for this conversation.
-        res = await fetch('/api/me/meetups', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        res = await fetch('/api/me/meetups', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'X-Contact-Owner': owner }, body: JSON.stringify(body) });
         data = await res.json();
         if (res.status >= 500 || (res.ok && !data?.meetup?.room_url)) throw new Error('Missing creation receipt');
       } catch {
@@ -150,18 +150,20 @@
 
     async function start() {
       if (left || starting || session || creationUncertain) return;
+      const owner = window.OrganizerAccount?.currentOwner?.();
+      if (!owner) { $('err').textContent = 'Reload this page to verify your signed-in account before planning.'; return; }
       starting = true;
       const run = ++generation;
       const attempt = new AbortController();
       controller = attempt;
       let ended = false;
-      const current = () => !left && generation === run && !attempt.signal.aborted;
+      const current = () => !left && generation === run && !attempt.signal.aborted && owner === window.OrganizerAccount?.currentOwner?.();
       const active = () => current() && !ended;
       let saveAttempt = null;
       $('err').textContent = '';
       try {
         const created = await window.LiveVoice.start({
-          signal: attempt.signal,
+          signal: attempt.signal, owner,
           instructions: instructions(),
           tools: [SAVE_TOOL],
           onToolCall: (name, args, context = {}) => {
@@ -169,7 +171,7 @@
             if (name !== 'save_meetup_plan') return { error: 'Unknown tool' };
             // Exactly one creation attempt per spoken plan, even if the model
             // repeats it with a new tool ID or while the first request is pending.
-            if (!saveAttempt) saveAttempt = save(args, () => active() && !context.signal?.aborted);
+            if (!saveAttempt) saveAttempt = save(args, () => active() && !context.signal?.aborted, owner);
             return saveAttempt;
           },
           onUser: (t) => { if (active()) line('user', t); },

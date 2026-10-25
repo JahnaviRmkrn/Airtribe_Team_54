@@ -73,7 +73,10 @@ provider tests use synthetic keys and intercepted fetch. No live LLM, microphone
 Google account, Vault, database, payment or external communication was used.
 These tests are not a real-browser accessibility or live-provider certification.
 
-A separate known gap remains in this batch: assistant and voice-plan writes are
-not yet bound to the account displayed when the action began. Another-tab
-account changes can affect unbound create requests; normal contact/goals forms
-already carry `X-Contact-Owner`. RLS alone is not an expected-account guard.
+Assistant requests and voice-plan creates also freeze the displayed account at
+turn/session startup. They send the existing `X-Contact-Owner` header on API reads,
+writes and voice-token requests. `requireUser` rejects a different current session
+before data/provider work; missing or changed displayed identities fail locally.
+Headerless legacy clients retain their existing behavior. This guard does not
+change RLS or authentication and is not general account-switch notification;
+requests already authorized and sent still cannot be undone.

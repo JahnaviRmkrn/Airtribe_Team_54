@@ -28,10 +28,10 @@
   };
   const unb64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
 
-  async function getToken(url, signal) {
+  async function getToken(url, signal, owner) {
     const u = new URL(url || '/api/voice/live-token', location.origin);
     if (u.origin !== location.origin) throw new Error('Voice token URL must be same-origin');
-    const res = await fetch(u.href, { credentials: 'include', signal });
+    const res = await fetch(u.href, { credentials: 'include', signal, ...(owner ? { headers: { 'X-Contact-Owner': owner } } : {}) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw Object.assign(new Error(data.error || 'Voice is unavailable'), { status: res.status });
     return data;
@@ -42,7 +42,7 @@
     const checkStartup = () => { if (opts.signal?.aborted) throw Object.assign(new Error('Voice startup cancelled'), { name: 'AbortError' }); };
     checkStartup();
     onState('connecting');
-    const { token, model, voice } = await getToken(opts.tokenUrl, opts.signal);
+    const { token, model, voice } = await getToken(opts.tokenUrl, opts.signal, opts.owner);
     checkStartup();
     let stream, micCtx, outCtx, node, ws;
     const releaseAudio = () => {
@@ -265,6 +265,8 @@
         return;
       }
       const run = ++generation;
+      const owner = window.Assistant.currentOwner?.();
+      if (!owner) { panel.classList.remove('hidden'); statusEl.textContent = 'Reload this page to verify your signed-in account before starting voice.'; return; }
       const attempt = new AbortController(); controller = attempt;
       const active = () => generation === run && !attempt.signal.aborted;
       panel.classList.remove('hidden');
@@ -273,12 +275,12 @@
       try {
         const ctx = typeof window.Assistant.context === 'function' ? window.Assistant.context() : '';
         const created = await start({
-          signal: attempt.signal,
+          signal: attempt.signal, owner,
           instructions: ASSISTANT_RULES + (window.Assistant.instructions ? '\n' + window.Assistant.instructions : '') + (ctx ? '\n\nCurrent page:\n' + ctx : ''),
           tools: window.Assistant.tools,
           onToolCall: async (name, args, context) => {
             if (!active()) return { error: 'Voice request cancelled.', cancelled: true };
-            const r = await window.Assistant.call(name, args, context);
+            const r = await window.Assistant.call(name, args, { ...context, owner });
             if (active() && (name === 'navigate' || name === 'open_contact')) setTimeout(() => { if (active()) session?.say('[page changed] ' + (window.Assistant.context ? window.Assistant.context() : '')); }, 600);
             return r;
           },

@@ -19,16 +19,27 @@ function liveHarness(options = {}) {
     constructor() { this.readyState = 1; this.send = vi.fn(); this.close = vi.fn(() => { this.readyState = 3; }); sockets.push(this); }
   }
   const bodyNodes = [];
-  const window = options.fab ? { Assistant: { tools: [], context: () => '', call: vi.fn(async () => ({ ok: true })) } } : {};
+  let owner = 'owner-a';
+  const window = options.fab ? { Assistant: { currentOwner: () => owner, tools: [], context: () => '', call: vi.fn(async () => ({ ok: true })) } } : {};
   const document = { readyState: 'complete', getElementById: (id) => bodyNodes.find((n) => n.id === id), createElement: node, body: { append: (...items) => bodyNodes.push(...items) } };
   const fetch = vi.fn(options.fetch || (async () => response({ token: 'synthetic', model: 'synthetic', voice: 'synthetic' })));
   vm.runInNewContext(liveSource, { window, document, navigator: { mediaDevices: { getUserMedia } }, location: { origin: 'https://example.test' }, URL, fetch, AudioContext, AudioWorkletNode: class { port = {}; }, WebSocket: Socket, AbortController, setTimeout, clearTimeout });
   const packet = (data) => sockets[0].onmessage({ data: JSON.stringify(data) });
-  return { window, fetch, sockets, contexts, tracks, getUserMedia, packet, fab: () => document.getElementById('voice-fab') };
+  return { window, fetch, sockets, contexts, tracks, getUserMedia, packet, setOwner: (value) => { owner = value; }, fab: () => document.getElementById('voice-fab') };
 }
 const toolPacket = (ids = ['a']) => ({ toolCall: { functionCalls: ids.map((id) => ({ id, name: 'create_meetup', args: { title: 'Brunch' } })) } });
 
 describe('shipped Gemini Live tool lifecycle with synthetic transport', () => {
+  it('captures the floating voice account before requesting credentials and reuses it for later tools', async () => {
+    const h = liveHarness({ fab: true }); await h.fab().onclick();
+    expect(h.fetch.mock.calls[0][1].headers['X-Contact-Owner']).toBe('owner-a');
+    h.setOwner('owner-b'); await h.packet(toolPacket());
+    expect(h.window.Assistant.call.mock.calls[0][2].owner).toBe('owner-a'); await h.fab().onclick();
+  });
+  it('does not request voice credentials before the displayed account is loaded', async () => {
+    const h = liveHarness({ fab: true }); h.setOwner(null); await h.fab().onclick();
+    expect(h.fetch).not.toHaveBeenCalled(); expect(h.getUserMedia).not.toHaveBeenCalled();
+  });
   it('lets a second floating-mic tap cancel pending startup without creating another session', async () => {
     const pending = deferred(); const h = liveHarness({ fab: true, fetch: () => pending.promise });
     const first = h.fab().onclick(); const second = h.fab().onclick();
@@ -95,16 +106,30 @@ function node() {
 function planHarness(options = {}) {
   const root = node(); const events = new Map(); const sessions = []; let callbacks;
   const start = vi.fn(async (opts) => { callbacks = opts; const session = { stop: vi.fn() }; sessions.push(session); return options.start ? options.start(session) : session; });
-  const window = { LiveVoice: { start }, addEventListener: (type, fn) => events.set(type, fn), removeEventListener: vi.fn() };
+  let owner = 'owner-a';
+  const window = { OrganizerAccount: { currentOwner: () => owner }, LiveVoice: { start }, addEventListener: (type, fn) => events.set(type, fn), removeEventListener: vi.fn() };
   const fetch = vi.fn(options.fetch || (async () => response({ meetup: { title: 'Brunch', room_url: 'https://example.test/m/synthetic' } })));
   const onCreated = vi.fn();
   vm.runInNewContext(planSource, { window, document: { createElement: node }, navigator: {}, fetch, AbortController, setTimeout, clearTimeout });
   const plan = window.PlanByVoice.mount(root, { onCreated });
   const get = (key) => root.querySelector('[data-pv="' + key + '"]');
-  return { plan, root, get, start, fetch, sessions, onCreated, callbacks: () => callbacks, click: () => get('mic').onclick(), leave: () => events.get('hashchange')() };
+  return { plan, root, get, start, fetch, sessions, onCreated, callbacks: () => callbacks, setOwner: (value) => { owner = value; }, click: () => get('mic').onclick(), leave: () => events.get('hashchange')() };
 }
 const args = { title: 'Brunch', activity: 'brunch', summary: 'A meal together', share_message: 'Join us for brunch' };
 describe('shipped voice meetup planning lifecycle', () => {
+  it('binds both plan voice startup and creation to the original displayed account', async () => {
+    const h = planHarness(); await h.click(); expect(h.callbacks().owner).toBe('owner-a');
+    await h.callbacks().onToolCall('save_meetup_plan', args);
+    expect(h.fetch.mock.calls[0][1].headers['X-Contact-Owner']).toBe('owner-a');
+  });
+  it('does not create a plan if the account changed after voice startup', async () => {
+    const h = planHarness(); await h.click(); h.setOwner('owner-b');
+    expect((await h.callbacks().onToolCall('save_meetup_plan', args)).cancelled).toBe(true); expect(h.fetch).not.toHaveBeenCalled();
+  });
+  it('keeps manual planning available when identity has not loaded', async () => {
+    const h = planHarness(); h.setOwner(null); await h.click();
+    expect(h.start).not.toHaveBeenCalled(); expect(h.fetch).not.toHaveBeenCalled(); expect(h.get('err').textContent).toMatch(/account|reload/i);
+  });
   it('shows a current connection failure even when the transport ended first', async () => {
     const h = planHarness(); await h.click(); h.callbacks().onState('ended'); h.callbacks().onError('Synthetic connection failed');
     expect(h.get('err').textContent).toContain('Synthetic connection failed');

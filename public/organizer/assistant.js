@@ -133,7 +133,7 @@
       throw e;
     }
     if (mutation && (res.status >= 500 || (res.ok && res.status !== 204 && !body))) throw Object.assign(new Error('The outcome is unknown. Check the current data before trying this action again.'), { uncertain: true });
-    if (!res.ok) throw new Error((body && body.error) || `Request failed (${res.status})`);
+    if (!res.ok) throw Object.assign(new Error((body && body.error) || `Request failed (${res.status})`), { cancelled: res.status === 409 && body?.error === 'Your signed-in account changed. Reload before saving.' });
     return body;
   }
 
@@ -141,14 +141,16 @@
   let askVersion = 0;
   let activeAsk = null;
   window.addEventListener('hashchange', () => { pageVersion++; });
-  function operation(signal) {
+  const currentOwner = () => window.OrganizerAccount?.currentOwner?.() || null;
+  function operation(signal, owner = currentOwner()) {
     const version = pageVersion, hash = location.hash;
     const check = () => {
+      if (!owner || owner !== currentOwner()) throw Object.assign(new Error('The signed-in account is unavailable or changed. Reload before continuing.'), { cancelled: true });
       if (signal?.aborted || version !== pageVersion || hash !== location.hash) {
         throw Object.assign(new Error('Action cancelled because the page changed or voice stopped. Any request already sent may have completed; check the current data.'), { cancelled: true });
       }
     };
-    return { check, request: async (path, opts) => { check(); const result = await api(path, opts); check(); return result; } };
+    return { check, request: async (path, opts = {}) => { check(); const result = await api(path, { ...opts, headers: { 'Content-Type': 'application/json', ...opts.headers, 'X-Contact-Owner': owner } }); check(); return result; } };
   }
   const list = (r, key) => (Array.isArray(r) ? r : (r && r[key]) || []);
   const clip = (s, n) => (String(s ?? '').length > n ? String(s).slice(0, n) + '...' : String(s ?? ''));
@@ -454,11 +456,11 @@
     },
   };
 
-  async function call(name, args, { signal } = {}) {
+  async function call(name, args, { signal, owner = currentOwner() } = {}) {
     const fn = Object.prototype.hasOwnProperty.call(impl, name) ? impl[name] : null;
     if (!fn) return { error: `Unknown tool "${name}".` };
     try {
-      const scope = operation(signal);
+      const scope = operation(signal, owner);
       scope.check();
       const out = (await fn(args || {}, scope)) ?? { ok: true };
       const json = JSON.stringify(out);
@@ -488,6 +490,7 @@
     const cancel = () => controller.abort();
     if (externalSignal?.aborted) cancel(); else externalSignal?.addEventListener('abort', cancel, { once: true });
     const version = ++askVersion;
+    const owner = currentOwner();
     const messages = [...history, { role: 'user', content: String(text).slice(0, 2000) }];
     const log = [];
     const effects = new Map();
@@ -500,7 +503,7 @@
     try {
       for (let round = 0; round < 6; round++) {
         if (signal?.aborted || version !== askVersion) return finish('Assistant request cancelled.', { cancelled: true });
-        const scope = operation(signal);
+        const scope = operation(signal, owner);
         const r = await scope.request('/api/assistant', { method: 'POST', body: JSON.stringify({ messages, context: context(), tools, instructions }) });
         if (version !== askVersion) return finish('Assistant request cancelled.', { cancelled: true });
         if (!r.tool_calls || !r.tool_calls.length) return finish(r.reply || 'No action was suggested. You can use the page controls.');
@@ -510,7 +513,7 @@
           let args;
           try { args = JSON.parse(tc.arguments || '{}'); } catch { return finish('The assistant returned an invalid action. No further actions were run. Use the page controls.'); }
           const key = tc.name + ':' + keyFor(args);
-          const result = !readOnly.has(tc.name) && effects.has(key) ? effects.get(key) : await call(tc.name, args, { signal });
+          const result = !readOnly.has(tc.name) && effects.has(key) ? effects.get(key) : await call(tc.name, args, { signal, owner });
           if (!readOnly.has(tc.name)) effects.set(key, result);
           log.push({ tool: tc.name, args, result });
           messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
@@ -526,5 +529,5 @@
     }
   }
 
-  window.Assistant = { tools, call, context, instructions, ask, speak };
+  window.Assistant = { tools, call, context, instructions, ask, speak, currentOwner };
 })();
