@@ -11,6 +11,12 @@
 <button class="btn" data-role="observer">Observer / new guest</button>
 <button class="btn" data-role="owner">Alice fixture organizer</button>
 <button class="btn" data-role="other">Bob fixture organizer (non-owner of Alice's room)</button>
+<h2>One-shot real room-response delay</h2>
+<p>Only Alice fixture organizer's next exact room GET is delayed, after the real route and SQL finish. Other roles, rooms, mutations and later GETs proceed normally. One pending/held response only. This is response delivery ordering, not simultaneous SQL execution.</p>
+<button class="btn" id="hold-read">Hold next Alice-owner room GET (maximum 60 seconds)</button>
+<button class="btn" id="timeout-read">Delay next Alice-owner room GET for 20 seconds</button>
+<button class="btn" id="release-read">Release held real response now</button>
+<p>For stale-close proof, wait for status to say held/open, close in the room tab, then release here before the room's 15-second GET timeout. Released old bytes must not reopen the room. Status reports elapsed hold time; an abort is timeout evidence, not stale-release evidence. The fixed 20-second mode exercises that actual 15-second timeout; next normal poll recovers. No mutations are delayed or retried. Reset/stop/client abort discard held bytes and timers.</p>
 <h2>Fixture lifecycle</h2>
 <p>Reset replaces only this server's in-memory fixture data. It invalidates every old guest session. Reload room tabs after a reset. Stop closes the listener and discards the database. Automatic stop: 30 minutes after startup.</p>
 <button class="btn" id="reset">Reset local fixture</button>

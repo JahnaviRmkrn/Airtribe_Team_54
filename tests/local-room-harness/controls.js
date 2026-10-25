@@ -17,3 +17,8 @@ document.getElementById('reset').addEventListener('click', () => request('reset'
 document.getElementById('stop').addEventListener('click', () => request('stop', { confirm: 'stop-local-fixture' }));
 document.getElementById('refresh').addEventListener('click', () => request('status'));
 request('status');
+
+for (const [id, mode] of [['hold-read', 'hold'], ['timeout-read', 'timeout20s']]) {
+  document.getElementById(id).addEventListener('click', () => request('read-delay', { confirm: 'delay-next-alice-owner-room-read', target: 'alice-owner-room', mode }));
+}
+document.getElementById('release-read').addEventListener('click', () => request('release-read', { confirm: 'release-held-room-read' }));

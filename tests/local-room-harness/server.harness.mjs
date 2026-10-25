@@ -1,3 +1,4 @@
+import vm from 'node:vm';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createServer, request as httpRequest } from 'node:http';
 import { readFileSync } from 'node:fs';
@@ -100,6 +101,45 @@ const handlers = new Map([
 ]);
 let db, server, origin, tenants, timeout, stopResolve, stopPromise, queue = Promise.resolve();
 let stopped = false, servedRequests = 0, resets = 0;
+let heldRead = null;
+const delayedRead = { pending_mode: null, active_mode: null, captured_count: 0, released_count: 0, aborted_count: 0, last_outcome: null, snapshot_status: null, last_hold_ms: null };
+const roomMutations = {};
+function discardHeldRead(reason) {
+  delayedRead.pending_mode = null;
+  const held = heldRead;
+  if (!held) return;
+  heldRead = null; clearTimeout(held.timer);
+  held.res.removeListener('close', held.onClose);
+  delayedRead.active_mode = null; delayedRead.aborted_count++; delayedRead.last_outcome = reason; delayedRead.last_hold_ms = Date.now() - held.startedAt;
+  held.res.destroy();
+}
+function releaseHeldRead() {
+  const held = heldRead;
+  if (!held) return false;
+  heldRead = null; clearTimeout(held.timer); held.res.removeListener('close', held.onClose);
+  delayedRead.active_mode = null; delayedRead.last_hold_ms = Date.now() - held.startedAt;
+  if (held.res.destroyed) { delayedRead.aborted_count++; delayedRead.last_outcome = 'client-aborted'; return false; }
+  delayedRead.released_count++; delayedRead.last_outcome = 'released';
+  respond(held.res, held.code, held.body, held.context, held.type);
+  return true;
+}
+function captureRead(res, code, body, context, type) {
+  const mode = delayedRead.pending_mode;
+  delayedRead.pending_mode = null; delayedRead.active_mode = mode;
+  delayedRead.captured_count++; delayedRead.last_outcome = 'held';
+  delayedRead.snapshot_status = JSON.parse(body.toString()).meetup.status;
+  const held = { res, code, body, context, type, startedAt: Date.now(), timer: null, onClose: null };
+  held.onClose = () => { if (heldRead === held) discardHeldRead('client-aborted'); };
+  heldRead = held; res.once('close', held.onClose);
+  if (res.destroyed) { discardHeldRead('client-aborted'); return; }
+  // Fixed response-boundary delays only: SQL and handler execution have ended.
+  // Returning to dispatch releases the serialized route queue immediately.
+  held.timer = setTimeout(() => {
+    if (heldRead !== held) return;
+    if (mode === 'timeout20s') releaseHeldRead(); else discardHeldRead('hold-deadline');
+  }, mode === 'timeout20s' ? 20_000 : 60_000);
+}
+
 const cookieHeader = (name, value, options = {}) => [
   `${name}=${encodeURIComponent(value)}`, 'Path=/', 'HttpOnly', 'SameSite=Lax',
   options.expires ? `Expires=${new Date(options.expires).toUTCString()}` : '',
@@ -126,6 +166,9 @@ function clearBrowserGuests(context) {
   }
 }
 async function resetFixture() {
+  discardHeldRead('reset');
+  Object.assign(delayedRead, { pending_mode: null, active_mode: null, captured_count: 0, released_count: 0, aborted_count: 0, last_outcome: null, snapshot_status: null, last_hold_ms: null });
+  for (const key of Object.keys(roomMutations)) delete roomMutations[key];
   tenants = await seedPrivateData(db);
   for (const name of ['alice', 'bob']) {
     await asRole(db, 'service_role', null, (tx) => tx.query('update meetups set room_token = $1 where id = $2', [tokens[name], tenants[name].meetup.id]));
@@ -138,7 +181,7 @@ async function status(context) {
     (select count(*)::int from venue_votes) as votes,
     (select count(*)::int from meetups where status = 'closed') as closed_rooms,
     (select count(*)::int from meetups where final_venue_id is not null) as confirmed_rooms`)).rows[0]);
-  return { mode: 'local-real-handler-fixture', role: context.role, ...counts, served_requests: servedRequests, resets,
+  return { mode: 'local-real-handler-fixture', delayed_read: { ...delayedRead }, room_mutations: { ...roomMutations }, role: context.role, ...counts, served_requests: servedRequests, resets,
     external_fetch_attempts: deps.externalFetchAttempts, provider_attempts: deps.providerAttempts,
     secret_access_attempts: deps.secretAccessAttempts, internal_errors: deps.errorCount,
     live_auth: false, live_postgrest: false, payments: 'disabled', voice: 'disabled' };
@@ -174,10 +217,21 @@ async function dispatch(req, res) {
     return respond(res, 200, readFileSync(new URL(asset[0], root)), context, asset[1]);
   }
   if (path === '/__harness/status' && req.method === 'GET') return respond(res, 200, await status(context), context);
-  if (['/__harness/role', '/__harness/reset', '/__harness/stop'].includes(path) && req.method === 'POST') {
+  if (['/__harness/role', '/__harness/reset', '/__harness/stop', '/__harness/read-delay', '/__harness/release-read'].includes(path) && req.method === 'POST') {
     let payload;
     try { payload = JSON.parse(await bodyBytes(req)); } catch { return respond(res, 400, { error: 'Invalid local control body' }); }
-    if (path.endsWith('/role')) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return respond(res, 400, { error: 'Invalid local control body' });
+    if (['/__harness/read-delay', '/__harness/release-read'].includes(path) && req.url !== path) return respond(res, 400, { error: 'Delay controls do not accept query inputs' });
+    if (path.endsWith('/read-delay')) {
+      if (payload.confirm !== 'delay-next-alice-owner-room-read' || payload.target !== 'alice-owner-room'
+        || !['hold', 'timeout20s'].includes(payload.mode)
+        || Object.keys(payload).some((key) => !['confirm', 'target', 'mode'].includes(key))) return respond(res, 400, { error: 'Only the fixed Alice-owner room read delay is allowed' });
+      if (heldRead || delayedRead.pending_mode) return respond(res, 409, { error: 'Consume/release or reset the existing delayed read first' });
+      delayedRead.pending_mode = payload.mode;
+    } else if (path.endsWith('/release-read')) {
+      if (payload.confirm !== 'release-held-room-read' || Object.keys(payload).some((key) => key !== 'confirm')) return respond(res, 400, { error: 'Explicit fixed release required' });
+      if (!releaseHeldRead()) return respond(res, 409, { error: 'No room response is held' });
+    } else if (path.endsWith('/role')) {
       if (!['observer', 'owner', 'other'].includes(payload.role)) return respond(res, 400, { error: 'Invalid fixture role' });
       clearBrowserGuests(context);
       context.role = payload.role;
@@ -204,12 +258,20 @@ async function dispatch(req, res) {
   // comes only from the separate local harness cookie, not from production auth.
   for (const name of ['content-type', 'x-guest-secret']) if (req.headers[name]) headers.set(name, req.headers[name]);
   const request = new Request(new URL(path, origin), { method: req.method, headers, ...(body?.length ? { body } : {}) });
+  if (mutating) roomMutations[`${req.method} ${suffix}`] = (roomMutations[`${req.method} ${suffix}`] || 0) + 1;
   const response = await storage.run(context, () => handler(request, { params: Promise.resolve({ token: match[1] }) }));
-  return respond(res, response.status, Buffer.from(await response.arrayBuffer()), context, response.headers.get('content-type') || 'application/json');
+  const responseBody = Buffer.from(await response.arrayBuffer()), type = response.headers.get('content-type') || 'application/json';
+  if (delayedRead.pending_mode && !heldRead && req.method === 'GET' && context.role === 'owner'
+    && req.url === `/api/rooms/${tokens.alice}` && response.status === 200) {
+    captureRead(res, response.status, responseBody, context, type);
+    return;
+  }
+  return respond(res, response.status, responseBody, context, type);
 }
 function stop() {
   if (stopped) return;
   stopped = true;
+  discardHeldRead('stop');
   clearTimeout(timeout);
   server?.close(() => stopResolve?.());
   server?.closeAllConnections();
@@ -219,9 +281,9 @@ function stop() {
 // here, so application fetch remains a throwing guard throughout the smoke.
 function client() {
   const jar = new Map();
-  return async (path, { method = 'GET', body, headers = {} } = {}) => new Promise((resolve, reject) => {
+  return async (path, { method = 'GET', body, headers = {}, signal, waitForRoomRead = false } = {}) => new Promise((resolve, reject) => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
-    const req = httpRequest(new URL(path, origin), { method, agent: false, headers: {
+    const req = httpRequest(new URL(path, origin), { method, agent: false, signal, headers: {
       ...(jar.size ? { cookie: [...jar].map(([key, value]) => `${key}=${value}`).join('; ') } : {}),
       ...(method !== 'GET' ? { origin } : {}),
       ...(payload ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } : {}), ...headers,
@@ -239,7 +301,7 @@ function client() {
         resolve({ status: res.statusCode, headers: res.headers, text, data });
       });
     });
-    req.once('error', reject); req.setTimeout(5_000, () => req.destroy(new Error('Local request timed out')));
+    req.once('error', reject); req.setTimeout(waitForRoomRead ? 25_000 : 5_000, () => req.destroy(new Error('Local request timed out')));
     req.end(payload);
   });
 }
@@ -371,6 +433,7 @@ it('serves unchanged room assets and real routes with safe HTTP cookie isolation
   expect(summary.guests).toBe(2); expect(summary.votes).toBe(1); expect(summary.closed_rooms).toBe(1);
   expect(summary.external_fetch_attempts).toBe(0); expect(summary.provider_attempts).toBe(0);
   expect(summary.secret_access_attempts).toBe(0); expect(summary.internal_errors).toBe(0);
+  await delayedReadSmoke({ owner, other, observer, room, mutate, statusIs });
   // Leave a clean fixture for a browser operator, never the smoke's credentials.
   statusIs(await owner('/__harness/reset', mutate('POST', { confirm: 'reset-local-fixture' })), 200);
   statusIs(await guestA(room + '/me'), 401);
@@ -380,8 +443,119 @@ it('serves unchanged room assets and real routes with safe HTTP cookie isolation
     await stopPromise;
     expect(deps.externalFetchAttempts).toBe(0); expect(deps.providerAttempts).toBe(0); expect(deps.secretAccessAttempts).toBe(0);
   } else {
+    statusIs(await owner('/__harness/read-delay', mutate('POST', { confirm: 'delay-next-alice-owner-room-read', target: 'alice-owner-room', mode: 'hold' })), 200);
+    const stoppingRead = owner(room).then(() => 'unexpected-success', () => 'discarded');
+    const heldDeadline = Date.now() + 5_000;
+    while (!heldRead && Date.now() < heldDeadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(heldRead !== null).toBe(true);
     statusIs(await owner('/__harness/stop', mutate('POST', { confirm: 'stop-local-fixture' })), 200);
     await stopPromise;
+    expect(await stoppingRead).toBe('discarded'); expect(heldRead).toBeNull(); expect(delayedRead.last_outcome).toBe('stop');
     console.log('LOCAL_ROUTE_HARNESS_SMOKE_OK: real route HTTP flow, independent cookies, ownership/RLS, controls, provider/network guards; listener stopped.');
   }
 });
+
+async function delayedReadSmoke({ owner, other, observer, room, mutate, statusIs }) {
+  const reset = () => owner('/__harness/reset', mutate('POST', { confirm: 'reset-local-fixture' }));
+  const arm = (mode = 'hold', extra = {}) => owner('/__harness/read-delay', mutate('POST', { confirm: 'delay-next-alice-owner-room-read', target: 'alice-owner-room', mode, ...extra }));
+  const release = () => owner('/__harness/release-read', mutate('POST', { confirm: 'release-held-room-read' }));
+  const info = async () => (await observer('/__harness/status')).data;
+  const until = async (predicate) => {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const value = await info(); if (predicate(value)) return value;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('Bounded room delay state did not settle');
+  };
+  statusIs(await reset(), 200);
+  for (const extra of [{ target: 'bob' }, { target: room }, { milliseconds: 20 }, { sql: 'no' }, { url: room }]) statusIs(await arm('hold', extra), 400);
+  statusIs(await arm('arbitrary'), 400);
+  statusIs(await owner('/__harness/read-delay', mutate('POST', null)), 400);
+  statusIs(await owner('/__harness/read-delay', { ...mutate('POST', { confirm: 'delay-next-alice-owner-room-read', target: 'alice-owner-room', mode: 'hold' }), headers: { origin: 'https://external.invalid' } }), 403);
+  statusIs(await release(), 409);
+  statusIs(await owner('/__harness/release-read', mutate('POST', { confirm: 'release-held-room-read', url: room })), 400);
+  statusIs(await owner('/__harness/read-delay?mode=hold', mutate('POST', { confirm: 'delay-next-alice-owner-room-read', target: 'alice-owner-room', mode: 'hold' })), 400);
+  statusIs(await arm(), 200); statusIs(await arm('timeout20s'), 409);
+  statusIs(await observer(room), 200); statusIs(await other(room), 200); statusIs(await owner(`/api/rooms/${tokens.bob}`), 200);
+  statusIs(await owner(room + '?not-a-delay-target=1'), 200);
+  expect((await info()).delayed_read.pending_mode).toBe('hold');
+  let settled = false;
+  const held = owner(room).then((result) => { settled = true; return result; });
+  await until((s) => s.delayed_read.active_mode === 'hold');
+  expect(settled).toBe(false);
+  statusIs(await arm(), 409);
+  // The real close SQL must commit while the old GET's bytes remain unsent.
+  statusIs(await owner(room + '/close', mutate('POST', {})), 200);
+  expect((await owner(room)).data.meetup.status).toBe('closed');
+  expect((await info()).delayed_read.snapshot_status).toBe('open');
+  statusIs(await release(), 200);
+  const old = await held; statusIs(old, 200); expect(old.data.meetup.status).toBe('open');
+  expect((await info()).delayed_read).toMatchObject({ captured_count: 1, released_count: 1, aborted_count: 0, last_outcome: 'released' });
+  expect((await info()).room_mutations['POST /close']).toBe(1);
+
+  // Run the checked-in refresh/send/act functions with real HTTP and real
+  // timers. Only rendering/toasts/DOM are replaced: not a native-browser claim.
+  const source = readFileSync(new URL('public/room/room.js', root), 'utf8').replace(/\nif \(!TOKEN\) \{[\s\S]*$/, '');
+  const nodes = new Map(), rendered = [], requests = [];
+  const node = (id) => {
+    if (!nodes.has(id)) {
+      const classes = new Set(['hidden']);
+      nodes.set(id, { textContent: '', innerHTML: '', classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) } });
+    }
+    return nodes.get(id);
+  };
+  const context = vm.createContext({ document: { getElementById: node }, location: { pathname: '/m/' + tokens.alice }, window: {},
+    AbortController, setTimeout, clearTimeout, clearInterval,
+    recordRender: (value) => rendered.push(value.meetup.status), recordToast() {},
+    fetch: async (path, options) => {
+      if (![room, room + '/close', room + '/confirm'].includes(path)) throw new Error('Unexpected bounded room UI transport');
+      requests.push({ path, method: options.method || 'GET', signal: options.signal });
+      const result = await owner(path, { method: options.method || 'GET', body: options.body === undefined ? undefined : JSON.parse(options.body), signal: options.signal, waitForRoomRead: true });
+      return { ok: result.status < 400, status: result.status, json: async () => result.data };
+    },
+  });
+  vm.runInContext(source, context);
+  const run = (code) => vm.runInContext(code, context);
+  run('render = () => recordRender(view); toast = recordToast;');
+  statusIs(await reset(), 200); await run('refresh()'); expect(run('view.meetup.status')).toBe('open');
+  statusIs(await arm(), 200);
+  const stale = run('refresh()'); await until((s) => s.delayed_read.active_mode === 'hold');
+  expect(await run("act(() => send('POST', '/close', {}))")).toBe(true);
+  expect(run('view.meetup.status')).toBe('closed');
+  statusIs(await release(), 200); await stale;
+  expect(run('view.meetup.status')).toBe('closed'); expect(rendered).toEqual(['open', 'closed']);
+  expect((await info()).delayed_read.last_hold_ms).toBeLessThan(15_000);
+  expect(requests.filter((r) => r.method === 'POST')).toHaveLength(1);
+
+  // Use a fresh open room, matching native polling (closed rooms stop polling).
+  statusIs(await reset(), 200); await run('refresh()');
+  expect(run('view.meetup.status')).toBe('open');
+  // Real production 15-second deadline, not fake timers or synthetic success.
+  statusIs(await arm('timeout20s'), 200);
+  const started = Date.now(), timedOut = run('refresh()');
+  await until((s) => s.delayed_read.active_mode === 'timeout20s');
+  const duplicated = run('refresh()'); const readCount = requests.length;
+  await Promise.all([timedOut, duplicated]);
+  expect(Date.now() - started).toBeGreaterThanOrEqual(14_900);
+  expect(requests).toHaveLength(readCount);
+  expect(requests.at(-1).signal.aborted).toBe(true);
+  expect(node('conn').classList.contains('hidden')).toBe(false);
+  expect(run('view.meetup.status')).toBe('open');
+  const aborted = await until((s) => s.delayed_read.last_outcome === 'client-aborted');
+  expect(aborted.delayed_read).toMatchObject({ active_mode: null, pending_mode: null, aborted_count: 1, released_count: 0 });
+  await run('refresh()');
+  expect(node('conn').classList.contains('hidden')).toBe(true);
+  expect(run('view.meetup.status')).toBe('open');
+  expect(requests.filter((r) => r.method === 'POST')).toHaveLength(1);
+  expect((await info()).room_mutations).toEqual({});
+
+  statusIs(await arm(), 200);
+  const resetRead = owner(room).then(() => 'unexpected-success', () => 'discarded');
+  await until((s) => s.delayed_read.active_mode === 'hold');
+  statusIs(await reset(), 200); expect(await resetRead).toBe('discarded');
+  const clean = await info();
+  expect(clean.delayed_read).toMatchObject({ active_mode: null, pending_mode: null, captured_count: 0, released_count: 0, aborted_count: 0 });
+  expect(clean.room_mutations).toEqual({});
+  expect(clean.external_fetch_attempts).toBe(0); expect(clean.provider_attempts).toBe(0); expect(clean.secret_access_attempts).toBe(0); expect(clean.internal_errors).toBe(0);
+}
