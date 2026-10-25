@@ -171,10 +171,12 @@ check('guest name edit keeps preferences', mine?.preferences?.food?.[0] === 'veg
 
 // Room-state rules hold even if the API's own check is bypassed (DB trigger).
 // Needs the service role, so only runs when SUPABASE_SERVICE_ROLE_KEY is set.
-if (!env.SUPABASE_SERVICE_ROLE_KEY) {
+const admin = env.SUPABASE_SERVICE_ROLE_KEY
+  ? createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
+  : null;
+if (!admin) {
   console.log('SKIP  service-role DB checks (SUPABASE_SERVICE_ROLE_KEY not set)');
 } else {
-  const admin = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
   await call('POST', `/api/rooms/${brunch}/close`, { token: alice });
   const { data: m } = await admin.from('meetups').select('id').eq('room_token', brunch).single();
   const { error: dbErr } = await admin.from('meetup_attendees').insert({ meetup_id: m.id, guest_name: 'sneaky', secret_hash: 'x' });
@@ -200,19 +202,24 @@ if (!env.SUPABASE_SERVICE_ROLE_KEY) {
     JSON.stringify(r.json.upcoming_meetups.map((m) => m.title)),
   );
 
-  // Vote withdrawal on a closed room (race found by spec/MeetupRoom.tla).
-  r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Unvote race', activity: 'dinner', area: 'Koramangala' } });
-  const uv = r.json.meetup;
-  r = await call('POST', `/api/rooms/${uv.room_token}/join`, { body: { guest_name: 'Voter', preferences: { food: ['veg'] } } });
-  const voter = r.json.guest_secret;
-  const uvVenue = r.json.room.shortlist[0].venue.id;
-  await call('POST', `/api/rooms/${uv.room_token}/vote`, { guest: voter, body: { venue_id: uvVenue } });
-  await call('POST', `/api/rooms/${uv.room_token}/close`, { token: alice });
+}
+
+// Vote withdrawal on a closed room (race found by spec/MeetupRoom.tla).
+r = await call('POST', '/api/me/meetups', { token: alice, body: { title: 'Unvote race', activity: 'dinner', area: 'Koramangala' } });
+const uv = r.json.meetup;
+r = await call('POST', `/api/rooms/${uv.room_token}/join`, { body: { guest_name: 'Voter', preferences: { food: ['veg'] } } });
+const voter = r.json.guest_secret;
+const uvVenue = r.json.room.shortlist[0].venue.id;
+await call('POST', `/api/rooms/${uv.room_token}/vote`, { guest: voter, body: { venue_id: uvVenue } });
+await call('POST', `/api/rooms/${uv.room_token}/close`, { token: alice });
+if (admin) {
   const { error: delErr } = await admin.from('venue_votes').delete().eq('meetup_id', uv.id);
   check('DB rejects vote withdrawal in closed room', delErr?.message.includes('room_closed'), JSON.stringify(delErr));
-  r = await call('GET', `/api/rooms/${uv.room_token}`);
-  check('closed room keeps its votes', r.json.votes[uvVenue] === 1, JSON.stringify(r.json.votes));
-  check('deleting a closed meetup still cascades', (await call('DELETE', `/api/me/meetups/${uv.id}`, { token: alice })).status === 200);
+}
+r = await call('GET', `/api/rooms/${uv.room_token}`);
+check('closed room keeps its votes', r.json.votes[uvVenue] === 1, JSON.stringify(r.json.votes));
+check('deleting a closed meetup still cascades', (await call('DELETE', `/api/me/meetups/${uv.id}`, { token: alice })).status === 200);
+if (admin) {
   const { count: leftover } = await admin.from('venue_votes').select('id', { count: 'exact', head: true }).eq('meetup_id', uv.id);
   check('no orphan votes after delete', leftover === 0, String(leftover));
 }

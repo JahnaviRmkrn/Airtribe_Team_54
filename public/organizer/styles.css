@@ -33,6 +33,13 @@ h1, h2, h3, .brand { font-family: "Newsreader", Georgia, serif; }
 }
 .nav a:hover { background: rgba(117, 228, 222, 0.3); }
 .nav a.active { background: rgba(246, 172, 13, 0.25); font-weight: 600; }
+.nav { display: flex; align-items: center; flex-wrap: wrap; }
+.nav .signout { display: inline; margin: 0 0 0 10px; }
+.nav .signout button {
+  font: inherit; font-size: 14px; color: #6b5a4b; background: transparent;
+  border: 1px solid #e3d8c4; border-radius: 999px; padding: 6px 13px; cursor: pointer;
+}
+.nav .signout button:hover { background: rgba(46, 31, 20, 0.06); color: #2e1f14; }
 
 .container { max-width: 780px; margin: 26px auto; padding: 0 16px 44px; }
 
@@ -158,7 +165,7 @@ fieldset legend { font-family: "Newsreader", Georgia, serif; font-size: 15px; pa
 .graph-legend-item i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .calendar { max-width: 560px; margin: 0 auto; }
 .cal-month { font: 600 15px Inter, system-ui, sans-serif; color: #3d2b1f; margin-bottom: 10px; }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .cal-head { text-align: center; font: 600 11px Inter, system-ui, sans-serif; color: rgba(61, 43, 31, 0.5); padding: 4px 0; text-transform: uppercase; }
 .cal-cell { aspect-ratio: 1; border-radius: 10px; background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(60, 42, 20, 0.08); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 2px; }
 .cal-pad { background: transparent; border: none; }
@@ -268,3 +275,145 @@ fieldset legend { font-family: "Newsreader", Georgia, serif; font-size: 15px; pa
 
 .ob-sub { margin: 18px 0 2px; font-size: 19px; }
 .ob-row .remove-row { width: auto; justify-self: end; padding: 6px 14px; }
+
+/* Today bar + overdue list */
+.cal-todaybar { font: 500 15px Inter, system-ui, sans-serif; color: #3d2b1f; margin-bottom: 6px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.cal-todaybar strong { display: inline-block; background: #f6ac0d; color: #fff; border-radius: 999px; padding: 2px 10px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+.cal-overdue-count { display: inline-block; background: #d93a2b; color: #fff; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
+.cal-ok { color: #2f7a55; font-size: 13px; }
+.cal-todaylist { list-style: none; margin: 0 0 12px; padding: 0; font-size: 14px; }
+.cal-todaylist li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.cal-todaylist li.late, .cal-item.late { color: #a3271b; }
+.cal-todaylist li.row { padding: 6px 0; border-top: none; flex-wrap: wrap; }
+.cal-todaylist .cal-line { display: flex; align-items: center; gap: 8px; }
+.cal-todaylist .actions button { font-size: 13px; padding: 4px 10px; }
+.cal-todaylist .draft-slot { list-style: none; }
+.cal-today { background: #f6ac0d !important; }
+.cal-today .cal-day { color: #fff; font-weight: 700; }
+.cal-cell { min-width: 0; overflow: hidden; }
+.cal-dots { flex-wrap: wrap; justify-content: center; }
+/* Status markers: red = overdue (not connected), yellow = due soon */
+.cal-mark { display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; border-radius: 50%; font-style: normal; font-size: 9px; line-height: 1; }
+.cal-mark.overdue { background: #fde2df; box-shadow: 0 0 0 2px #d93a2b inset; color: #d93a2b; }
+.cal-mark.soon { background: #fff4d6; box-shadow: 0 0 0 2px #f6ac0d inset; color: #c98a00; }
+.cal-mark.meetup { background: #dcece4; }
+.cal-mark.cat-community { font-size: 11px; }
+.cal-late { border-color: #d93a2b !important; }
+.cal-more { font-size: 10px; color: #6b5a48; }
+@media (max-width: 520px) { .cal-mark { width: 12px; height: 12px; font-size: 7px; } }
+
+/* Link styled as a button (mailto hand-offs) */
+a.button { display: inline-flex; align-items: center; padding: 9px 16px; border: 1px solid #e5dcc8; border-radius: 999px; background: #fff; color: #2e1f14; font-size: 14px; font-weight: 500; text-decoration: none; font-family: inherit; transition: border-color 0.15s ease; }
+a.button:hover { border-color: #75e4de; }
+
+/* --- draft a check-in message --------------------------------------------- */
+.draft-slot { padding: 0 0 12px; }
+.draft-box {
+  margin-top: 10px; padding: 14px; border-radius: 14px;
+  background: linear-gradient(135deg, rgba(117, 228, 222, 0.16), rgba(246, 172, 13, 0.10));
+  border: 1px solid #e6dcc6;
+}
+.draft-label { display: block; font-size: 13px; font-weight: 600; }
+.draft-basis { margin: 0 0 4px; font-size: 12px; line-height: 1.45; }
+.draft-text {
+  display: block; width: 100%; margin: 8px 0 10px; padding: 10px 12px;
+  font: 400 15px/1.45 "Newsreader", Georgia, serif; color: #2e1f14;
+  background: #fffdf8; border: 1px solid #e3d8c4; border-radius: 10px; resize: vertical;
+}
+.draft-box .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.button-link {
+  display: inline-block; padding: 8px 14px; border-radius: 999px; font-size: 14px; font-weight: 500;
+  color: #0b5d57; background: rgba(117, 228, 222, 0.35); text-decoration: none;
+}
+.button-link:hover { background: rgba(117, 228, 222, 0.55); }
+
+/* Narrow phones: a row's buttons (e.g. Draft message + Mark done) drop below its
+   text and wrap instead of pushing the page sideways. */
+.row > :first-child { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+  .row:not(.spread) { flex-wrap: wrap; }
+  .row .actions { flex-shrink: 1; max-width: 100%; }
+  .row:not(.spread) .actions { width: 100%; }
+}
+/* --- guide card on the dashboard first page ------------------------------- */
+.guide-card {
+  background: linear-gradient(135deg, rgba(246, 172, 13, 0.14), rgba(117, 228, 222, 0.16) 55%, rgba(214, 235, 179, 0.28));
+  border: 1px solid #f0e2c4;
+  margin-top: 16px;
+}
+.guide-card summary { display: flex; align-items: center; gap: 14px; cursor: pointer; list-style: none; }
+.guide-card summary::-webkit-details-marker { display: none; }
+.guide-char { flex: none; display: inline-flex; }
+.guide-char .vx-char { width: 60px; height: 60px; }
+.guide-title { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.guide-h { font: 500 21px "Newsreader", Georgia, serif; }
+.guide-caret { color: #a0814f; font-size: 13px; transition: transform 0.15s ease; }
+.guide-card[open] .guide-caret { transform: rotate(180deg); }
+.guide-card .cap-list { margin: 14px 0 2px; }
+.cap-list.pretty { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.cap-list.pretty .cap-ic { font-size: 19px; }
+.cap-1 .cap-ic { background: rgba(246, 172, 13, 0.30); }
+.cap-2 .cap-ic { background: rgba(4, 193, 225, 0.20); }
+.cap-3 .cap-ic { background: rgba(117, 228, 222, 0.40); }
+.cap-4 .cap-ic { background: rgba(214, 235, 179, 0.70); }
+.cap-5 .cap-ic { background: rgba(243, 232, 3, 0.30); }
+
+/* --- profile: your details + activity log --------------------------------- */
+.me-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; }
+.me-avatar {
+  width: 62px; height: 62px; border-radius: 50%; flex: none;
+  background: linear-gradient(135deg, #f6ac0d, #f3c94a);
+  color: #3b2a1a; display: grid; place-items: center;
+  font: 600 27px "Newsreader", Georgia, serif;
+  border: 2px solid rgba(46, 31, 20, 0.15);
+}
+.me-name { margin: 0 0 2px; font-size: 22px; word-break: break-all; }
+.me-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.me-item { background: rgba(255, 255, 255, 0.75); border: 1px solid #efe6d4; border-radius: 14px; padding: 12px 14px; }
+.me-num { font: 600 26px "Newsreader", Georgia, serif; }
+.me-k { font-size: 13px; font-weight: 600; }
+.me-goal-bars { margin-bottom: 12px; }
+.me-goal-bars .bar-actual { display: block; height: 100%; border-radius: 999px; }
+.me-log { margin-top: 8px; }
+
+/* --- cute onboarding + welcome -------------------------------------------- */
+.ob-cute {
+  position: relative; overflow: hidden;
+  background: linear-gradient(165deg, #fffdf8 30%, rgba(214, 235, 179, 0.30));
+  border-color: #f0e2c4;
+}
+.ob-cute > *:not(.ob-deco) { position: relative; }
+.ob-deco span { position: absolute; border-radius: 50%; pointer-events: none; }
+.ob-deco .b1 { width: 92px; height: 92px; background: #75e4de; opacity: 0.32; top: -32px; right: -22px; }
+.ob-deco .b2 { width: 54px; height: 54px; background: #f6ac0d; opacity: 0.22; top: 44px; right: 56px; }
+.ob-deco .b3 { width: 42px; height: 42px; background: #f3e803; opacity: 0.28; bottom: -16px; left: -12px; }
+.step-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(4, 193, 225, 0.13); border: 1px solid rgba(4, 193, 225, 0.32);
+  color: #0b7285; border-radius: 999px; padding: 5px 14px; font-weight: 600;
+}
+.ob-cute h1 { margin: 10px 0 6px; }
+.ob-yay { font-size: 26px; letter-spacing: 8px; margin: 0 0 4px; }
+.welcome-char { display: inline-flex; margin-bottom: 6px; }
+.welcome-char .vx-char { width: 74px; height: 74px; }
+
+/* Keep the floating voice button from ever resting on content: on phones the
+   page gets extra bottom room so every control can scroll fully clear of it. */
+@media (max-width: 640px) {
+  .container { padding-bottom: 116px; }
+}
+
+/* --- topbar back button ---------------------------------------------------- */
+.nav-back {
+  width: 34px; height: 34px; border-radius: 50%;
+  display: inline-grid; place-items: center;
+  padding: 0; margin-right: 10px; font-size: 17px; line-height: 1;
+  border: 1px solid #e5dcc8; background: rgba(255, 255, 255, 0.85);
+}
+.nav-back:hover:not(:disabled) { border-color: #f6ac0d; background: rgba(246, 172, 13, 0.18); }
+.topbar-left { display: inline-flex; align-items: center; }
+
+/* --- room QR code ------------------------------------------------------------ */
+.qr-slot { padding: 4px 0 14px; }
+.qr-box { width: 200px; max-width: 70vw; background: #fff; border: 1px solid #f3ecdc; border-radius: 12px; padding: 8px; }
+.qr-box svg { display: block; width: 100%; height: auto; }

@@ -5,6 +5,7 @@ import { adminClient } from './supabase/admin';
 import { HttpError } from './http';
 import { amountPaise } from './pinelabs';
 import { shortlist, type GuestPreferences, type Venue } from './shortlist';
+import { areaCoords, centroid, isLatLng, nearestArea, roundTo, travel, type LatLng } from './geo';
 
 export type MeetupRow = {
   id: string;
@@ -98,10 +99,20 @@ export async function roomView(req: Request, room: MeetupRow, isOrganizer = fals
   // Never build a room (and shortlist) from partial data.
   if (aErr || vErr || venErr || pErr) throw new HttpError(503, 'Could not load room, please retry');
 
+  // Meet in the middle: each guest's shared location, else the area they typed.
+  const starts = (attendees ?? []).map((a) => {
+    const p = (a.preferences ?? {}) as GuestPreferences;
+    return isLatLng(p.location) ? { lat: p.location.lat, lng: p.location.lng } : areaCoords(p.area);
+  });
+  const people = starts.filter((s): s is LatLng => !!s);
+  const middle = people.length >= 2 ? centroid(people) : null;
+
   const list = shortlist(
     { activity: room.activity, area: room.area, budget: room.budget },
     (attendees ?? []).map((a) => a.preferences as GuestPreferences),
     (venues ?? []) as Venue[],
+    5,
+    { people },
   );
 
   const counts: Record<string, number> = {};
@@ -123,8 +134,26 @@ export async function roomView(req: Request, room: MeetupRow, isOrganizer = fals
       expires_at: room.expires_at,
       final_venue: finalVenue,
     },
-    attendees: attendees ?? [],
-    shortlist: list,
+    // Exact coordinates never leave the server: guests see a label, and the map gets ~1 km pins.
+    attendees: (attendees ?? []).map((a) => {
+      const p = (a.preferences ?? {}) as GuestPreferences;
+      if (!p.location) return a;
+      const { location, ...rest } = p;
+      return { ...a, preferences: { ...rest, location: { label: location.label || 'Shared location' } } };
+    }),
+    meeting_point: middle
+      ? {
+          ...roundTo(middle, 3),
+          near: nearestArea(middle).area,
+          people: people.length,
+          ...travel(middle, people),
+          pins: (attendees ?? []).flatMap((a, i) => (starts[i] ? [{ name: a.guest_name, ...roundTo(starts[i]!, 2) }] : [])),
+        }
+      : { people: people.length },
+    shortlist: list.map((s) => {
+      const c = areaCoords(s.venue.area);
+      return c ? { ...s, venue: { ...s.venue, lat: c.lat, lng: c.lng } } : s;
+    }),
     shortlist_note: list.length
       ? 'Sample suggestions from a seeded list, not verified listings. Check prices and availability before booking.'
       : 'Not enough preferences yet to suggest places. Add your area, budget or food/activity preferences.',

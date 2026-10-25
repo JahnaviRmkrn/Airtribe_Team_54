@@ -14,7 +14,7 @@ const pages = Object.fromEntries(['login', 'reset-password'].map((name) => [name
   }).outputText,
 ]));
 
-function page(name, auth = {}, search = '') {
+function page(name, auth = {}, search = '', env = {}) {
   const state = [];
   const effects = [];
   let cursor = 0;
@@ -48,12 +48,14 @@ function page(name, auth = {}, search = '') {
     '@/lib/supabase/browser': { browserClient: client },
     '@/lib/password-auth': { passwordAuth },
     '@/lib/urls': { safeNext },
+    '@/lib/env': { supabaseUrl: () => 'https://example.test', supabaseAnonKey: () => 'test-key', ...env },
     '@vercel/analytics': { track: vi.fn() },
     './login.css': {},
     '../login/login.css': {},
   };
   const context = vm.createContext({
     exports: {}, window: {}, location, URLSearchParams, Error, setTimeout, clearTimeout,
+    fetch: vi.fn().mockResolvedValue({ ok: true, json: async () => ({ external: { google: true } }) }),
     require(id) {
       if (!(id in modules)) throw new Error(`Unexpected page dependency: ${id}`);
       return modules[id];
@@ -213,6 +215,15 @@ describe('reconciled login design and authentication', () => {
     await button(view.render(), 'Forgot?').props.onClick();
     expect(text(view.render())).toContain('Auth configuration unavailable');
     expect(find(view.render(), (node) => node.props.type === 'submit').props.disabled).toBe(false);
+  });
+
+  it('keeps login usable when optional provider discovery has no configuration', async () => {
+    const view = page('login', {}, '', { supabaseUrl: () => { throw new Error('Missing configuration'); } });
+    view.render();
+    expect(() => view.effects[0]()).not.toThrow();
+    await tick();
+    expect(find(view.render(), (node) => node.props.type === 'submit').props.disabled).toBe(false);
+    expect(view.client).not.toHaveBeenCalled();
   });
 });
 

@@ -184,6 +184,7 @@ function render() {
   renderPeople();
   renderSlots();
   renderShortlist();
+  if (window.MeetMiddle) window.MeetMiddle.render(view);
   if (view.me && prefsFor !== view.me.attendee_id) renderPrefs();
   document.querySelectorAll('#prefs-form input, #prefs-form button').forEach((x) => { x.disabled = !open; });
 }
@@ -413,6 +414,12 @@ function renderPrefs() {
     <label class="field"><span class="field-label">Area</span>
       <input name="area" maxlength="80" list="area-list" placeholder="Anywhere" value="${esc(p.area || '')}">
       <datalist id="area-list">${areas.map((a) => `<option value="${esc(a)}"></option>`).join('')}</datalist></label>
+    <div class="field"><span class="field-label">Where are you coming from?</span>
+      <div class="loc-row">
+        <button type="button" class="btn ghost sm" id="loc-btn">📍 Use my location</button>
+        ${p.location ? '<button type="button" class="btn ghost sm" id="loc-clear">Stop sharing</button>' : ''}
+        <span class="muted" id="loc-status">${p.location ? '✓ Location shared (others see about 1 km)' : 'Or type your area above - used to find a fair middle.'}</span>
+      </div></div>
     <div class="field"><span class="field-label">Food</span>
       <div class="chips">${chips('food', FOOD, p.food)}</div>
       <input name="food_other" maxlength="200" placeholder="Other (comma-separated)" aria-label="Other food"></div>
@@ -424,7 +431,19 @@ function renderPrefs() {
       <input name="availability_other" maxlength="200" placeholder="Other times, e.g. Thu dinner" aria-label="Other times"></div>
     <button class="btn primary" type="submit">Save preferences</button>`;
   $('prefs-form').onsubmit = savePrefs;
+  $('loc-btn').onclick = async () => {
+    $('loc-status').textContent = 'Finding you...';
+    try {
+      const at = await window.MeetMiddle.locate();
+      pendingLocation = { ...at, label: 'Shared location' };
+      $('loc-status').textContent = '✓ Got it - tap Save preferences to share (others see about 1 km).';
+    } catch (err) { $('loc-status').textContent = err.message; }
+  };
+  if ($('loc-clear')) $('loc-clear').onclick = () => { pendingLocation = null; $('loc-status').textContent = 'Location will be removed when you save.'; };
 }
+
+// undefined = unchanged (server keeps what it has), null = stop sharing, object = new location
+let pendingLocation;
 
 async function savePrefs(e) {
   e.preventDefault();
@@ -451,6 +470,7 @@ async function savePrefs(e) {
   const activities = uniq([...f.getAll('activities'), ...splitList(f.get('activities_other'))]).slice(0, 20);
   if (food.length) preferences.food = food;
   if (activities.length) preferences.activities = activities;
+  if (pendingLocation !== undefined) preferences.location = pendingLocation;
   const body = {
     guest_name: String(f.get('guest_name') || '').trim(),
     preferences,
@@ -458,6 +478,7 @@ async function savePrefs(e) {
   };
   const saved = await act(() => send('PATCH', '/me', body), 'Preferences saved - shortlist updated');
   if (saved) {
+    pendingLocation = undefined;
     prefsFor = null; // re-render with the saved values (folds "Other" into chips)
     render();
     $('prefs-saved').classList.remove('hidden');
@@ -493,6 +514,9 @@ $('share-btn').onclick = async () => {
     prompt('Copy this link:', link);
   }
 };
+
+// For the room voice helper (room-voice.js): read the view, call the room API, re-render.
+window.Room = { token: TOKEN, view: () => view, send, refresh, tallySlots, SLOTS };
 
 if (!TOKEN) {
   renderMissing();

@@ -22,6 +22,16 @@ const fmtDay = (iso) => {
   const d = new Date(iso);
   return isNaN(d) ? String(iso) : d.toLocaleDateString(undefined, { dateStyle: 'medium' });
 };
+// Whole days from today to a check-in date: < 0 overdue, 0 due today, null
+// unscheduled. Every screen uses this one rule (the API's lib/due.ts matches),
+// so a check-in due today never shows as overdue.
+const dueIn = (iso) => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d)) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0); d.setHours(0, 0, 0, 0);
+  return Math.round((d - today) / 864e5);
+};
 const toISO = (local) => (local ? new Date(local).toISOString() : undefined);
 const parseInterests = (text) => String(text || '').split(',').map((s) => s.trim()).filter(Boolean);
 
@@ -55,10 +65,32 @@ async function api(path, opts = {}) {
 
 function go(hash) { location.hash = hash; }
 
+// mailto: hand-off - opens the user's own mail app with a ready message.
+function mailtoHref(to, subject, body) {
+  return 'mailto:' + encodeURIComponent(to || '').replace(/%40/g, '@')
+    + '?subject=' + encodeURIComponent(subject || '') + '&body=' + encodeURIComponent(body || '');
+}
+function checkInEmail(c) {
+  const first = String(c.name || '').split(/\s+/)[0] || 'there';
+  const about = (c.interests || []).length ? ` How's the ${c.interests[0]} going?` : '';
+  return mailtoHref(c.email, 'Catching up', `Hi ${first},\n\nIt's been a while - I was just thinking of you.${about} Free for a coffee or a call this week?\n\nCheers`);
+}
+function meetupInviteEmail(m, url) {
+  const when = m.starts_at ? ' on ' + fmtDate(m.starts_at) : '';
+  return mailtoHref('', `Join me: ${m.title}`, `Hi!\n\nI'm planning "${m.title}"${when}${m.area ? ' around ' + m.area : ''}. Pick a venue and tell us when you're free here:\n${url}\n\nNo sign-up needed. See you there!`);
+}
+
 // Every view, including direct refreshes and synchronous pages, invalidates
 // outstanding work. Late reads or mutations must not paint over a newer view.
 let navGen = 0;
 const stale = (token) => token !== navGen;
+
+// In-app back stack: pages you came from inside the app, latest last. Back
+// pops instead of pushing, so two taps can never ping-pong. Never leaves the
+// SPA, so state in other views survives exactly like ordinary nav taps.
+let currentHash = null;
+let navStack = [];
+let goingBack = false;
 
 function route() {
   navGen++;
@@ -69,6 +101,21 @@ function route() {
   document.querySelectorAll('[data-nav]').forEach((a) => {
     a.classList.toggle('active', hash.startsWith('#/' + a.dataset.nav));
   });
+  // Topbar back button: hidden on the first page, everywhere else goes to the
+  // last in-app page - or the dashboard when entered directly (no history).
+  const backBtn = el('nav-back');
+  if (backBtn) {
+    backBtn.classList.toggle('hidden', hash === '#/dashboard');
+    backBtn.onclick = () => {
+      const target = navStack.length ? navStack.pop() : '#/dashboard'; // direct entry: fall back to the first page
+      goingBack = true;
+      go(target);
+    };
+  }
+  if (goingBack) goingBack = false;
+  else if (currentHash && currentHash !== hash) navStack.push(currentHash);
+  if (navStack.length > 50) navStack = navStack.slice(-50);
+  currentHash = hash;
   const contactMatch = hash.match(/^#\/contacts\/(.+)$/);
   if (contactMatch) return contactDetailView(decodeURIComponent(contactMatch[1]));
   const views = {
@@ -77,6 +124,7 @@ function route() {
     '#/meetups': meetupsView,
     '#/onboarding': () => onboardingView(),
     '#/welcome': welcomeView,
+    '#/profile': profileView,
   };
   (views[hash] || dashboardView)();
 }
@@ -95,6 +143,42 @@ function renderError(err, retry) {
       <button id="retry-btn">Try again</button>
     </div>`;
   el('retry-btn').onclick = retry;
+}
+
+// Room QR code: scan from a phone and join with no account. The generator is
+// loaded only when someone taps "QR code", pinned with SRI like Leaflet/ElevenLabs.
+const QR_JS = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+const QR_SRI = 'sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k';
+let qrLoading = null;
+function loadQr() {
+  if (window.qrcode) return Promise.resolve(window.qrcode);
+  qrLoading ??= new Promise((resolve, reject) => {
+    const s = Object.assign(document.createElement('script'), { src: QR_JS, integrity: QR_SRI, crossOrigin: 'anonymous', async: true });
+    s.onload = () => (window.qrcode ? resolve(window.qrcode) : reject(new Error('QR library missing')));
+    s.onerror = () => { qrLoading = null; reject(new Error('Could not load the QR code generator')); };
+    document.head.appendChild(s);
+  });
+  return qrLoading;
+}
+async function toggleQr(btn) {
+  const row = btn.closest('.row');
+  const open = row.nextElementSibling;
+  if (open && open.classList.contains('qr-slot')) { open.remove(); btn.textContent = 'QR code'; return; }
+  const slot = document.createElement('div');
+  slot.className = 'qr-slot';
+  slot.innerHTML = '<p class="muted">Loading QR code...</p>';
+  row.after(slot);
+  btn.textContent = 'Hide QR';
+  try {
+    const qrcode = await loadQr();
+    const qr = qrcode(0, 'M');
+    qr.addData(btn.dataset.qr);
+    qr.make();
+    slot.innerHTML = `<div class="qr-box">${qr.createSvgTag({ cellSize: 6, margin: 2, scalable: true, alt: 'QR code for the meetup room', title: 'Meetup room' })}</div>
+      <p class="muted">Guests scan this to open the room on their phone. No account or app needed.</p>`;
+  } catch (e) {
+    slot.innerHTML = `<p class="error">${esc(e.message || 'Could not make the QR code')}. Use Copy link instead.</p>`;
+  }
 }
 
 function copyText(text, btn, label) {
@@ -117,18 +201,60 @@ function copyText(text, btn, label) {
 
 const roomUrl = (token) => location.origin + '/m/' + token;
 
+// --- draft a check-in message ------------------------------------------
+// "Then you send the message": asks the server (DeepSeek, template fallback)
+// for a short check-in text. Shown editable with Copy / Open in WhatsApp -
+// nothing is ever sent for the user.
+
+function rowSlot(btn) {
+  const row = btn.closest('.row');
+  const next = row.nextElementSibling;
+  if (next && next.classList.contains('draft-slot')) return next;
+  const slot = document.createElement('div');
+  slot.className = 'draft-slot';
+  return slot;
+}
+
+function draftPanel(container, contactId, name) {
+  const existing = container.querySelector('.draft-box');
+  if (existing) { existing.remove(); return; }
+  const box = document.createElement('div');
+  box.className = 'draft-box';
+  container.appendChild(box);
+  const load = async () => {
+    box.innerHTML = '<p class="muted">Drafting a message for ' + esc(name || 'them') + '...</p>';
+    try {
+      const r = await api('/api/me/contacts/' + encodeURIComponent(contactId) + '/draft', { method: 'POST' });
+      box.innerHTML = `
+        <label class="draft-label">Suggested message <span class="muted">(${r.source === 'template' ? 'template' : 'drafted by ' + esc(r.source === 'deepseek' ? 'DeepSeek' : 'AI')} - edit before sending)</span>
+          <textarea class="draft-text" rows="3">${esc(r.message)}</textarea>
+        </label>
+        ${(r.basis || []).length ? `<p class="draft-basis muted">Based on: ${(r.basis).map((b) => esc(b)).join(' · ')}</p>` : ''}
+        <div class="actions">
+          <button class="primary draft-copy">Copy</button>
+          <a class="button-link draft-wa" target="_blank" rel="noopener">Open in WhatsApp</a>
+          <button class="draft-again">Try another</button>
+        </div>`;
+      const text = box.querySelector('.draft-text');
+      const wa = box.querySelector('.draft-wa');
+      const syncWa = () => { wa.href = 'https://wa.me/?text=' + encodeURIComponent(text.value); };
+      syncWa();
+      text.oninput = syncWa;
+      box.querySelector('.draft-copy').onclick = (e) => copyText(text.value, e.currentTarget, 'Copy');
+      box.querySelector('.draft-again').onclick = load;
+    } catch (e) {
+      if (e instanceof AuthError) return;
+      box.innerHTML = '<p class="error">' + esc(e.message) + '</p>';
+    }
+  };
+  load();
+}
+
 // --- dashboard -----------------------------------------------------------
 
 // "Your people": every contact, soonest check-in first, with a due badge.
 function peopleCard(contacts) {
-  const DAY = 86400000;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const due = (c) => {
-    if (!c.next_followup_at) return null;
-    const d = new Date(c.next_followup_at); d.setHours(0, 0, 0, 0);
-    const n = Math.round((d - today) / DAY);
-    return Number.isFinite(n) ? n : null;
-  };
+  const due = (c) => dueIn(c.next_followup_at);
   const badge = (n) => n === null ? '' : n < 0 ? '<span class="due due-late">overdue</span>'
     : n === 0 ? '<span class="due due-today">today</span>'
     : n <= 7 ? '<span class="due">soon</span>' : `<span class="due">in ${n} days</span>`;
@@ -166,15 +292,14 @@ async function dashboardView() {
   const act = d.recorded_activity || { label: 'Recorded activity', total: 0, by_category: {}, sufficient_data: false };
   const followups = d.followups || { overdue: [], upcoming: [] };
   const meetups = d.upcoming_meetups || [];
-  const recent = d.recent_activity || [];
 
   if (d.is_empty) {
     if (stale(nav)) return;
   el('app').innerHTML = `
       <h1>Dashboard</h1>
       <div class="card state-box">
-        <h2>Welcome to Organizer</h2>
-        <p class="muted">Nothing here yet. Add your people and plan your first meetup.</p>
+        <h2>Welcome to muop 💛</h2>
+        <p class="muted">Nothing here yet. Add your favourite people and plan your first get-together.</p>
         <div class="quick-actions" style="justify-content:center">
           <button class="primary" id="qa-add">Add person</button>
           <button class="primary" id="qa-meetup">Plan a meetup</button>
@@ -187,18 +312,27 @@ async function dashboardView() {
     return;
   }
 
-  const followupRow = (f, overdue) => `
+  const followupActions = (f) => `
+      <div class="actions">
+        <button data-draft="${esc(f.id || f.contact_id || '')}" data-name="${esc(f.name || '')}">Draft message</button>
+        <button data-done="${esc(f.id || f.contact_id || '')}" data-name="${esc(f.name || '')}">Mark done</button>
+      </div>`;
+  const followupRow = (f) => {
+    const n = dueIn(f.next_followup_at);
+    return `
     <div class="row" data-fu-name="${esc(f.name || '')}">
       <div><strong>${esc(f.name || 'Someone')}</strong>
-        ${f.category ? `<span class="tag">${esc(catLabel(f.category))}</span>` : ''}${overdue ? ' <span class="tag overdue">Overdue</span>' : ''}
-        <div class="muted">${overdue ? 'Was due' : 'Due'} ${esc(fmtDay(f.next_followup_at))}</div>
-      </div>
-      <div class="actions"><button data-done="${esc(f.id || f.contact_id || '')}" data-name="${esc(f.name || '')}">Mark done</button></div>
+        ${f.category ? `<span class="tag">${esc(catLabel(f.category))}</span>` : ''}${n < 0 ? ' <span class="tag overdue">Overdue</span>' : ''}
+        <div class="muted">${n < 0 ? `Was due ${esc(fmtDay(f.next_followup_at))}` : n === 0 ? 'Due today' : `Due ${esc(fmtDay(f.next_followup_at))}`}</div>
+      </div>${followupActions(f)}
     </div>`;
+  };
 
   if (stale(nav)) return;
-  const nOver = (followups.overdue || []).length;
-  const nWeek = (followups.upcoming || []).filter((f) => new Date(f.next_followup_at).getTime() < Date.now() + 7 * 864e5).length;
+  const allFollowups = [...(followups.overdue || []), ...(followups.upcoming || [])]
+    .sort((a, b) => (dueIn(a.next_followup_at) ?? 1e9) - (dueIn(b.next_followup_at) ?? 1e9));
+  const nOver = allFollowups.filter((f) => dueIn(f.next_followup_at) < 0).length;
+  const nWeek = allFollowups.filter((f) => { const n = dueIn(f.next_followup_at); return n !== null && n >= 0 && n <= 7; }).length;
   const nMeet = meetups.length;
   const chip = (n, label, cls, target) => `<button class="sum-chip ${cls}" data-jump="${target}"><span class="sum-num">${n}</span><span>${label}</span></button>`;
   const summary = `<div class="summary" role="group" aria-label="At a glance">
@@ -217,6 +351,7 @@ async function dashboardView() {
       </div>
     </div>
     ${summary}
+    ${guideCardHTML()}
     <div class="dash-grid">
     <section class="card">
       <h2>Your network</h2>
@@ -245,9 +380,8 @@ async function dashboardView() {
     <div class="dash-grid">
     <section class="card" id="sec-followups">
       <h2>Follow-ups</h2>
-      ${(followups.overdue || []).map((f) => followupRow(f, true)).join('')}
-      ${(followups.upcoming || []).map((f) => followupRow(f, false)).join('')}
-      ${!(followups.overdue || []).length && !(followups.upcoming || []).length ? '<p class="muted">No follow-ups due.</p>' : ''}
+      ${allFollowups.map(followupRow).join('')}
+      ${!allFollowups.length ? '<p class="muted">No follow-ups due.</p>' : ''}
     </section>
     <section class="card" id="sec-meetups">
       <h2>Upcoming meetups</h2>
@@ -258,30 +392,24 @@ async function dashboardView() {
             <div class="muted">${esc([m.area, fmtDate(m.starts_at)].filter(Boolean).join(' · '))}</div>
             ${m.room_token ? `<div class="muted mono">${esc(roomUrl(m.room_token))}</div>` : ''}
           </div>
-          ${m.room_token ? `<div class="actions"><button data-copy="${esc(roomUrl(m.room_token))}">Copy link</button></div>` : ''}
+          ${m.room_token ? `<div class="actions"><a class="button" href="${esc(roomUrl(m.room_token))}" target="_blank" rel="noopener">Open room</a><button data-copy="${esc(roomUrl(m.room_token))}">Copy link</button><button data-qr="${esc(roomUrl(m.room_token))}">QR code</button></div>` : ''}
         </div>`).join('') : '<p class="muted">No meetups planned yet. Plan one to get people together.</p>'}
     </section>
     </div>
-    ${peopleCard(graphContacts)}
-    <section class="card">
-      <h2>Recent activity</h2>
-      ${recent.length ? recent.map((r) => `
-        <div class="row">
-          <div><strong>${esc((r.contact && r.contact.name) || 'Someone')}</strong>
-            ${r.contact && r.contact.category ? `<span class="tag">${esc(catLabel(r.contact.category))}</span>` : ''}
-            <div class="muted">${esc((r.type || '').replace(/_/g, ' '))} · ${esc(fmtDate(r.occurred_at))}</div>
-            ${r.notes ? `<div class="muted">${esc(r.notes)}</div>` : ''}
-          </div>
-        </div>`).join('') : '<p class="muted">No activity recorded yet.</p>'}
-    </section>`;
+    ${peopleCard(graphContacts)}`;
 
   document.querySelectorAll('[data-person]').forEach((b) => { b.onclick = () => go('#/contacts/' + encodeURIComponent(b.dataset.person)); });
   el('qa-add').onclick = () => { sessionStorage.setItem('org_new_contact', '1'); go('#/contacts'); };
   el('qa-meetup').onclick = () => go('#/meetups');
   document.querySelectorAll('[data-jump]').forEach((b) => { b.onclick = () => el(b.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   wireCalendar();
+  wireGuideCard();
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
+  document.querySelectorAll('[data-qr]').forEach((b) => { b.onclick = () => toggleQr(b); });
   document.querySelectorAll('[data-done]').forEach((b) => { b.onclick = () => markDoneForm(b); });
+  document.querySelectorAll('[data-draft]').forEach((b) => {
+    b.onclick = () => draftPanel(b.closest('.row').parentElement.insertBefore(rowSlot(b), b.closest('.row').nextSibling), b.dataset.draft, b.dataset.name);
+  });
   document.querySelectorAll('[data-gcontact]').forEach((n) => {
     const pick = () => {
       document.querySelectorAll('.g-dot.sel').forEach((x) => x.classList.remove('sel'));
@@ -306,14 +434,11 @@ function networkGraphSVG(contacts) {
   const BANDS = [[36, 86], [100, 152], [166, 214]];
   const RING_LABELS = ['Overdue', 'This week', 'Later'];
   const DOT_FILL = { personal: '#E89B00', professional: '#04C1E1', community: '#3FAE9C' };
-  const now = Date.now();
-  const WEEK = 7 * 24 * 3600 * 1000;
   const urgency = (c) => {
-    if (!c.next_followup_at) return 2;
-    const t = new Date(c.next_followup_at).getTime();
-    if (isNaN(t)) return 2;
-    if (t < now - 24 * 3600 * 1000) return 0;
-    if (t < now + WEEK) return 1;
+    const n = dueIn(c.next_followup_at);
+    if (n === null) return 2;
+    if (n < 0) return 0;
+    if (n <= 7) return 1;
     return 2;
   };
   // Deterministic layout: dots in the same category + timing slot are spread
@@ -370,6 +495,23 @@ function networkGraphSVG(contacts) {
 // --- calendar (dashboard) --------------------------------------------------
 // Current month grid; entries come only from real follow-up and meetup dates.
 
+// Calendar markers. Colour = status (red: overdue, you haven't connected;
+// yellow: due soon, turns red if you don't reach out). Icon = network:
+// professional 💼, personal ❤️, community ● dot; meetups 📅.
+const CAT_ICON = { professional: '💼', personal: '❤️', community: '●' };
+const lateText = (n) => `${n} day${n === 1 ? '' : 's'} overdue`;
+function calMarker(e) {
+  if (e.kind === 'meetup') return `<i class="cal-mark meetup" title="${esc(e.label)}">📅</i>`;
+  const tip = e.label + (e.status === 'overdue' ? ` - not connected, ${lateText(e.late)}` : ' - due soon');
+  return `<i class="cal-mark ${e.status} cat-${esc(e.cat || 'personal')}" title="${esc(tip)}">${CAT_ICON[e.cat] || '●'}</i>`;
+}
+function calLine(e) {
+  if (e.kind === 'meetup') return `Meetup: ${esc(e.label)}${e.time ? ` · ${esc(e.time)}` : ''}`;
+  return e.status === 'overdue'
+    ? `Haven't connected with <strong>${esc(e.label)}</strong> · ${lateText(e.late)}`
+    : `Check in with ${esc(e.label)}`;
+}
+
 function calendarHTML(contacts, meetups) {
   const now = new Date();
   const year = now.getFullYear(), month = now.getMonth();
@@ -378,29 +520,59 @@ function calendarHTML(contacts, meetups) {
   const startOffset = first.getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const events = {};
-  const add = (iso, kind, label) => {
-    const t = new Date(iso);
-    if (isNaN(t) || t.getFullYear() !== year || t.getMonth() !== month) return;
-    const day = t.getDate();
-    (events[day] = events[day] || []).push({ kind, label, at: t });
+  const add = (t, ev) => {
+    if (t.getFullYear() !== year || t.getMonth() !== month) return;
+    (events[t.getDate()] = events[t.getDate()] || []).push(ev);
   };
-  (contacts || []).forEach((c) => c.next_followup_at && add(c.next_followup_at, 'followup', (c.name || 'Follow-up')));
-  (meetups || []).forEach((m) => m.starts_at && add(m.starts_at, 'meetup', (m.title || 'Meetup')));
+  const overdue = [];
+  (contacts || []).forEach((c) => {
+    const n = dueIn(c.next_followup_at);
+    if (n === null) return;
+    const t = new Date(c.next_followup_at);
+    const late = -n;
+    const ev = { kind: 'followup', status: late > 0 ? 'overdue' : 'soon', id: c.id, cat: c.category, label: c.name || 'Someone', late };
+    if (late > 0) overdue.push(ev);
+    add(t, ev);
+  });
+  (meetups || []).forEach((m) => {
+    const t = m.starts_at && new Date(m.starts_at);
+    if (t && !isNaN(t)) add(t, { kind: 'meetup', label: m.title || 'Meetup', time: t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) });
+  });
+  overdue.sort((x, y) => y.late - x.late);
+  // Read by wireCalendar() for the day detail panel.
+  window.__calEvents = events;
+
   const cells = [];
   for (let i = 0; i < startOffset; i++) cells.push('<div class="cal-cell cal-pad"></div>');
   for (let day = 1; day <= daysInMonth; day++) {
     const evs = events[day] || [];
-    const today = day === now.getDate() ? ' cal-today' : '';
-    const dots = evs.slice(0, 4).map((e) => `<i class="cal-dot ${e.kind}" title="${esc(e.label)}"></i>`).join('');
-    const has = evs.length ? ' has-ev' : '';
-    const tip = evs.map((e) => (e.kind === 'meetup' ? 'Meetup: ' : 'Check-in: ') + e.label).join('; ');
-    cells.push(`<button type="button" class="cal-cell${today}${has}" data-day="${day}" aria-label="${esc(monthName.split(' ')[0] + ' ' + day + (tip ? ': ' + tip : ': nothing planned'))}"><span class="cal-day">${day}</span><span class="cal-dots">${dots}</span></button>`);
+    const isToday = day === now.getDate();
+    const cls = (isToday ? ' cal-today' : '') + (evs.length ? ' has-ev' : '') + (evs.some((e) => e.status === 'overdue') ? ' cal-late' : '');
+    const marks = evs.slice(0, 3).map(calMarker).join('') + (evs.length > 3 ? `<span class="cal-more">+${evs.length - 3}</span>` : '');
+    const tip = evs.map((e) => (e.kind === 'meetup' ? 'Meetup: ' : e.status === 'overdue' ? 'Not connected: ' : 'Check-in: ') + e.label).join('; ');
+    cells.push(`<button type="button" class="cal-cell${cls}" data-day="${day}"${isToday ? ' aria-current="date"' : ''} aria-label="${esc(monthName.split(' ')[0] + ' ' + day + (tip ? ': ' + tip : ': nothing planned'))}"><span class="cal-day">${day}</span><span class="cal-dots">${marks}</span></button>`);
   }
   const names = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => `<div class="cal-head">${d}</div>`).join('');
-  window.__calEvents = events;
-  return `<div class="calendar"><div class="cal-month">${esc(monthName)}</div><div class="cal-grid">${names}${cells.join('')}</div>
+  const todayLabel = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  // Overdue people get the same Draft message / Mark done actions as the
+  // Follow-ups card, so you can act straight from "Today".
+  const lines = overdue.map((e) => `<li class="late row"><span class="cal-line">${calMarker(e)}<span>${calLine(e)}</span></span>${e.id ? `
+      <div class="actions">
+        <button data-draft="${esc(e.id)}" data-name="${esc(e.label)}">Draft message</button>
+        <button data-done="${esc(e.id)}" data-name="${esc(e.label)}">Mark done</button>
+      </div>` : ''}</li>`);
+  return `<div class="calendar">
+    <div class="cal-todaybar"><strong>Today</strong> ${esc(todayLabel)}
+      ${overdue.length ? `<span class="cal-overdue-count">${overdue.length} overdue</span>` : '<span class="cal-ok">All caught up</span>'}</div>
+    ${lines.length ? `<ul class="cal-todaylist">${lines.join('')}</ul>` : ''}
+    <div class="cal-month">${esc(monthName)}</div><div class="cal-grid">${names}${cells.join('')}</div>
     <div class="cal-detail" id="cal-detail" aria-live="polite"></div>
-    <div class="graph-legend"><span class="graph-legend-item"><i class="cal-dot followup"></i>Check-in</span><span class="graph-legend-item"><i class="cal-dot meetup"></i>Meetup</span></div></div>`;
+    <div class="graph-legend">
+      <span class="graph-legend-item"><i class="cal-mark overdue">●</i>Haven't connected (overdue)</span>
+      <span class="graph-legend-item"><i class="cal-mark soon">●</i>Due soon - turns red</span>
+      <span class="graph-legend-item">💼 Professional</span><span class="graph-legend-item">❤️ Personal</span><span class="graph-legend-item">● Community</span>
+      <span class="graph-legend-item">📅 Meetup</span>
+    </div></div>`;
 }
 
 function wireCalendar() {
@@ -412,7 +584,7 @@ function wireCalendar() {
     document.querySelectorAll('.cal-cell[data-day]').forEach((b) => b.classList.toggle('selected', Number(b.dataset.day) === Number(day)));
     const when = new Date(new Date().getFullYear(), new Date().getMonth(), Number(day)).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
     box.innerHTML = `<strong>${esc(when)}</strong>` + (list.length
-      ? list.map((e) => `<div class="cal-item"><i class="cal-dot ${e.kind}"></i>${e.kind === 'meetup' ? 'Meetup' : 'Check-in'}: ${esc(e.label)}</div>`).join('')
+      ? list.map((e) => `<div class="cal-item${e.status === 'overdue' ? ' late' : ''}">${calMarker(e)}<span>${calLine(e)}</span></div>`).join('')
       : '<div class="muted">Nothing planned.</div>');
   };
   document.querySelectorAll('.cal-cell[data-day]').forEach((b) => { b.onclick = () => show(b.dataset.day); });
@@ -434,7 +606,7 @@ function goalsComparison(goals, act) {
       </div>`;
   }).join('');
   return `<section class="card"><h2>Goals vs activity</h2>${rows}
-    <p class="muted">Bars show where your recorded activity actually went, against your goals.</p></section>`;
+    <p class="muted">Bars show where your recorded activity actually went, against your goals. This counts check-ins you logged, not the closeness of any relationship - a quiet week with no notes is not a failing friendship.</p></section>`;
 }
 
 // --- mark a follow-up done ------------------------------------------------
@@ -508,6 +680,7 @@ async function contactsView() {
           <label class="full">Interests <input id="c-interests" placeholder="hiking, chai, board games (comma-separated)"></label>
           <label>Check in every (days) <input id="c-freq" type="number" min="1" value="14"></label>
           <label>Next follow-up <input id="c-next" type="date"></label>
+          <label>Email <input id="c-email" type="email" placeholder="name@example.com"></label>
           <label class="full">Notes <input id="c-notes" placeholder="Notes"></label>
         </div>
         <p class="error" id="add-error"></p>
@@ -539,6 +712,8 @@ async function contactsView() {
       interests: parseInterests(el('c-interests').value),
       notes: el('c-notes').value.trim(),
     };
+    const email = el('c-email').value.trim();
+    if (email) body.email = email;
     const freq = parseInt(el('c-freq').value, 10);
     if (freq > 0) body.preferred_frequency_days = freq;
     const next = el('c-next').value;
@@ -558,13 +733,15 @@ async function contactsView() {
 }
 
 function contactRow(c) {
-  const t = c.next_followup_at ? new Date(c.next_followup_at).getTime() : NaN;
-  const overdue = !isNaN(t) && t < Date.now() - 24 * 3600 * 1000;
+  const n = dueIn(c.next_followup_at);
+  const overdue = n !== null && n < 0;
+  const when = n === null ? 'No check-in scheduled' : overdue ? 'Was due ' + esc(fmtDay(c.next_followup_at))
+    : n === 0 ? 'Check-in due today' : 'Next check-in ' + esc(fmtDay(c.next_followup_at));
   return `
     <div class="row contact-row">
       <div><strong>${esc(c.name)}</strong> <span class="tag">${esc(catLabel(c.category))}</span>${overdue ? ' <span class="tag overdue">Overdue</span>' : ''}
         ${(c.interests || []).length ? `<div class="interest-pills">${c.interests.map((i) => `<span class="tag">${esc(i)}</span>`).join('')}</div>` : ''}
-        <div class="muted">${c.next_followup_at ? (overdue ? 'Was due ' : 'Next check-in ') + esc(fmtDay(c.next_followup_at)) : 'No check-in scheduled'}</div>
+        <div class="muted">${when}</div>
       </div>
       <div class="actions"><button data-view="${esc(c.id)}">Open</button></div>
     </div>`;
@@ -582,10 +759,9 @@ async function contactDetailView(id) {
   } catch (e) { if (stale(nav)) return; return renderError(e, () => contactDetailView(id)); }
 
   if (stale(nav)) return;
-  const tt = contact.next_followup_at ? new Date(contact.next_followup_at).getTime() : NaN;
-  const dueDays = isNaN(tt) ? null : Math.round((tt - Date.now()) / 864e5);
-  const dueText = dueDays === null ? 'No check-in scheduled' : dueDays < -1 ? `Check-in overdue by ${-dueDays} days` : dueDays <= 0 ? 'Check-in due today' : `Next check-in in ${dueDays} day${dueDays === 1 ? '' : 's'}`;
-  const dueCls = dueDays !== null && dueDays < -1 ? 'warn' : dueDays !== null && dueDays <= 7 ? 'soon' : 'ok';
+  const dueDays = dueIn(contact.next_followup_at);
+  const dueText = dueDays === null ? 'No check-in scheduled' : dueDays < 0 ? `Check-in overdue by ${-dueDays} day${dueDays === -1 ? '' : 's'}` : dueDays === 0 ? 'Check-in due today' : `Next check-in in ${dueDays} day${dueDays === 1 ? '' : 's'}`;
+  const dueCls = dueDays !== null && dueDays < 0 ? 'warn' : dueDays !== null && dueDays <= 7 ? 'soon' : 'ok';
   el('app').innerHTML = `
     <p><button class="link-btn" id="back">← All contacts</button></p>
     <section class="card profile" id="profile-card">
@@ -593,7 +769,7 @@ async function contactDetailView(id) {
         <div class="avatar" aria-hidden="true">${esc(String(contact.name || '?').trim().charAt(0).toUpperCase())}</div>
         <div>
           <h1 class="profile-name">${esc(contact.name)}</h1>
-          <span class="tag">${esc(catLabel(contact.category))}</span>
+          <span class="tag">${esc(catLabel(contact.category))}</span>${contact.email ? ` <span class="muted">${esc(contact.email)}</span>` : ''}
         </div>
       </div>
       <div class="due-banner ${dueCls}"><strong>${esc(dueText)}</strong>
@@ -618,7 +794,8 @@ async function contactDetailView(id) {
           <span class="muted"> · ${esc(fmtDate(i.occurred_at))}</span>
           ${i.notes ? `<div>${esc(i.notes)}</div>` : ''}</div></li>`).join('')}</ol>` : '<p class="muted empty">No check-ins yet. Log the first one above.</p>'}
     </section>
-    <div class="manage"><button class="primary" id="c-meetup">Plan a meetup with ${esc(String(contact.name || '').split(/\s+/)[0])}</button> <button id="c-edit">Edit details</button> <button class="danger" id="c-del">Delete contact</button></div>`;
+    <div id="c-draft-slot"></div>
+    <div class="manage"><button class="primary" id="c-draft">Draft message</button> <button id="c-meetup">Plan a meetup with ${esc(String(contact.name || '').split(/\s+/)[0])}</button> <a class="button" id="c-email-link" href="${esc(checkInEmail(contact))}">Email</a> <button id="c-edit">Edit details</button> <button class="danger" id="c-del">Delete contact</button></div>`;
 
   el('back').onclick = () => go('#/contacts');
   el('c-meetup').onclick = () => { sessionStorage.setItem('org_meetup_title', 'Catch-up with ' + String(contact.name || '').split(/\s+/)[0]); go('#/meetups'); };
@@ -630,6 +807,7 @@ async function contactDetailView(id) {
     } catch (e) { if (!stale(nav)) alert(e.message); }
   };
   el('c-edit').onclick = () => editContactForm(id, contact);
+  el('c-draft').onclick = () => draftPanel(el('c-draft-slot'), id, contact.name);
   el('log-form').onsubmit = async (e) => {
     e.preventDefault();
     el('log-error').textContent = '';
@@ -658,6 +836,7 @@ function editContactForm(id, c) {
       <label class="full">Interests <input id="e-interests" value="${esc((c.interests || []).join(', '))}"></label>
       <label>Check in every (days) <input id="e-freq" type="number" min="1" value="${c.preferred_frequency_days || 14}"></label>
       <label>Next follow-up <input id="e-next" type="date" value="${c.next_followup_at ? esc(new Date(c.next_followup_at).toISOString().slice(0, 10)) : ''}"></label>
+      <label>Email <input id="e-email" type="email" value="${esc(c.email || '')}" placeholder="name@example.com"></label>
       <label class="full">Notes <input id="e-notes" value="${esc(c.notes || '')}"></label>
     </div>
     <p class="error" id="e-error"></p>
@@ -677,6 +856,8 @@ function editContactForm(id, c) {
     if (JSON.stringify(interests) !== JSON.stringify(c.interests || [])) patch.interests = interests;
     const notes = el('e-notes').value.trim();
     if (notes !== (c.notes || '')) patch.notes = notes;
+    const email = el('e-email').value.trim();
+    if (email !== (c.email || '')) patch.email = email || null;
     const freq = parseInt(el('e-freq').value, 10);
     if (freq > 0 && freq !== c.preferred_frequency_days) patch.preferred_frequency_days = freq;
     const nextVal = el('e-next').value;
@@ -707,6 +888,7 @@ async function meetupsView(created) {
     <section class="card">
       <h2>Plan a meetup</h2>
       <p class="muted">Guests join through the room link - nothing is sent automatically.</p>
+      <div id="plan-voice"></div>
       <form id="m-form">
         <div class="form-grid">
           <label class="full">Title <input id="m-title" required placeholder="Coffee catch-up"></label>
@@ -726,6 +908,7 @@ async function meetupsView(created) {
       ${meetups.length ? meetups.slice().sort((x, y) => ((x.status || 'open') !== 'open') - ((y.status || 'open') !== 'open')).map(meetupRow).join('') : '<p class="muted empty">No meetups yet. Plan one above and share the room link with your people.</p>'}
     </section>`;
 
+  if (window.PlanByVoice) window.PlanByVoice.mount(el('plan-voice'));
   const pre = sessionStorage.getItem('org_meetup_title');
   if (pre) { sessionStorage.removeItem('org_meetup_title'); el('m-title').value = pre; el('m-title').focus(); }
   el('m-form').onsubmit = async (e) => {
@@ -778,6 +961,8 @@ function meetupRow(m) {
       </div>
       <div class="actions">
         ${url ? `<button data-copy="${esc(url)}">Copy link</button>` : ''}
+        ${url && !closed ? `<button data-qr="${esc(url)}">QR code</button>` : ''}
+        ${url && !closed ? `<a class="button" href="${esc(meetupInviteEmail(m, url))}">Email invite</a>` : ''}
         ${!closed ? `<button class="danger" data-close="${esc(m.id)}">Close</button>` : ''}
       </div>
     </div>`;
@@ -786,6 +971,7 @@ function meetupRow(m) {
 function wireMeetupRows() {
   const nav = navGen;
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
+  document.querySelectorAll('[data-qr]').forEach((b) => { b.onclick = () => toggleQr(b); });
   document.querySelectorAll('[data-close]').forEach((b) => {
     b.onclick = async () => {
       if (!confirm('Close this meetup? Guests will no longer be able to vote.')) return;
@@ -830,18 +1016,71 @@ const toRow = (c) => ({
 // Shown to new users before setup, and reachable any time from "Guide".
 
 const CAPABILITIES = [
-  ['1', 'Keep your people close', 'Add friends, colleagues and community. Group them as Personal, Professional or Community and set how often you want to check in.'],
-  ['2', 'See who needs you', 'Your dashboard shows a network map and a calendar. The closer someone is to the centre, the sooner a check-in is due.'],
-  ['3', 'Log check-ins', 'Note what happened after a coffee or a call. The next reminder is set for you, or you pick the date.'],
-  ['4', 'Plan meetups together', 'Create a meetup and share its room link. Guests add budget, area and free times, then vote on a shortlist of places. Nothing is ever sent for you.'],
-  ['5', 'Balance your attention', 'Set goals for Personal, Professional and Community, then compare them with where your time actually went.'],
+  ['💛', 'Keep your people close', 'Add friends, colleagues and community. Group them as Personal, Professional or Community and set how often you want to check in.'],
+  ['🧭', 'See who needs you', 'Your dashboard shows a network map and a calendar. The closer someone is to the centre, the sooner a check-in is due.'],
+  ['☕', 'Log check-ins', 'Note what happened after a coffee or a call. The next reminder is set for you, or you pick the date.'],
+  ['🎉', 'Plan meetups together', 'Create a meetup and share its room link. Guests add budget, area and free times, then vote on a shortlist of places. Nothing is ever sent for you.'],
+  ['⚖️', 'Balance your attention', 'Set goals for Personal, Professional and Community, then compare them with where your time actually went.'],
 ];
+
+
+// The friendly muop guide character (same face as the voice onboarding widget).
+const MUOP_CHAR = `
+  <svg class="vx-char" viewBox="0 0 96 96" role="img" aria-label="muop, your friendly guide">
+    <g class="vx-sat s1"><circle cx="80" cy="24" r="8" fill="#04C1E1" stroke="#2E1F14" stroke-width="2.4"/></g>
+    <g class="vx-sat s2"><circle cx="14" cy="30" r="6" fill="#75E4DE" stroke="#2E1F14" stroke-width="2.4"/></g>
+    <g class="vx-body">
+      <circle cx="48" cy="54" r="30" fill="#F6AC0D" stroke="#2E1F14" stroke-width="2.4"/>
+      <ellipse cx="36" cy="64" rx="5" ry="3.2" fill="#FFF3C4" opacity="0.7"/>
+      <ellipse cx="60" cy="64" rx="5" ry="3.2" fill="#FFF3C4" opacity="0.7"/>
+      <g class="vx-eyes"><circle cx="38" cy="50" r="3.4" fill="#2E1F14"/><circle cx="58" cy="50" r="3.4" fill="#2E1F14"/></g>
+      <path class="vx-smile" d="M38 61 Q48 70 58 61" fill="none" stroke="#2E1F14" stroke-width="2.6" stroke-linecap="round"/>
+    </g>
+  </svg>`;
+
+// Pretty, collapsible guide card on the first page. Open on the first visit,
+// collapsed after that so returning users see their people first; an explicit
+// open/close choice is remembered.
+function guideCardHTML() {
+  return `
+    <details class="card guide-card" id="guide-card">
+      <summary>
+        <span class="guide-char" aria-hidden="true">${MUOP_CHAR}</span>
+        <span class="guide-title">
+          <span class="eyebrow">Your muop guide</span>
+          <span class="guide-h">Five little things muop does for you</span>
+        </span>
+        <span class="guide-caret" aria-hidden="true">&#9662;</span>
+      </summary>
+      <ul class="cap-list pretty">
+        ${CAPABILITIES.map(([ic, t, d], i) => `<li class="cap-${i + 1}"><span class="cap-ic" aria-hidden="true">${ic}</span><div><strong>${esc(t)}</strong><div class="muted">${esc(d)}</div></div></li>`).join('')}
+      </ul>
+    </details>`;
+}
+
+function wireGuideCard() {
+  const gc = el('guide-card');
+  if (!gc) return;
+  try {
+    const pref = localStorage.getItem('org_guide_open');
+    gc.open = pref === null ? localStorage.getItem('org_guide_seen') !== '1' : pref === '1';
+    localStorage.setItem('org_guide_seen', '1');
+  } catch { gc.open = true; }
+  // Opening it here fires one 'toggle' too; only the user's own clicks are saved.
+  let skip = gc.open;
+  gc.addEventListener('toggle', () => {
+    if (skip) { skip = false; return; }
+    try { localStorage.setItem('org_guide_open', gc.open ? '1' : '0'); } catch { /* ignore */ }
+  });
+}
 
 function welcomeView(opts = {}) {
   ++navGen;
   const returning = !!opts.returning || localStorage.getItem('org_onboarded') === '1';
   el('app').innerHTML = `
-    <section class="card welcome">
+    <section class="card welcome ob-cute">
+      <div class="ob-deco" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+      <div class="welcome-char" aria-hidden="true">${MUOP_CHAR}</div>
       <p class="eyebrow">${returning ? 'Guide' : 'Welcome to muop'}</p>
       <h1>${returning ? 'What you can do with muop' : 'Stay close to the people who matter'}</h1>
       <p class="muted lede-lg">muop helps you remember to check in, and makes meeting up easy. Here is what you can do.</p>
@@ -883,8 +1122,19 @@ function onboardingView() {
   const p = prefill();
   const rows = (p.contacts && p.contacts.length ? p.contacts.slice(0, 5) : [emptyRow()]).map(toRow);
   const goals = { personal: 50, professional: 30, community: 20, ...(p.goals || {}) };
+  // Who understood the extraction: kept with the rows (and in org_prefill) so
+  // the attribution survives Back from goals and a refresh.
+  let source = typeof p.source === 'string' ? p.source : null;
   let step = 1;
   let voice = null;
+
+  const SOURCE_LABELS = { deepseek: 'DeepSeek', gemini: 'Gemini', openai: 'AI', agenticorg: 'AgenticOrg', rules: 'built-in rules' };
+  const showSource = () => {
+    const box = el('ob-source');
+    if (!box) return;
+    const label = source && Object.hasOwn(SOURCE_LABELS, source) ? SOURCE_LABELS[source] : null;
+    box.textContent = label && rows.some((r) => r.name) ? `Filled from what you said (understood by ${label}). Review each person - nothing is saved until you finish.` : '';
+  };
 
   const finish = (added) => {
     if (stale(nav)) return;
@@ -897,9 +1147,11 @@ function onboardingView() {
 
   function renderDone(added) {
     el('app').innerHTML = `
-      <section class="card welcome">
-        <p class="eyebrow">You are set</p>
-        <h1>${added.length} ${added.length === 1 ? 'person' : 'people'} added. What next?</h1>
+      <section class="card welcome ob-cute">
+        <div class="ob-deco" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+        <p class="ob-yay" aria-hidden="true">🎉 ⭐ 💛</p>
+        <p class="eyebrow">All set</p>
+        <h1>${added.length} ${added.length === 1 ? 'person' : 'people'} added - lovely! What next?</h1>
         <div class="next-grid">
           <button class="next-card" id="d-checkin"><strong>Log a check-in</strong><span class="muted">Record a recent catch-up with ${esc(added[0].name)}.</span></button>
           <button class="next-card" id="d-meetup"><strong>Plan a meetup</strong><span class="muted">Create a room link to share with friends.</span></button>
@@ -931,13 +1183,16 @@ function onboardingView() {
     const merged = [...kept, ...added].slice(0, 5);
     rows.splice(0, rows.length, ...(merged.length ? merged : [emptyRow()]));
     if (res.goals) Object.assign(goals, res.goals);
+    if (typeof res.source === 'string') source = res.source;
     try {
       sessionStorage.setItem('org_prefill', JSON.stringify({
         contacts: merged.map((r) => ({ name: r.name, category: r.category, interests: r.interests, preferred_frequency_days: r.freq })),
         goals,
+        source,
       }));
     } catch { /* storage unavailable: pre-fill still applies on screen */ }
     renderRows();
+    showSource();
     if (merged.length >= 5 && kept.length + added.length > 5) {
       el('ob-error').textContent = 'Only the first 5 people were kept - you can add more from Contacts later.';
     }
@@ -950,22 +1205,25 @@ function onboardingView() {
     if (voice) voice.stop();
     step = 1;
     el('app').innerHTML = `
-      <section class="card">
-        <div class="step-dots">Step 1 of 2 · People</div>
-        <h1>Let's find your people</h1>
+      <section class="card ob-cute">
+        <div class="ob-deco" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+        <div class="step-dots step-pill">Step 1 of 2 · Your people 🌷</div>
+        <h1>Who do you want to stay close to?</h1>
         <div id="voice-mount"></div>
         <h2 class="ob-sub">Your people <span class="muted">(up to 5)</span></h2>
-        <p class="muted">Anyone I hear or you type appears here. Check and edit them. Nothing is saved until you finish setup.</p>
+        <p class="muted">Anyone I hear or you type appears here. Check them, fix them, make them yours. Nothing is saved until you finish setup.</p>
         <div id="ob-rows"></div>
+        <p class="muted" id="ob-source"></p>
         <p><button class="link-btn" id="ob-add">+ Add another</button></p>
         <p class="error" id="ob-error"></p>
         <div class="quick-actions">
-          <button class="primary" id="ob-next">Next: goals</button>
+          <button class="primary" id="ob-next">Next: your goals →</button>
           <button id="ob-skip">Skip for now</button>
         </div>
         <p><button class="link-btn" id="ob-welcome">← What can muop do?</button></p>
       </section>`;
     renderRows();
+    showSource();
     el('ob-welcome').onclick = () => go('#/welcome');
     voice = window.Voice ? window.Voice.mount(el('voice-mount'), applyExtraction) : null;
     // Lets the voice assistant (assistant.js) fill this form and move on.
@@ -1012,10 +1270,11 @@ function onboardingView() {
 
   function renderStep2() {
     el('app').innerHTML = `
-      <section class="card">
-        <div class="step-dots">Step 2 of 2 · Goals</div>
-        <h1>How do you want to split your attention?</h1>
-        <p class="muted">Must total 100%.</p>
+      <section class="card ob-cute">
+        <div class="ob-deco" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+        <div class="step-dots step-pill">Step 2 of 2 · Your goals 🎈</div>
+        <h1>How do you want to share your time?</h1>
+        <p class="muted">Split 100% between the parts of your life. You can change this anytime from your Profile.</p>
         <div class="goals-grid">
           ${CATEGORIES.map((c) => `<label>${catLabel(c)} <input type="number" class="goal-input" data-cat="${c}" min="0" max="100" value="${goals[c] || 0}"></label>`).join('')}
         </div>
@@ -1023,7 +1282,7 @@ function onboardingView() {
         <p class="error" id="ob-error"></p>
         <div class="quick-actions">
           <button id="ob-back">Back</button>
-          <button class="primary" id="ob-confirm">Save and finish</button>
+          <button class="primary" id="ob-confirm">Save and finish 🎉</button>
           <button id="ob-skip">Skip for now</button>
         </div>
       </section>`;
@@ -1065,6 +1324,106 @@ function onboardingView() {
   }
 
   renderStep1();
+}
+
+
+// --- profile: your account, your goals, and the full activity log -----------
+
+async function profileView() {
+  const nav = navToken();
+  renderLoading('Loading your profile...');
+  let me = null, d = null, interactions = [];
+  try {
+    [me, d] = await Promise.all([api('/api/me'), api('/api/me/dashboard')]);
+    try {
+      const ri = await api('/api/me/interactions?limit=100');
+      interactions = ri.interactions || [];
+    } catch { interactions = []; }
+  } catch (e) { if (stale(nav)) return; return renderError(e, profileView); }
+  if (stale(nav)) return;
+
+  const u = (me && me.user) || {};
+  const counts = d.contact_counts || {};
+  const totalContacts = CATEGORIES.reduce((sum, c) => sum + (counts[c] || 0), 0);
+  const act = d.recorded_activity || { total: 0 };
+  const meetups = d.upcoming_meetups || [];
+  const goals = { personal: 50, professional: 30, community: 20, ...(d.goals || {}) };
+  const initial = (String(u.email || 'm').trim().charAt(0) || 'm').toUpperCase();
+  const CAT_META = { personal: ['#F6AC0D', '\u{1F49B}'], professional: ['#04C1E1', '\u{1F4BC}'], community: ['#3FAE9C', '\u{1F331}'] };
+
+  el('app').className = 'container';
+  el('app').innerHTML = `
+    <div class="page-head">
+      <div><h1>Profile</h1><p class="muted lede">Your account, your goals, and everything you have logged.</p></div>
+    </div>
+    <section class="card me-card">
+      <div class="me-head">
+        <span class="me-avatar" aria-hidden="true">${esc(initial)}</span>
+        <div>
+          <h2 class="me-name">${esc(u.email || 'muop member')}</h2>
+          ${u.created_at ? `<div class="muted">With muop since ${esc(fmtDay(u.created_at))}</div>` : ''}
+        </div>
+      </div>
+      <div class="me-grid">
+        <div class="me-item"><div class="me-num">${totalContacts}</div><div class="me-k">${totalContacts === 1 ? 'person' : 'people'}</div><div class="muted">${CATEGORIES.map((c) => `${catLabel(c)} ${counts[c] || 0}`).join(' · ')}</div></div>
+        <div class="me-item"><div class="me-num">${act.total || 0}</div><div class="me-k">check-ins logged</div><div class="muted">${esc(act.label || 'interactions on record')}</div></div>
+        <div class="me-item"><div class="me-num">${meetups.length}</div><div class="me-k">${meetups.length === 1 ? 'meetup planned' : 'meetups planned'}</div><div class="muted">open right now</div></div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Your goals</h2>
+      <p class="muted">How you want to split your attention.</p>
+      <div class="me-goal-bars">
+        ${CATEGORIES.map((c) => `
+          <div class="goal-bar"><strong>${CAT_META[c][1]} ${catLabel(c)}</strong> · ${goals[c] || 0}%
+            <div class="bar-track"><div class="bar-actual" style="width:${Math.min(100, Math.max(0, goals[c] || 0))}%; background:${CAT_META[c][0]}"></div></div>
+          </div>`).join('')}
+      </div>
+      <div class="quick-actions"><button id="me-edit-goals">Edit goals</button></div>
+      <div id="me-goals-form" class="hidden">
+        <div class="goals-grid">
+          ${CATEGORIES.map((c) => `<label>${catLabel(c)} <input type="number" class="me-goal-input" data-cat="${c}" min="0" max="100" value="${goals[c] || 0}"></label>`).join('')}
+        </div>
+        <p>Total: <strong id="me-goals-total">100</strong>% <span class="muted">(must be 100)</span></p>
+        <p class="error" id="me-goals-error"></p>
+        <div class="quick-actions">
+          <button class="primary" id="me-goals-save">Save goals</button>
+          <button id="me-goals-cancel">Cancel</button>
+        </div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Activity log</h2>
+      <p class="muted">Everything you have logged, newest first.</p>
+      ${interactions.length ? `<ol class="timeline me-log">${interactions.map((i) => `
+        <li><span class="tl-dot"></span>
+          <strong>${esc((i.contact && i.contact.name) || 'Someone')}</strong>
+          ${i.contact && i.contact.category ? `<span class="tag">${esc(catLabel(i.contact.category))}</span>` : ''}
+          <div class="muted">${esc(String(i.type || '').replace(/_/g, ' '))} · ${esc(fmtDate(i.occurred_at))}</div>
+          ${i.notes ? `<div class="notes muted">${esc(i.notes)}</div>` : ''}
+        </li>`).join('')}</ol>`
+      : '<p class="muted">Nothing logged yet. Log a check-in from a contact page or the dashboard.</p>'}
+    </section>`;
+
+  el('me-edit-goals').onclick = () => { el('me-goals-form').classList.remove('hidden'); el('me-edit-goals').classList.add('hidden'); };
+  el('me-goals-cancel').onclick = () => { el('me-goals-form').classList.add('hidden'); el('me-edit-goals').classList.remove('hidden'); };
+  const inputs = [...document.querySelectorAll('.me-goal-input')];
+  const total = () => inputs.reduce((sum, i) => sum + (parseInt(i.value, 10) || 0), 0);
+  inputs.forEach((i) => { i.oninput = () => { el('me-goals-total').textContent = total(); }; });
+  el('me-goals-save').onclick = async () => {
+    el('me-goals-error').textContent = '';
+    if (total() !== 100) { el('me-goals-error').textContent = 'Goals must total 100% - currently ' + total() + '%.'; return; }
+    el('me-goals-save').disabled = true;
+    try {
+      const body = Object.fromEntries(inputs.map((i) => [i.dataset.cat, parseInt(i.value, 10) || 0]));
+      await api('/api/me/goals', { method: 'PUT', body: JSON.stringify(body) });
+      flash('Goals saved.');
+      profileView();
+    } catch (e) {
+      el('me-goals-save').disabled = false;
+      el('me-goals-error').textContent = e.message;
+    }
+  };
 }
 
 // --- boot ------------------------------------------------------------------------

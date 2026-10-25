@@ -24,6 +24,10 @@ beforeAll(async () => {
   `);
   const directory = new URL('../supabase/migrations/', import.meta.url);
   for (const file of readdirSync(directory).filter((name) => name.endsWith('.sql')).sort()) {
+    // PGlite has no Supabase Vault extension. This migration only defines the
+    // production secret store, not room state; its loader is mocked separately
+    // in lib/secrets.test.ts. Never connect to live Vault to run these tests.
+    if (file === '20261025090000_app_secrets_vault.sql') continue;
     await db.exec(readFileSync(new URL(file, directory), 'utf8'));
   }
   await db.query('insert into auth.users (id) values ($1)', [owner]);

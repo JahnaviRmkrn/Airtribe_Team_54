@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meetup room · Moup</title>
+  <meta name="description" content="Join the meetup room: share your budget, area and availability, then vote on where to go.">
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/room.css">
+</head>
+<body>
+  <div class="bg-orbs" aria-hidden="true"><span></span><span></span><span></span></div>
+
+  <header class="r-top">
+    <a class="r-brand" href="/"><span class="r-logo">◆</span> Moup</a>
+    <span id="status-pill" class="pill">Loading…</span>
+  </header>
+
+  <main class="r-wrap">
+    <section class="hero glass" id="hero">
+      <p class="eyebrow">You're invited</p>
+      <h1 id="room-title">Meetup room</h1>
+      <p id="room-when" class="sub"></p>
+      <div class="hero-row">
+        <div id="avatar-stack" class="avatar-stack"></div>
+        <button id="share-btn" class="btn ghost" type="button">Copy guest link</button>
+      </div>
+    </section>
+
+    <div id="banner"></div>
+
+    <section id="join-card" class="glass card hidden">
+      <h2>Join with your name</h2>
+      <p class="muted">No account needed. Your name is only shown to people in this room.</p>
+      <form id="join-form" class="join-form">
+        <input id="join-name" maxlength="40" autocomplete="given-name" placeholder="e.g. Priya" required>
+        <button id="join-btn" class="btn primary" type="submit">Join room</button>
+      </form>
+      <p id="join-error" class="error"></p>
+    </section>
+
+    <section id="org-panel" class="glass card org hidden" aria-label="Organizer controls"></section>
+
+    <div class="grid">
+      <section id="prefs-card" class="glass card hidden">
+        <div class="card-head">
+          <h2>Your preferences</h2>
+          <span id="prefs-saved" class="saved-chip hidden">Saved ✓</span>
+        </div>
+        <form id="prefs-form"></form>
+      </section>
+
+      <div class="stack">
+        <section class="glass card">
+          <div class="card-head">
+            <h2>Who's in</h2>
+            <span id="people-count" class="count">0</span>
+          </div>
+          <ul id="people" class="people"></ul>
+        </section>
+        <section class="glass card">
+          <h2>Best time</h2>
+          <div id="slots" class="slots"></div>
+        </section>
+      </div>
+    </div>
+
+    <section class="glass card">
+      <div class="card-head">
+        <h2>Shortlist</h2>
+        <span class="muted">Tap to vote for every place you'd be happy with</span>
+      </div>
+      <div id="shortlist" class="shortlist"></div>
+      <details id="suggest" class="suggest hidden">
+        <summary>Suggest another place</summary>
+        <form id="suggest-form" class="suggest-form"></form>
+      </details>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/static/room.js?v=1.1"></script>
+</body>
+</html>

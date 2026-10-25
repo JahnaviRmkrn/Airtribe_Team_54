@@ -10,7 +10,7 @@ function organizer(overrides = {}) {
   const nodes = new Map();
   const document = {
     getElementById(id) {
-      if (!nodes.has(id)) nodes.set(id, { innerHTML: '', value: '', classList: { remove() {}, toggle() {} } });
+      if (!nodes.has(id)) nodes.set(id, { innerHTML: '', value: '', addEventListener() {}, classList: { remove() {}, toggle() {} } });
       return nodes.get(id);
     },
     querySelectorAll: () => [],
@@ -125,7 +125,7 @@ describe('onboarding retries', () => {
     expect(document.getElementById('ob-error').textContent).toBe('Retry goals');
     await document.getElementById('ob-confirm').onclick();
     expect(calls.filter((path) => path === '/api/me/contacts')).toHaveLength(1);
-    expect(document.getElementById('app').innerHTML).toContain('1 person added. What next?');
+    expect(document.getElementById('app').innerHTML).toContain('1 person added - lovely! What next?');
     expect(calls.filter((path) => path === '/api/me/goals')).toHaveLength(2);
     document.getElementById('d-dash').onclick();
     expect(context.location.hash).toBe('#/dashboard');

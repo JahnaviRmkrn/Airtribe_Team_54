@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { shortlist, type Venue } from './shortlist';
+import { AREAS } from './geo';
 
 const v = (o: Partial<Venue> & { name: string }): Venue => ({
   id: o.name,
@@ -41,6 +42,15 @@ describe('shortlist', () => {
     expect(r.find((x) => x.venue.name === 'Pricey Grill')).toBeUndefined();
   });
 
+  it("doesn't count the organiser's area as a guest vote in the reason", () => {
+    const alone = shortlist({ activity: 'dinner', area: 'Indiranagar' }, [], venues);
+    expect(alone[0].reasons).toContain("In Indiranagar (organiser's pick)");
+    const withGuest = shortlist({ activity: 'dinner', area: 'Indiranagar' }, [{ area: 'Indiranagar' }], venues);
+    expect(withGuest[0].reasons).toContain("In Indiranagar (organiser's pick, preferred by 1)");
+    const guestOnly = shortlist({ activity: 'dinner' }, [{ area: 'Koramangala' }], venues);
+    expect(guestOnly[0].reasons).toContain('In Koramangala (preferred by 1)');
+  });
+
   it('respects the organiser budget', () => {
     const r = shortlist({ activity: 'dinner', area: 'Indiranagar', budget: 1000 }, [], venues);
     expect(r.map((x) => x.venue.name)).not.toContain('Pricey Grill');
@@ -64,5 +74,32 @@ describe('budget-only preferences', () => {
 
   it('does not infer affordability when a venue has no price', () => {
     expect(shortlist({ budget: 500 }, [], [v({ name: 'Unknown', price_per_person: null })])).toEqual([]);
+  });
+});
+
+describe('meet in the middle', () => {
+  const venues: Venue[] = [
+    v({ name: 'Whitefield Diner', area: 'Whitefield' }),
+    v({ name: 'Domlur Diner', area: 'Domlur' }),
+    v({ name: 'Jayanagar Diner', area: 'Jayanagar' }),
+  ];
+  const people = [AREAS.whitefield, AREAS.jayanagar];
+
+  it('ranks the place in the middle first and reports travel', () => {
+    const list = shortlist({ activity: 'dinner' }, [{}, {}], venues, 5, { people });
+    expect(list[0].venue.name).toBe('Domlur Diner');
+    expect(list[0].travel!.max_km).toBeLessThan(list[1].travel!.max_km);
+    expect(list[0].reasons.some((r) => r.startsWith('Max '))).toBe(true);
+  });
+
+  it('suggests by distance alone when there is no other signal', () => {
+    const list = shortlist({}, [{}, {}], venues, 5, { people });
+    expect(list.length).toBe(3);
+    expect(list[0].venue.name).toBe('Domlur Diner');
+  });
+
+  it('ignores distance with fewer than two people', () => {
+    const list = shortlist({ activity: 'dinner' }, [{}], venues, 5, { people: [AREAS.whitefield] });
+    expect(list.every((i) => !i.travel)).toBe(true);
   });
 });

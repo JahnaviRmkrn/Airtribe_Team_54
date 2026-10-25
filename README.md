@@ -1,11 +1,10 @@
-# Airtribe Team 54: Personal Relationship Manager (backend)
+# Moup (Airtribe Team 54): Personal Relationship Manager
 
-Next.js 15 (App Router) + Supabase (Postgres, Auth, RLS). This branch holds the
-data and access layer: schema, auth, the private API, the public room API and
-the venue shortlist.
+Next.js 15 (App Router) + Supabase (Postgres, Auth, RLS) unified platform, alongside the FastAPI prototype backend and static runner.
 
 ## Run locally
 
+### 1. Unified App (Next.js 15)
 ```bash
 pnpm install
 supabase start                 # needs Docker; applies migrations + seed.sql
@@ -17,6 +16,14 @@ node scripts/smoke.mjs         # end-to-end API check (needs dev server running)
 
 Deploying (Vercel + hosted Supabase): see [DEPLOY.md](DEPLOY.md).
 `pnpm check-env` validates the env (`--prod` for production values).
+
+### 2. FastAPI Prototype Runner
+```bash
+pip install -r requirements.txt
+python -m uvicorn main:app --reload --port 8000
+```
+Open http://127.0.0.1:8000 - API docs at http://127.0.0.1:8000/docs
+
 
 ## Auth
 

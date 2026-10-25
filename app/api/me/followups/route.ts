@@ -1,3 +1,4 @@
+import { isOverdue } from '@/lib/due';
 import { boundedInteger } from '@/lib/query';
 import { dbError, handle, HttpError, ok, requireUser } from '@/lib/http';
 
@@ -15,9 +16,8 @@ export const GET = handle(async (req: Request) => {
     .lte('next_followup_at', horizon)
     .order('next_followup_at');
   dbError(error);
-  const iso = now.toISOString();
   return ok({
-    overdue: (data ?? []).filter((c) => c.next_followup_at! < iso),
-    upcoming: (data ?? []).filter((c) => c.next_followup_at! >= iso),
+    overdue: (data ?? []).filter((c) => isOverdue(c.next_followup_at, now)),
+    upcoming: (data ?? []).filter((c) => !isOverdue(c.next_followup_at, now)),
   });
 });

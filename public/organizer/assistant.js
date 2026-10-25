@@ -39,7 +39,7 @@
         name: S('Their name'), category: cat,
         interests: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Up to 5 short interest tags' },
         preferred_frequency_days: N('How often to check in, in days (weekly = 7, monthly = 30)'),
-        notes: S('Free-text notes'),
+        notes: S('Free-text notes'), email: S('Email address (optional)'),
       }, ['name', 'category']),
     },
     {
@@ -48,7 +48,7 @@
       parameters: obj({
         name: S('Their current name'), new_name: S('New name'), category: cat,
         interests: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Replaces the interest tags' },
-        preferred_frequency_days: N('Check-in frequency in days'), notes: S('Replaces the notes'),
+        preferred_frequency_days: N('Check-in frequency in days'), notes: S('Replaces the notes'), email: S('Email address'),
       }, ['name']),
     },
     {
@@ -65,6 +65,16 @@
         notes: S('What they talked about (optional)'),
       }, ['name']),
     },
+    {
+      name: 'email_contact',
+      description: 'Open the user\'s mail app with an email to one of their people (uses the saved email address if any). Write the subject and body in the user\'s voice.',
+      parameters: obj({ name: S('Who to email'), subject: S('Subject line'), body: S('Email body, plain text'), email: S('Email address if not saved (optional)') }, ['name', 'subject', 'body']),
+    },
+    {
+      name: 'email_meetup_invite',
+      description: 'Open the mail app with an invite to a meetup, including its room link. Optional recipients by name (their saved emails are used).',
+      parameters: obj({ title: S('Meetup title'), to: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Names of people to invite (optional)' }, note: S('Personal note to add (optional)') }, ['title']),
+    },
     { name: 'list_meetups', description: 'List the user\'s meetups with their room links.', parameters: obj() },
     {
       name: 'create_meetup',
@@ -73,7 +83,13 @@
         title: S('Short title, e.g. "Saturday brunch"'), activity: S('dinner, coffee, brunch, drinks, hike, movie...'),
         area: S('Neighbourhood or area (optional)'), starts_at: S('Date/time in ISO 8601 with offset (optional)'),
         budget: N('Budget per person in rupees (optional)'),
+        notes: S('Private planning notes for the organiser, e.g. "Meera is vegetarian" (optional)'),
       }, ['title']),
+    },
+    {
+      name: 'get_meeting_point',
+      description: 'For a meetup, get the fair middle point between where guests are coming from, how far the longest trip is, and the top venues ranked for everyone.',
+      parameters: obj({ title: S('Meetup title') }, ['title']),
     },
     { name: 'copy_meetup_link', description: 'Copy a meetup\'s room link to the clipboard.', parameters: obj({ title: S('Meetup title') }, ['title']) },
     {
@@ -119,8 +135,17 @@
   const refresh = () => window.dispatchEvent(new HashChangeEvent('hashchange'));
   const contactSummary = (c) => ({
     name: c.name, category: c.category, interests: (c.interests || []).slice(0, 5),
-    every_days: c.preferred_frequency_days ?? null, next_check_in: day(c.next_followup_at), last_contact: day(c.last_interaction_at),
+    email: c.email || null, every_days: c.preferred_frequency_days ?? null, next_check_in: day(c.next_followup_at), last_contact: day(c.last_interaction_at),
   });
+
+  // mailto: hand-off. The user's own mail app sends it; nothing is sent from the server.
+  function openMail(to, subject, body) {
+    const href = 'mailto:' + encodeURIComponent(to || '').replace(/%40/g, '@').replace(/%2C/g, ',')
+      + '?subject=' + encodeURIComponent(subject || '') + '&body=' + encodeURIComponent(body || '');
+    const a = document.createElement('a');
+    a.href = href; a.rel = 'noopener'; a.style.display = 'none';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
 
   async function contacts() { return list(await api('/api/me/contacts'), 'contacts'); }
 
@@ -196,16 +221,17 @@
       return { ok: true, opened: c.name };
     },
 
-    async add_contact({ name, category, interests, preferred_frequency_days, notes }) {
+    async add_contact({ name, category, interests, preferred_frequency_days, notes, email }) {
       const body = { name, category: CATEGORIES.includes(category) ? category : 'personal', interests: (interests || []).slice(0, 5) };
       if (preferred_frequency_days) body.preferred_frequency_days = Math.round(preferred_frequency_days);
       if (notes) body.notes = notes;
+      if (email) body.email = email;
       const c = await api('/api/me/contacts', { method: 'POST', body: JSON.stringify(body) });
       refresh();
       return { ok: true, added: contactSummary((c.contacts && c.contacts[0]) || c.contact || c) };
     },
 
-    async update_contact({ name, new_name, category, interests, preferred_frequency_days, notes }) {
+    async update_contact({ name, new_name, category, interests, preferred_frequency_days, notes, email }) {
       const c = await findOne(name);
       const patch = {};
       if (new_name) patch.name = new_name;
@@ -213,6 +239,7 @@
       if (Array.isArray(interests)) patch.interests = interests.slice(0, 5);
       if (preferred_frequency_days) patch.preferred_frequency_days = Math.round(preferred_frequency_days);
       if (typeof notes === 'string') patch.notes = notes;
+      if (typeof email === 'string') patch.email = email || null;
       if (!Object.keys(patch).length) return { error: 'Nothing to change.' };
       const r = await api('/api/me/contacts/' + encodeURIComponent(c.id), { method: 'PATCH', body: JSON.stringify(patch) });
       refresh();
@@ -238,6 +265,29 @@
       return { ok: true, logged: body.type, with: c.name };
     },
 
+    async email_contact({ name, subject, body, email }) {
+      const c = await findOne(name);
+      const to = (email || c.email || '').trim();
+      if (email && !c.email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        await api('/api/me/contacts/' + encodeURIComponent(c.id), { method: 'PATCH', body: JSON.stringify({ email }) }).catch(() => {});
+      }
+      openMail(to, subject, body);
+      return { ok: true, to: to || '(no address saved - the user can pick one)', subject };
+    },
+
+    async email_meetup_invite({ title, to, note }) {
+      const all = list(await api('/api/me/meetups'), 'meetups');
+      const m = all.find((x) => norm(x.title) === norm(title)) || all.find((x) => norm(x.title).includes(norm(title)));
+      if (!m || !m.room_token) return { error: `No meetup called "${title}".` };
+      const link = location.origin + '/m/' + m.room_token;
+      const people = await contacts();
+      const emails = (to || []).map((n) => people.find((c) => norm(c.name).includes(norm(n)))).filter((c) => c && c.email).map((c) => c.email);
+      const when = m.starts_at ? ' on ' + new Date(m.starts_at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+      openMail(emails.join(','), `Join me: ${m.title}`,
+        `Hi!\n\n${note ? note + '\n\n' : ''}I'm planning "${m.title}"${when}${m.area ? ' around ' + m.area : ''}. Pick a venue and tell us when you're free here:\n${link}\n\nNo sign-up needed.`);
+      return { ok: true, meetup: m.title, to: emails, missing_emails: (to || []).length - emails.length };
+    },
+
     async list_meetups() {
       const all = list(await api('/api/me/meetups'), 'meetups');
       return {
@@ -249,8 +299,9 @@
       };
     },
 
-    async create_meetup({ title, activity, area, starts_at, budget }) {
+    async create_meetup({ title, activity, area, starts_at, budget, notes }) {
       const body = { title };
+      if (notes) body.notes = String(notes).slice(0, 2000);
       if (activity) body.activity = clip(activity, 40);
       if (area) body.area = area;
       if (starts_at && !Number.isNaN(Date.parse(starts_at))) body.starts_at = new Date(starts_at).toISOString();
@@ -259,6 +310,17 @@
       const m = r.meetup || r;
       if (pageName() === 'meetups') refresh(); else location.hash = '#/meetups';
       return { ok: true, title: m.title, link: m.room_token ? location.origin + '/m/' + m.room_token : null };
+    },
+
+    async get_meeting_point({ title }) {
+      const all = list(await api('/api/me/meetups'), 'meetups');
+      const m = all.find((x) => norm(x.title) === norm(title)) || all.find((x) => norm(x.title).includes(norm(title)));
+      if (!m || !m.room_token) return { error: `No meetup called "${title}".` };
+      const room = await api('/api/rooms/' + encodeURIComponent(m.room_token));
+      const mp = room.meeting_point || {};
+      const top = (room.shortlist || []).slice(0, 3).map((s) => ({ venue: s.venue && s.venue.name, area: s.venue && s.venue.area, why: (s.reasons || []).slice(0, 2), longest_trip_km: s.travel ? s.travel.max_km : undefined }));
+      if (!mp.near) return { meetup: m.title, people_sharing_location: mp.people || 0, note: 'Fewer than two guests have shared where they are coming from yet.', top_venues: top };
+      return { meetup: m.title, middle_near: mp.near, people_sharing_location: mp.people, longest_trip_km: mp.max_km, average_trip_km: mp.avg_km, top_venues: top };
     },
 
     async copy_meetup_link({ title }) {
