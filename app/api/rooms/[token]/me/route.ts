@@ -12,11 +12,13 @@ export const GET = handle(async (req: Request, { params }: Ctx) => {
   await rateLimit(req, 'me', LIMITS.view, token);
   const room = await getRoom(token);
   const me = await requireGuest(req, room);
-  const { data } = await adminClient()
+  const { data, error } = await adminClient()
     .from('meetup_attendees')
     .select('id, guest_name, preferences, availability, joined_at')
     .eq('id', me.id)
+    .eq('meetup_id', room.id)
     .single();
+  if (error || !data) throw new HttpError(503, 'Could not load your preferences, please retry');
   return ok({ attendee: data });
 });
 
@@ -28,6 +30,7 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
   requireOpen(room);
   const me = await requireGuest(req, room);
   const body = await parseBody(req, guestUpdate);
+  let retainedPreferences: string | undefined;
   // The room view never returns exact coordinates, so a preferences save that
   // omits `location` keeps the stored one; `location: null` stops sharing.
   if (body.preferences) {
@@ -37,6 +40,7 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
       // An unavailable read is not proof that this guest stopped sharing.
       // Do not replace their preferences unless the retained value is known.
       if (error || !cur) throw new HttpError(503, 'Could not load your preferences, please retry');
+      retainedPreferences = JSON.stringify(cur.preferences);
       const kept = (cur?.preferences as Record<string, unknown> | null)?.location;
       if (kept) prefs.location = kept;
     } else if (prefs.location === null) {
@@ -44,7 +48,12 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
     }
     body.preferences = prefs as typeof body.preferences;
   }
-  const { error } = await adminClient().from('meetup_attendees').update(body).eq('id', me.id).eq('meetup_id', room.id);
+  let update = adminClient().from('meetup_attendees').update(body).eq('id', me.id).eq('meetup_id', room.id);
+  // A second request may have stopped sharing since our read. Compare the
+  // JSONB snapshot atomically instead of restoring a superseded location.
+  if (retainedPreferences !== undefined) update = update.eq('preferences', retainedPreferences);
+  const { data: updated, error } = await update.select('id').maybeSingle();
   roomWriteError(error, 'Could not update');
+  if (!updated) throw new HttpError(409, 'Your preferences changed. Reload and try again.');
   return ok(await roomView(req, room));
 });

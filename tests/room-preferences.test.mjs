@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { createClient } from '@supabase/supabase-js';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { asRole, identities, privacyDatabase, seedPrivateData } from './helpers/privacy-db.mjs';
 import { pgliteClient } from './helpers/pglite-client.mjs';
@@ -14,7 +15,7 @@ vi.mock('@/lib/pinelabs', () => ({ amountPaise: (price) => price == null ? null 
 
 import { GET as viewRoom } from '../app/api/rooms/[token]/route';
 import { POST as joinRoom } from '../app/api/rooms/[token]/join/route';
-import { PATCH as editGuest } from '../app/api/rooms/[token]/me/route';
+import { GET as getGuest, PATCH as editGuest } from '../app/api/rooms/[token]/me/route';
 import { POST as vote, DELETE as unvote } from '../app/api/rooms/[token]/vote/route';
 
 let db, tenants;
@@ -143,5 +144,94 @@ describe('guest preference boundaries through real routes and PostgreSQL', () =>
     expect((await guests()).rows).toEqual(before);
     expect((await asRole(db, 'service_role', null, (tx) => tx.query('select count(*)::int as n from venue_votes'))).rows[0].n).toBe(1);
     expect((await invoke(viewRoom, { session })).status).toBe(state === 'closed' ? 200 : 404);
+  });
+
+  it.each([
+    ['cleared', { location: null }, {}],
+    ['replaced', { location: { lat: 12.981, lng: 77.651 } }, { location: { lat: 12.981, lng: 77.651 } }],
+  ])('does not restore a shared location %s between the retention read and write', async (_label, nextPreferences, expected) => {
+    const session = browser();
+    await join(session, { location, area: 'Indiranagar' });
+    const originalFrom = deps.admin.from;
+    let cleared = false;
+    deps.admin.from = (table) => {
+      const query = originalFrom(table);
+      const select = query.select;
+      query.select = (columns) => {
+        if (table === 'meetup_attendees' && columns === 'preferences') {
+          const then = query.then;
+          query.then = async (resolve, reject) => {
+            const snapshot = await then((result) => result);
+            // Deterministic interleaving of two legitimate requests in one
+            // worker, not a live DB race or concurrent browser session.
+            const response = await invoke(editGuest, { session, method: 'PATCH', body: { preferences: nextPreferences } });
+            expect(response.status).toBe(200);
+            cleared = true;
+            return Promise.resolve(snapshot).then(resolve, reject);
+          };
+        }
+        return select(columns);
+      };
+      return query;
+    };
+    const response = await invoke(editGuest, { session, method: 'PATCH', body: { preferences: { area: 'Whitefield' } } });
+    expect(cleared).toBe(true);
+    expect(response.status).toBe(409);
+    expect((await guests()).rows[0].preferences).toEqual(expected);
+  });
+
+  it('serializes the actual route snapshot filter through supabase-js and detects an unmatched update without retrying', async () => {
+    const session = browser();
+    const preferences = { location: roundedLocation, area: 'A comma, quote " and & symbol' };
+    await join(session, preferences);
+    const captured = [];
+    // A synthetic SDK key and local fetch implementation only. This callback
+    // records construction, never invokes fetch or sends a network request.
+    const sdk = createClient('https://synthetic.example.test', 'synthetic-test-key', {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { fetch: async (url, options) => {
+        captured.push({ url: new URL(url), body: JSON.parse(options.body) });
+        return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } });
+      } },
+    });
+    const originalFrom = deps.admin.from;
+    deps.admin.from = (table) => {
+      const query = originalFrom(table);
+      // Reads use real PostgreSQL; only the final write goes to the SDK
+      // capture, whose empty representation simulates an unmatched snapshot.
+      query.update = (body) => sdk.from(table).update(body);
+      return query;
+    };
+    const response = await invoke(editGuest, { session, method: 'PATCH', body: { preferences: { area: 'Whitefield' } } });
+    expect(response.status).toBe(409);
+    expect(captured).toHaveLength(1);
+    const filter = captured[0].url.searchParams.get('preferences');
+    expect(filter.startsWith('eq.')).toBe(true);
+    expect(JSON.parse(filter.slice(3))).toEqual(preferences);
+    expect(filter).not.toContain('[object Object]');
+    expect(captured[0].url.searchParams.get('select')).toBe('id');
+    expect(captured[0].url.searchParams.get('meetup_id')).toBe(`eq.${tenants.alice.meetup.id}`);
+    expect(captured[0].body.preferences).toEqual({ area: 'Whitefield', location: roundedLocation });
+    expect((await guests()).rows[0].preferences).toEqual(preferences);
+  });
+
+  it.each(['error', 'missing'])('does not report a successful guest read when its data query is %s', async (failure) => {
+    const session = browser();
+    await join(session, { location });
+    const originalFrom = deps.admin.from;
+    deps.admin.from = (table) => {
+      const query = originalFrom(table);
+      const select = query.select;
+      query.select = (columns) => {
+        if (table === 'meetup_attendees' && columns === 'id, guest_name, preferences, availability, joined_at') {
+          query.then = (resolve, reject) => Promise.resolve({ data: null, error: failure === 'error' ? { message: 'Synthetic unavailable read' } : null }).then(resolve, reject);
+        }
+        return select(columns);
+      };
+      return query;
+    };
+    const response = await invoke(getGuest, { session });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: 'Could not load your preferences, please retry' });
   });
 });
