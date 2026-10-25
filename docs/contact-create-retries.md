@@ -135,6 +135,14 @@ and failure message explain that refresh recovery is unavailable. Clearing site
 data, changing browsers/devices, losing session-only storage, or replacing an
 unresolved intent explicitly cannot recover the old key. Check Contacts before
 recreating. No automatic retry or background contact creation is performed.
+The default-off unkeyed API still inserts once per received request. Duplicate
+requests, including a retransmission outside the JavaScript handler's control,
+can therefore create duplicates even before the UI sees an uncertain outcome.
+The button lock and local pending marker are not backend deduplication. A
+synthetic connection-drop browser test observed two legacy POSTs after one user
+click; the exact transport cause was not established. Only the enabled,
+migrated keyed path provides the receipt guarantee described above.
+
 The app does not deduplicate separate deliberate intents started simultaneously
 in unrelated tabs/devices; only requests carrying the same owner/key are the
 same intent. Receipt persistence is durable on the server, but it cannot infer

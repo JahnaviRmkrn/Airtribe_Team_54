@@ -186,7 +186,7 @@ export default async function Home() {
                 <span className="download-meta">{mb(d.bytes)} · SHA-256 {d.sha256.slice(0, 12)}…</span>
               </span>
             ))}
-            <span className="closing-footnote">macOS (.dmg) is built on a Mac — see the desktop folder in the repo. Desktop builds are unsigned, so your OS may warn on first launch. Full checksums: <a href="/downloads/downloads.json">downloads.json</a>.</span>
+            <span className="closing-footnote">Desktop builds are unsigned, so your OS may warn on first launch. Full checksums: <a href="/downloads/downloads.json">downloads.json</a>.</span>
           </div>
         </div>
       </section>
