@@ -34,8 +34,12 @@ call APIs directly is outside this guard's scope.
 ## Interrupted and repeated operations
 
 - Each asynchronous assistant operation captures its page/hash context and
-  cancellation signal. Navigation, cancellation and a superseding text request
-  prevent later steps and stale renders. A request already sent cannot be undone.
+  cancellation signal. Manual navigation, cancellation and a superseding text
+  request prevent later steps and stale renders. An assistant-owned hash change
+  advances the page context immediately; its exact queued browser event is
+  consumed once so it does not falsely cancel the next tool or model round.
+  Unmatched navigation and synthetic refreshes still invalidate older work.
+  A request already sent cannot be undone.
 - Text turns retain the first result for repeated identical non-read-only tools.
   A network/receipt/5xx failure on a mutation returns an explicit unknown outcome
   and stops that turn's tool progression, rather than asking the model to retry.

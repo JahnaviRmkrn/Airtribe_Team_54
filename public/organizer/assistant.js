@@ -140,7 +140,24 @@
   let pageVersion = 0;
   let askVersion = 0;
   let activeAsk = null;
-  window.addEventListener('hashchange', () => { pageVersion++; });
+  const ownNavigation = [];
+  window.addEventListener('hashchange', (event) => {
+    const next = ownNavigation[0];
+    if (next && event?.oldURL === next.from && event?.newURL === next.to) ownNavigation.shift();
+    else pageVersion++;
+  });
+  function pageAction(action) {
+    const from = location.href, hash = location.hash;
+    action();
+    const to = location.href;
+    if (hash !== location.hash) {
+      // location changes now; its native hashchange arrives in a later task.
+      // Invalidate older work now, not the next tool started on the new page.
+      pageVersion++;
+      ownNavigation.push({ from, to });
+    }
+  }
+  const openPage = (hash) => pageAction(() => { location.hash = hash; });
   const currentOwner = () => window.OrganizerAccount?.currentOwner?.() || null;
   function operation(signal, owner = currentOwner()) {
     const version = pageVersion, hash = location.hash;
@@ -243,7 +260,7 @@
   const impl = {
     async navigate({ page }) {
       if (!PAGES.includes(page)) return { error: `Unknown page. Use one of: ${PAGES.join(', ')}` };
-      location.hash = '#/' + page;
+      openPage('#/' + page);
       return { ok: true, page };
     },
 
@@ -272,7 +289,7 @@
 
     async open_contact({ name }, { request: api }) {
       const c = await findOne(name, api);
-      location.hash = '#/contacts/' + encodeURIComponent(c.id);
+      openPage('#/contacts/' + encodeURIComponent(c.id));
       return { ok: true, opened: c.name };
     },
 
@@ -307,7 +324,7 @@
       // A real click on a real dialog: a model steered by page text can't delete on its own.
       if (!window.confirm(`Delete ${c.name}? This also removes their history.`)) return { error: 'The user cancelled the delete.' };
       await api('/api/me/contacts/' + encodeURIComponent(c.id), { method: 'DELETE' });
-      if (/^#\/contacts\//.test(location.hash)) location.hash = '#/contacts'; else refresh();
+      if (/^#\/contacts\//.test(location.hash)) openPage('#/contacts'); else refresh();
       return { ok: true, deleted: c.name };
     },
 
@@ -360,7 +377,7 @@
       if (Number.isFinite(budget)) body.budget = Math.round(budget);
       const r = await api('/api/me/meetups', { method: 'POST', body: JSON.stringify(body) });
       const m = r.meetup || r;
-      if (pageName() === 'meetups') refresh(); else location.hash = '#/meetups';
+      if (pageName() === 'meetups') refresh(); else openPage('#/meetups');
       return { ok: true, title: m.title, link: m.room_token ? location.origin + '/m/' + m.room_token : null };
     },
 
@@ -421,7 +438,7 @@
       if (/\bconfirm\b|\bsend\b|\bpay\b|\bcheckout\b|close.*(?:room|meetup)/i.test(labelOf(hit))) return { error: 'Review and confirm this action yourself using the page controls.' };
       if (/delete|remove|sign ?out|log ?out/i.test(labelOf(hit))) return { error: 'Use delete_contact or sign_out for that, after the user confirms.' };
       if (!canClick(hit)) return { error: 'Activate this control manually yourself, or ask for a specific local-data tool.' };
-      hit.click();
+      pageAction(() => hit.click());
       return { ok: true, clicked: labelOf(hit) };
     },
 
