@@ -129,7 +129,8 @@ describe('assistant route chain with local PostgreSQL ownership policies', () =>
     }] });
     const outbound = JSON.stringify(providerRequests);
     for (const hidden of [identities.alice, identities.bob, tenants.alice.contact.id, tenants.alice.contact.notes, tenants.alice.interaction.notes, tenants.bob.contact.name, tenants.bob.contact.email, tenants.bob.contact.notes]) expect(outbound).not.toContain(hidden);
-    expect(databaseQueries).toEqual([{ table: 'contacts', owner: identities.alice }]);
+    // One data page, empty page, and exact-count verification all keep Alice's RLS identity.
+    expect(databaseQueries).toEqual(Array.from({ length: 3 }, () => ({ table: 'contacts', owner: identities.alice })));
     expect(routes.map(({ path }) => path)).toEqual(['/api/assistant', '/api/me/contacts', '/api/assistant']);
     expect(routes.every(({ owner }) => owner === identities.alice)).toBe(true);
   });
@@ -161,7 +162,8 @@ describe('assistant route chain with local PostgreSQL ownership policies', () =>
     const result = await ask(h, 'Update my contact note');
     expect(result.cancelled).toBe(true);
     expect(routes.map(({ method }) => method)).toEqual(['POST', 'GET', 'PATCH']);
-    expect(databaseQueries).toEqual([{ table: 'contacts', owner: identities.alice }]);
+    // One data page, empty page, and exact-count verification all keep Alice's RLS identity.
+    expect(databaseQueries).toEqual(Array.from({ length: 3 }, () => ({ table: 'contacts', owner: identities.alice })));
     expect(providerRequests).toHaveLength(1);
     expect((await ownedContact(identities.alice, tenants.alice.contact.id)).rows[0].notes).toBe(tenants.alice.contact.notes);
     expect((await ownedContact(identities.bob, tenants.bob.contact.id)).rows[0].notes).toBe(tenants.bob.contact.notes);
