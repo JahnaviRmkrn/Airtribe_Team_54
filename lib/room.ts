@@ -20,6 +20,7 @@ export type MeetupRow = {
   expires_at: string;
   final_venue_id: string | null;
 };
+export const roomColumns = 'id, organizer_id, title, activity, area, starts_at, budget, status, room_token, expires_at, final_venue_id';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 export const newSecret = () => randomBytes(32).toString('base64url');
@@ -31,7 +32,7 @@ export async function getRoom(token: string): Promise<MeetupRow> {
   if (!/^[A-Za-z0-9_-]{20,100}$/.test(token)) throw new HttpError(404, 'Room not found');
   const { data, error } = await adminClient()
     .from('meetups')
-    .select('id, organizer_id, title, activity, area, starts_at, budget, status, room_token, expires_at, final_venue_id')
+    .select(roomColumns)
     .eq('room_token', token)
     .maybeSingle();
   if (error) throw new HttpError(500, 'Lookup failed');
@@ -49,7 +50,7 @@ export function roomWriteError(error: { message: string } | null, fallback: stri
 }
 
 export function requireOpen(room: MeetupRow) {
-  if (room.status !== 'open') throw new HttpError(410, 'This meetup room is closed');
+  if (room.status !== 'open' || new Date(room.expires_at) < new Date()) throw new HttpError(410, 'This meetup room is closed');
 }
 
 export async function setGuestCookie(room: MeetupRow, secret: string) {

@@ -1,6 +1,6 @@
 import { confirmBody } from '@/lib/schemas';
 import { dbError, handle, HttpError, ok, parseBody, requireUser } from '@/lib/http';
-import { getRoom, requireOpen, roomView } from '@/lib/room';
+import { getRoom, requireOpen, roomColumns, roomView, type MeetupRow } from '@/lib/room';
 import { limitRoom } from '@/lib/ratelimit';
 
 type Ctx = { params: Promise<{ token: string }> };
@@ -23,9 +23,13 @@ export const POST = handle(async (req: Request, { params }: Ctx) => {
     .from('meetups')
     .update({ final_venue_id: venue_id })
     .eq('id', room.id)
-    .select('final_venue_id')
+    .select(roomColumns)
     .single();
   dbError(error);
   if (!data) throw new HttpError(403, 'Could not confirm');
-  return ok(await roomView(req, { ...room, final_venue_id: venue_id }, true));
+  // Same-venue retries are allowed by the DB trigger. Recheck the row returned
+  // by the write so a committed close/expiry cannot look like an open success.
+  const updated = data as MeetupRow;
+  requireOpen(updated);
+  return ok(await roomView(req, updated, true));
 });
