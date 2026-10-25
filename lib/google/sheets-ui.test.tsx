@@ -104,6 +104,25 @@ describe('Sheets component event guards', () => {
     expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body))).toEqual({ previewId });
     resolve(response({ result: { state: 'complete' } })); await first; await second;
   });
+  it.each(['import', 'export'] as const)('removes %s confirmation after a lost response until a read-only status check', async mode => {
+    const initial = hooks.values[0] as SheetsStatus;
+    hooks.values[1] = mode; hooks.values[16] = mode;
+    if (mode === 'import') initial.sessions.import.importPreview = { id: previewId, includeNotes: false, rows: [{ row: 2, duplicate: false, error: null, contact: { name: 'Ada', email: null, category: 'personal', interests: [], notes: null } }] };
+    const label = mode === 'export' ? 'Create spreadsheet and export these values' : 'Confirm import into muop';
+    vi.mocked(fetch).mockRejectedValueOnce(new Error('Lost confirmation response'));
+    await click(button(label));
+    expect(text(render())).not.toContain(label);
+    expect(text(render())).not.toContain(mode === 'export' ? 'Preview selected contacts' : 'Choose spreadsheet and worksheet');
+    expect(text(render())).toContain(mode === 'export' ? 'pending or uncertain' : 'result is uncertain');
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/confirm'))).toHaveLength(1);
+    const current = hooks.values[0] as SheetsStatus;
+    if (mode === 'export') current.sessions.export.exportRun = { previewId, state: 'complete', spreadsheetId: 'a'.repeat(30) };
+    else current.sessions.import.importRun = { previewId, state: 'complete', added: 1, skipped: 0 };
+    await click(button('Refresh status'));
+    expect(text(render())).toContain(mode === 'export' ? 'Export complete' : 'Import complete');
+    expect(text(render())).not.toContain(label);
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/confirm'))).toHaveLength(1);
+  });
   it('never navigates to Google if the page was left while connect was pending', async () => {
     (hooks.values[0] as SheetsStatus).sessions.export.connected = false;
     let resolve!: (value: Response) => void;

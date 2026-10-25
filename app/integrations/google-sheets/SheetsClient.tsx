@@ -86,16 +86,24 @@ export default function SheetsClient() {
     await refresh(); setReview('import');
   });
   const confirmImport = () => run(async () => {
-    await api('import', '/confirm', { previewId: status!.sessions.import.importPreview!.id });
-    await refresh(); setReview(null); setRows([]);
+    const previewId = status!.sessions.import.importPreview!.id;
+    // The server may commit even if this browser loses the response. Hide all
+    // repeat-write controls before dispatch; only a status read can resolve it.
+    setReview(null);
+    setStatus(current => current && { ...current, sessions: { ...current.sessions, import: { ...current.sessions.import, importRun: { previewId, state: 'running' } } } });
+    await api('import', '/confirm', { previewId });
+    await refresh(); setRows([]);
   });
   const previewExport = () => run(async () => {
     await api('export', '/preview', { contactIds, fields, title, includeNotes: exportNotes });
     await refresh(); setReview('export');
   });
   const confirmExport = () => run(async () => {
-    await api('export', '/confirm', { previewId: status!.sessions.export.exportPreview!.id });
-    await refresh(); setReview(null);
+    const previewId = status!.sessions.export.exportPreview!.id;
+    setReview(null);
+    setStatus(current => current && { ...current, sessions: { ...current.sessions, export: { ...current.sessions.export, exportRun: { previewId, state: 'creating' } } } });
+    await api('export', '/confirm', { previewId });
+    await refresh();
   });
   const checkExport = () => run(async () => { await api('export', '/confirm', { checkOnly: true }); await refresh(); });
   const source = status?.sessions.import.source;
@@ -148,7 +156,7 @@ export default function SheetsClient() {
             {source.values.length < 2 && <p>No data rows found. Use a worksheet with a header row followed by contacts.</p>}
             <button disabled={busy || rows.length < 1} onClick={previewImport}>Preview {rows.length} selected rows</button>
           </section>}
-          {review === 'import' && importPreview && <section className="sheets-card sheets-review"><h2>3. Review exact contacts before saving</h2><p>Destination: your signed-in muop account. Matching emails are skipped; when either email is missing, matching names are skipped. Contacts with different nonempty emails stay separate. Nothing is merged or overwritten. {importPreview.includeNotes ? 'Selected notes will be saved with these contacts.' : 'No private notes will be imported.'}</p>{importPreview.rows.map(row => <article key={row.row}><h3>Row {row.row}{row.duplicate ? ' · duplicate, will be skipped' : ''}</h3>{row.error ? <p className="sheets-error">{row.error}</p> : <dl>{sheetFields.filter(field => field !== 'notes' || importPreview.includeNotes).map(field => <div key={field}><dt>{fieldLabels[field]}</dt><dd>{field === 'interests' ? row.contact?.interests.join(', ') || 'None' : row.contact?.[field] || 'None'}</dd></div>)}</dl>}</article>)}<div className="sheets-actions"><button disabled={busy || !importPreview.rows.some(row => row.contact && !row.duplicate) || importPreview.rows.some(row => row.error !== null)} onClick={confirmImport}>Confirm import into muop</button><button disabled={busy} onClick={() => setReview(null)}>Back without importing</button></div></section>}
+          {review === 'import' && importPreview && !importedBlocked && <section className="sheets-card sheets-review"><h2>3. Review exact contacts before saving</h2><p>Destination: your signed-in muop account. Matching emails are skipped; when either email is missing, matching names are skipped. Contacts with different nonempty emails stay separate. Nothing is merged or overwritten. {importPreview.includeNotes ? 'Selected notes will be saved with these contacts.' : 'No private notes will be imported.'}</p>{importPreview.rows.map(row => <article key={row.row}><h3>Row {row.row}{row.duplicate ? ' · duplicate, will be skipped' : ''}</h3>{row.error ? <p className="sheets-error">{row.error}</p> : <dl>{sheetFields.filter(field => field !== 'notes' || importPreview.includeNotes).map(field => <div key={field}><dt>{fieldLabels[field]}</dt><dd>{field === 'interests' ? row.contact?.interests.join(', ') || 'None' : row.contact?.[field] || 'None'}</dd></div>)}</dl>}</article>)}<div className="sheets-actions"><button disabled={busy || !importPreview.rows.some(row => row.contact && !row.duplicate) || importPreview.rows.some(row => row.error !== null)} onClick={confirmImport}>Confirm import into muop</button><button disabled={busy} onClick={() => setReview(null)}>Back without importing</button></div></section>}
         </>}
 
         {mode === 'export' && connected && <>
@@ -161,7 +169,7 @@ export default function SheetsClient() {
             <fieldset disabled={busy}><legend>Selected contacts: {contactIds.length}/100</legend>{status.contacts.length === 0 && <p>No contacts to export yet.</p>}{status.contacts.map(contact => <label key={contact.id} className="sheets-check"><input type="checkbox" checked={contactIds.includes(contact.id)} disabled={!contactIds.includes(contact.id) && contactIds.length >= 100} onChange={e => { setContactIds(old => e.target.checked ? [...old, contact.id] : old.filter(id => id !== contact.id)); setReview(null); }} />{contact.name}{contact.email ? ` (${contact.email})` : ''} · {contact.category}</label>)}</fieldset>
             <button disabled={busy || contactIds.length < 1 || fields.length < 1 || !title.trim()} onClick={previewExport}>Preview selected contacts</button>
           </section>}
-          {review === 'export' && exportPreview && <section className="sheets-card sheets-review"><h2>2. Review exact export</h2><p>Destination: a newly created spreadsheet named “{exportPreview.title}” in Google account {exportPreview.destinationEmail}. Worksheet: Contacts. Exact range: {exportPreview.range}. A new file link will appear after creation. No existing spreadsheet will be overwritten or shared.</p><p>{exportPreview.includeNotes ? 'Private notes are included below and will be sent to Google.' : 'Private notes are excluded.'} Formula-looking text will be stored as literal text, never executed.</p><ValueTable values={exportPreview.values} /><div className="sheets-actions"><button disabled={busy} onClick={confirmExport}>Create spreadsheet and export these values</button><button disabled={busy} onClick={() => setReview(null)}>Back without exporting</button></div></section>}
+          {review === 'export' && exportPreview && !exportBlocked && <section className="sheets-card sheets-review"><h2>2. Review exact export</h2><p>Destination: a newly created spreadsheet named “{exportPreview.title}” in Google account {exportPreview.destinationEmail}. Worksheet: Contacts. Exact range: {exportPreview.range}. A new file link will appear after creation. No existing spreadsheet will be overwritten or shared.</p><p>{exportPreview.includeNotes ? 'Private notes are included below and will be sent to Google.' : 'Private notes are excluded.'} Formula-looking text will be stored as literal text, never executed.</p><ValueTable values={exportPreview.values} /><div className="sheets-actions"><button disabled={busy} onClick={confirmExport}>Create spreadsheet and export these values</button><button disabled={busy} onClick={() => setReview(null)}>Back without exporting</button></div></section>}
         </>}
       </>}
     </>}
