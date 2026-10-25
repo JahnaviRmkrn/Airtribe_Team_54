@@ -201,7 +201,12 @@ describe('reconciled login design and authentication', () => {
     expect(find(view.render(), (node) => node.props.type === 'submit').props.disabled).toBe(false);
   });
 
-  it.each([['%2Forganizer', '/organizer'], ['https%3A%2F%2Fevil.test', '/']])(
+  it.each([
+    ['%2Forganizer', '/organizer'],
+    ['https%3A%2F%2Fevil.test', '/'],
+    ['https%3A%2F%2Fexample.test%2F%2Fevil.test', '/'],
+    ['%2F.%2F%2Fevil.test', '/'],
+  ])(
     'redirects a real session only to a safe next path (%s)', async (next, expected) => {
       const auth = { signInWithPassword: vi.fn().mockResolvedValue({ data: { session: {} }, error: null }) };
       const view = page('login', auth, `?next=${next}`);
@@ -328,9 +333,10 @@ describe('preserved reset-password flow', () => {
     expect(view.auth.updateUser).not.toHaveBeenCalled();
   });
 
-  it('updates a confirmed password and rejects an external return URL', async () => {
+  it.each(['https://evil.test', 'https://example.test//evil.test', '/.//evil.test'])(
+    'updates a confirmed password and rejects unsafe return URL %s', async (next) => {
     vi.useFakeTimers();
-    const view = resetPage(true, '?next=https%3A%2F%2Fevil.test');
+    const view = resetPage(true, '?next=' + encodeURIComponent(next));
     view.render();
     view.effects[0]();
     await tick();

@@ -9,6 +9,10 @@ export function safeNext(next: string | null | undefined, origin: string): strin
   try {
     const u = new URL(next, origin);
     if (u.origin !== origin || (u.protocol !== 'http:' && u.protocol !== 'https:')) return '/';
+    // A same-origin absolute URL (or dot-segment path) can normalize to a
+    // pathname starting with //, which becomes off-origin when used again as
+    // a relative redirect. Validate the path we return as well as the input.
+    if (u.pathname.startsWith('//')) return '/';
     return u.pathname + u.search + u.hash;
   } catch {
     return '/';

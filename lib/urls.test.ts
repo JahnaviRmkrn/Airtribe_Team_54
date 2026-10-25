@@ -14,6 +14,9 @@ describe('safeNext', () => {
     '/\\evil.example',
     'https://evil.example/',
     'data:text/html,hi',
+    'https://app.example//evil.example/path',
+    '/.//evil.example/path',
+    '/safe/..//evil.example/path',
   ])('rejects %s', (next) => {
     expect(safeNext(next, origin)).toBe('/');
   });
