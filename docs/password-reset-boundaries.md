@@ -53,6 +53,17 @@ allowed origin. A proxy that rewrites Host to an internal address must configure
 forwarded header repeats it. No wildcard, origin reflection, or live deployment
 configuration change is part of this fix.
 
+This fallback policy is specific to the password POST. The social-login callback
+also prefers `NEXT_PUBLIC_SITE_URL`, but requires an origin-only value and, when
+unset, uses validated forwarded headers before Host. Use a canonical origin
+without a path/query/fragment for both flows; invalid social-origin configuration
+fails before code exchange, rather than falling back to request headers.
+Google feature connectors separately require `GOOGLE_CONNECTOR_ORIGIN`.
+Review [social setup](social-auth-setup.md) for those callback/proxy prerequisites.
+A successful mocked password update is not evidence that the live Supabase
+Site URL, recovery-email template, redirect allow-list or mail delivery is
+configured correctly.
+
 ## Uncertain outcomes
 
 A password provider's explicit rejection can be corrected and resubmitted.
