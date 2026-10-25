@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { unstable_cache } from 'next/cache';
 import { adminClient } from '@/lib/supabase/admin';
-import { buildLedger, type LedgerAttendee, type LedgerStep } from '@/lib/traction';
+import { buildLedger, type LedgerStep } from '@/lib/traction';
+import { readTractionData } from '@/lib/traction-read';
 import './traction.css';
 
 export const metadata: Metadata = {
@@ -16,43 +17,11 @@ const list = (v: string | undefined) => (v ?? '').split(',').map((s) => s.trim()
 // Builders Day, Bengaluru: count from the start of the event day.
 const SINCE = process.env.TRACTION_SINCE || '2026-10-24T00:00:00+05:30';
 
-// PostgREST caps a response at 1000 rows and the smoke test adds guests every
-// few minutes, so read every page; a silent cap would undercount real guests.
-type Page<T> = { data: T[] | null; error: { message: string } | null };
-async function all<T>(page: (from: number, to: number) => PromiseLike<Page<T>>): Promise<T[]> {
-  const rows: T[] = [];
-  for (let from = 0; from < 50_000; from += 1000) {
-    const { data, error } = await page(from, from + 999);
-    if (error) throw new Error(error.message);
-    rows.push(...(data ?? []));
-    if (!data || data.length < 1000) return rows;
-  }
-  throw new Error('traction: too many rows to count');
-}
-
 async function load() {
-  const db = adminClient();
-  const [meetups, attendees, votes] = await Promise.all([
-    all((a, b) => db.from('meetups').select('id, organizer_id').order('id').range(a, b)),
-    all((a, b) =>
-      db.from('meetup_attendees')
-        .select('id, meetup_id, guest_name, preferences, availability, joined_at, updated_at')
-        .gte('joined_at', SINCE).order('id').range(a, b)),
-    all((a, b) => db.from('venue_votes').select('attendee_id, created_at').gte('created_at', SINCE).order('id').range(a, b)),
-  ]);
-
-  // Organiser emails decide which rooms are test traffic (smoke/UI tests sign up on example.com).
-  const emails = new Map<string, string>();
-  for (let page = 1; page <= 20; page++) {
-    const { data, error } = await db.auth.admin.listUsers({ page, perPage: 1000 });
-    if (error) throw new Error(error.message);
-    data.users.forEach((u) => emails.set(u.id, u.email ?? ''));
-    if (data.users.length < 1000) break;
-  }
-
+  const { meetups, attendees, votes } = await readTractionData(adminClient(), SINCE);
   return buildLedger(
-    meetups.map((m) => ({ id: m.id, organizer_email: emails.get(m.organizer_id) ?? null })),
-    attendees as LedgerAttendee[],
+    meetups,
+    attendees,
     votes,
     {
       testDomains: list(process.env.TRACTION_TEST_DOMAINS || 'example.com,muopdemo.dev'),
@@ -65,7 +34,7 @@ async function load() {
 
 const cachedLoad = unstable_cache(load, ['traction-ledger'], { revalidate: 15 });
 
-const STEP: Record<LedgerStep, string> = { joined: 'joined', shared: 'shared what they like', voted: 'voted on a place' };
+const STEP: Record<LedgerStep, string> = { joined: 'joined', voted: 'voted on a place' };
 const time = (iso: string) =>
   new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 
@@ -85,6 +54,11 @@ export default async function TractionPage() {
   return (
     <main className="traction">
       <p className="tr-eyebrow">muop · live traction</p>
+      {excluded.unverified > 0 && (
+        <p className="tr-note">
+          {excluded.unverified} {excluded.unverified === 1 ? 'visit is' : 'visits are'} excluded because the room or organizer could not be verified; totals may be incomplete.
+        </p>
+      )}
       <h1>
         {completed} {completed === 1 ? 'person' : 'people'} planned a meetup with muop
       </h1>
@@ -113,6 +87,7 @@ export default async function TractionPage() {
 
       <section className="tr-card">
         <h2>Latest activity</h2>
+        <p className="tr-note">Sharing is counted from current saved preferences or availability. The original sharing time is not recorded, so this list shows only joins and votes.</p>
         {timeline.length ? (
           <ul className="tr-log">
             {timeline.map((e, i) => (

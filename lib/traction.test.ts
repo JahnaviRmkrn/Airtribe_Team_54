@@ -7,8 +7,8 @@ const meetups = [
   { id: 'nobody', organizer_email: null },
 ];
 const at = (min: number) => new Date(Date.UTC(2026, 9, 24, 6, min)).toISOString();
-// Real joins never share an exact instant (identical joined_at = seeded), so
-// each test guest gets its own second unless a test says otherwise.
+// Avoid accidental collisions in the existing seeded-guest heuristic unless
+// a test specifically exercises it; real timestamps can also coincide.
 let tick = 0;
 const guest = (id: string, o: Partial<LedgerAttendee> = {}): LedgerAttendee => {
   const t = new Date(Date.UTC(2026, 9, 24, 6, 1, ++tick)).toISOString();
@@ -36,7 +36,7 @@ describe('buildLedger', () => {
     expect(l.completed).toBe(0);
   });
 
-  it('excludes test rooms, unknown rooms and team members, and says how many', () => {
+  it('separates known test traffic from unknown rooms and organizers', () => {
     const l = buildLedger(
       meetups,
       [
@@ -48,7 +48,35 @@ describe('buildLedger', () => {
       [{ attendee_id: 't', created_at: at(2) }, { attendee_id: 'j', created_at: at(2) }],
       opts,
     );
-    expect(l).toMatchObject({ joined: 0, completed: 0, excluded: { test: 3, team: 1, seeded: 0 } });
+    expect(l).toMatchObject({ joined: 0, completed: 0, excluded: { test: 1, team: 1, seeded: 0, unverified: 2 } });
+  });
+
+  it('keeps explicit exclusions as test traffic even when the organizer is unknown', () => {
+    const l = buildLedger(meetups, [guest('x', { meetup_id: 'gone' })], [], { ...opts, excludeIds: ['x'] });
+    expect(l.excluded).toEqual({ test: 1, team: 0, seeded: 0, unverified: 0 });
+  });
+
+  it('preserves configured test-domain exclusions, ignoring case and whitespace', () => {
+    const l = buildLedger([{ id: 'real', organizer_email: ' Tester@MuopDemo.dev ' }], [guest('x')], [], {
+      ...opts, testDomains: [' MUOPDEMO.DEV '],
+    });
+    expect(l.excluded).toEqual({ test: 1, team: 0, seeded: 0, unverified: 0 });
+  });
+
+  it('counts duplicate attendee IDs once without inventing a seeded collision', () => {
+    const a = guest('a', { preferences: { food: ['veg'] } });
+    const l = buildLedger(meetups, [a, { ...a }], [{ attendee_id: 'a', created_at: at(3) }], opts);
+    expect(l).toMatchObject({ joined: 1, shared: 1, completed: 1, excluded: { seeded: 0 } });
+    expect(l.timeline.map((e) => e.step)).toEqual(['voted', 'joined']);
+  });
+
+  it('does not change totals or timeline when a guest is renamed or updated_at changes', () => {
+    const a = guest('a', { preferences: { food: ['veg'] }, updated_at: at(2) });
+    const votes = [{ attendee_id: 'a', created_at: at(3) }];
+    const original = buildLedger(meetups, [a], votes, opts);
+    const renamed = buildLedger(meetups, [{ ...a, guest_name: 'Ravi', updated_at: at(10) }], votes, opts);
+    expect(renamed).toEqual(original);
+    expect(original.timeline.map((e) => e.at)).toEqual([at(3), a.joined_at]);
   });
 
   it('excludes bulk-inserted (seeded) guests and listed internal test ids', () => {
@@ -78,7 +106,7 @@ describe('buildLedger', () => {
       [{ attendee_id: 'a', created_at: at(3) }],
       opts,
     );
-    expect(l.timeline.map((e) => e.step)).toEqual(['voted', 'shared', 'joined']);
+    expect(l.timeline.map((e) => e.step)).toEqual(['voted', 'joined']);
     expect(JSON.stringify(l.timeline)).not.toContain('Priya');
   });
 });

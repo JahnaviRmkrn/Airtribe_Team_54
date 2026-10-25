@@ -28,7 +28,7 @@ export type LedgerOptions = {
   since?: string;
 };
 
-export type LedgerStep = 'joined' | 'shared' | 'voted';
+export type LedgerStep = 'joined' | 'voted';
 export type LedgerEvent = { at: string; room: number; guest: number; step: LedgerStep };
 
 export type Ledger = {
@@ -37,7 +37,7 @@ export type Ledger = {
   shared: number;
   completed: number;
   rooms: number;
-  excluded: { test: number; team: number; seeded: number };
+  excluded: { test: number; team: number; seeded: number; unverified: number };
   timeline: LedgerEvent[];
 };
 
@@ -62,12 +62,11 @@ export function buildLedger(
   const testDomains = opts.testDomains.map(norm).filter(Boolean);
   const team = new Set(opts.teamNames.map(firstName).filter(Boolean));
   const since = opts.since ? Date.parse(opts.since) : NaN;
-  const isTestRoom = new Map(
+  const roomStatus = new Map(
     meetups.map((m) => {
-      // No known organiser email = can't tell it's real, so don't count it.
-      if (!m.organizer_email) return [m.id, true];
-      const domain = norm(m.organizer_email).split('@')[1] ?? '';
-      return [m.id, testDomains.includes(domain)];
+      const domain = m.organizer_email ? norm(m.organizer_email).split('@')[1] : null;
+      // Unknown organiser email is not evidence that a room is test traffic.
+      return [m.id, !domain ? 'unverified' : testDomains.includes(domain) ? 'test' : 'verified'];
     }),
   );
   const voteAt = new Map(votes.map((v) => [v.attendee_id, v.created_at]));
@@ -76,19 +75,22 @@ export function buildLedger(
   // page is public, so it must not reveal who joined or how to reach a room.
   const roomNo = new Map<string, number>();
   const counted: LedgerAttendee[] = [];
-  const excluded = { test: 0, team: 0, seeded: 0 };
+  const excluded = { test: 0, team: 0, seeded: 0, unverified: 0 };
   const skip = new Set(opts.excludeIds ?? []);
+  const uniqueAttendees = [...new Map(attendees.map((a) => [a.id, a])).values()];
   // Seed scripts insert a room's guests in one transaction, so they share the
-  // exact same joined_at (to the microsecond). Real joins never collide.
+  // exact same joined_at. This is a heuristic: real joins can also collide.
+  // Deduplicate IDs first so repeated reads cannot create a false collision.
   const sameInstant = new Map<string, number>();
-  attendees.forEach((a) => sameInstant.set(a.joined_at, (sameInstant.get(a.joined_at) ?? 0) + 1));
-  const ordered = attendees
+  uniqueAttendees.forEach((a) => sameInstant.set(a.joined_at, (sameInstant.get(a.joined_at) ?? 0) + 1));
+  const ordered = uniqueAttendees
     .filter((a) => isNaN(since) || Date.parse(a.joined_at) >= since)
     .sort((a, b) => Date.parse(a.joined_at) - Date.parse(b.joined_at));
 
   for (const a of ordered) {
-    if (isTestRoom.get(a.meetup_id) ?? true) { excluded.test++; continue; } // unknown room = not countable
-    if (skip.has(a.id)) { excluded.test++; continue; }
+    const status = roomStatus.get(a.meetup_id) ?? 'unverified';
+    if (skip.has(a.id) || status === 'test') { excluded.test++; continue; }
+    if (status === 'unverified') { excluded.unverified++; continue; }
     if ((sameInstant.get(a.joined_at) ?? 0) > 1) { excluded.seeded++; continue; }
     if (team.has(firstName(a.guest_name))) { excluded.team++; continue; }
     counted.push(a);
@@ -103,10 +105,9 @@ export function buildLedger(
     const guest = i + 1;
     events.push({ at: a.joined_at, room, guest, step: 'joined' });
     const didShare = hasContent(a.preferences) || hasContent(a.availability);
-    if (didShare) {
-      shared++;
-      events.push({ at: a.updated_at, room, guest, step: 'shared' });
-    }
+    // updated_at also changes on renames and later edits; it is not the
+    // original sharing time. Count saved state without inventing an event.
+    if (didShare) shared++;
     const v = voteAt.get(a.id);
     if (v) events.push({ at: v, room, guest, step: 'voted' });
     if (didShare && v) completed++;
