@@ -58,9 +58,9 @@ function browser(initial, handler) {
 }
 
 describe('Google Contacts selection UI', () => {
-  it('preserves the import callback route for a new account without an onboarding flag', async () => {
+  it.each(['#/google-contacts', '#/gmail', '#/calendar'])('preserves the %s callback route for a new account without an onboarding flag', async (hash) => {
     const appSource = readFileSync(new URL('../public/organizer/app.js', import.meta.url), 'utf8').replace(/\nboot\(\);\s*$/, '');
-    const context = vm.createContext({ window: {}, location: { hash: '#/google-contacts' }, localStorage: { getItem: () => null }, destination: null });
+    const context = vm.createContext({ window: {}, location: { hash }, localStorage: { getItem: () => null }, destination: null });
     vm.runInContext(appSource, context);
     vm.runInContext("renderLoading = () => 0; api = async () => ({ is_empty: true }); installFlash = () => {}; route = () => {}; go = (hash) => { destination = hash; };", context);
     await vm.runInContext('boot()', context);

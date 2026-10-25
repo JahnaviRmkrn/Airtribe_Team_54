@@ -1554,7 +1554,9 @@ async function boot() {
   const hash = location.hash || '#/dashboard';
   window.onhashchange = route;
   installFlash();
-  if (d.is_empty && !onboarded && hash !== '#/onboarding' && hash !== '#/welcome' && hash !== '#/google-contacts') {
+  // OAuth returns must keep their destination even before first-run onboarding.
+  const directEntry = ['#/onboarding', '#/welcome', '#/google-contacts', '#/gmail', '#/calendar'].includes(hash);
+  if (d.is_empty && !onboarded && !directEntry) {
     go('#/welcome');
   }
   route();
