@@ -1,6 +1,6 @@
 {
   "name": "muop-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Muop desktop app (Electron shell for muop.win)",
   "main": "main.js",
@@ -12,8 +12,8 @@
     "dist": "electron-builder --mac dmg zip --win nsis portable --linux AppImage"
   },
   "devDependencies": {
-    "electron": "^33.2.0",
-    "electron-builder": "^24.13.3"
+    "electron": "44.7.0",
+    "electron-builder": "26.17.0"
   },
   "build": {
     "appId": "win.muop.app",
