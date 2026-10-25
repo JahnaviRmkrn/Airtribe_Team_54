@@ -643,7 +643,7 @@ describe('profile rendering and navigation', () => {
     const html = document.getElementById('app').innerHTML;
     expect(html).toContain('alice@example.test');
     expect(html).toContain('Personal</strong> · 60%');
-    expect(html).toContain('Bob');
+    expect(document.getElementById('me-activity-log').innerHTML).toContain('Bob');
     expect(paths).toEqual(Object.keys(profileResults));
   });
 

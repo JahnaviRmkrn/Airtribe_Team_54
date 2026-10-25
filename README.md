@@ -104,6 +104,11 @@ the current time, excluding any previously stored future-dated entries.
 This guard is API-only: direct SQL/RPC writers must validate their own occurrence
 times. Existing future-dated history or contact schedules are not rewritten.
 
+Profile shows the most recent 100 check-ins, not the full activity history.
+Activity loads independently of the account and goals; a failed read shows an
+activity-only retry without resetting an open goals draft. Only a successful
+empty response is shown as “Nothing logged yet.”
+
 ### Follow-up date policy
 
 Follow-ups use the calendar day in **Asia/Kolkata (IST)**, regardless of the

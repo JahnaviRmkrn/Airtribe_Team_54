@@ -1761,19 +1761,17 @@ function onboardingView() {
 }
 
 
-// --- profile: your account, your goals, and the full activity log -----------
+// --- profile: your account, your goals, and recent activity -----------------
 
 async function profileView() {
   const nav = renderLoading('Loading your profile...');
-  let me = null, d = null, interactions = [];
+  const hash = location.hash || '';
+  const isCurrent = () => !stale(nav) && (location.hash || '') === hash;
+  let me = null, d = null;
   try {
     [me, d] = await Promise.all([api('/api/me'), api('/api/me/dashboard')]);
-    try {
-      const ri = await api('/api/me/interactions?limit=100');
-      interactions = ri.interactions || [];
-    } catch { interactions = []; }
-  } catch (e) { if (stale(nav)) return; return renderError(e, profileView); }
-  if (stale(nav)) return;
+  } catch (e) { if (!isCurrent()) return; return renderError(e, profileView); }
+  if (!isCurrent()) return;
 
   const u = (me && me.user) || {};
   const counts = d.contact_counts || {};
@@ -1787,7 +1785,7 @@ async function profileView() {
   el('app').className = 'container';
   el('app').innerHTML = `
     <div class="page-head">
-      <div><h1>Profile</h1><p class="muted lede">Your account, your goals, and everything you have logged.</p></div>
+      <div><h1>Profile</h1><p class="muted lede">Your account, your goals, and your recent activity.</p></div>
     </div>
     <section class="card me-card">
       <div class="me-head">
@@ -1828,27 +1826,50 @@ async function profileView() {
     </section>
     <section class="card">
       <h2>Activity log</h2>
-      <p class="muted">Everything you have logged, newest first.</p>
-      ${interactions.length ? `<ol class="timeline me-log">${interactions.map((i) => `
+      <p class="muted">Your most recent 100 check-ins, newest first.</p>
+      <div id="me-activity-log"></div>
+    </section>`;
+
+  // Activity is optional to this page. Retry only this region, never the whole
+  // profile: re-rendering would silently discard an open goals draft.
+  let loadingActivity = false;
+  const loadActivity = async () => {
+    if (!isCurrent() || loadingActivity) return;
+    loadingActivity = true;
+    const log = el('me-activity-log');
+    log.innerHTML = '<p class="muted" role="status">Loading activity...</p>';
+    try {
+      const result = await api('/api/me/interactions?limit=100');
+      if (!isCurrent()) return;
+      const interactions = result.interactions || [];
+      log.innerHTML = interactions.length ? `<ol class="timeline me-log">${interactions.map((i) => `
         <li><span class="tl-dot"></span>
           <strong>${esc((i.contact && i.contact.name) || 'Someone')}</strong>
           ${i.contact && i.contact.category ? `<span class="tag">${esc(catLabel(i.contact.category))}</span>` : ''}
           <div class="muted">${esc(String(i.type || '').replace(/_/g, ' '))} · ${esc(fmtDate(i.occurred_at))}</div>
           ${i.notes ? `<div class="notes muted">${esc(i.notes)}</div>` : ''}
         </li>`).join('')}</ol>`
-      : '<p class="muted">Nothing logged yet. Log a check-in from a contact page or the dashboard.</p>'}
-    </section>`;
+        : '<p class="muted">Nothing logged yet. Log a check-in from a contact page or the dashboard.</p>';
+    } catch (e) {
+      if (!isCurrent() || e instanceof AuthError) return;
+      log.innerHTML = `<p class="error" role="alert">Could not load activity. ${esc(e.message || 'Please try again.')}</p>
+        <button id="me-activity-retry">Retry activity</button>`;
+      el('me-activity-retry').onclick = loadActivity;
+    } finally {
+      loadingActivity = false;
+    }
+  };
 
   let savingGoals = false;
   let editingGoals = false;
   el('me-edit-goals').onclick = () => {
-    if (stale(nav) || savingGoals) return;
+    if (!isCurrent() || savingGoals) return;
     editingGoals = true;
     el('me-goals-form').classList.remove('hidden');
     el('me-edit-goals').classList.add('hidden');
   };
   el('me-goals-cancel').onclick = () => {
-    if (stale(nav) || savingGoals) return;
+    if (!isCurrent() || savingGoals) return;
     editingGoals = false;
     el('me-goals-form').classList.add('hidden');
     el('me-edit-goals').classList.remove('hidden');
@@ -1856,10 +1877,10 @@ async function profileView() {
   const inputs = [...document.querySelectorAll('.me-goal-input')];
   const total = () => inputs.reduce((sum, input) => sum + (Number(input.value) || 0), 0);
   inputs.forEach((input) => { input.oninput = () => {
-    if (!stale(nav)) el('me-goals-total').textContent = total();
+    if (isCurrent()) el('me-goals-total').textContent = total();
   }; });
   el('me-goals-save').onclick = async () => {
-    if (stale(nav) || savingGoals || !editingGoals) return;
+    if (!isCurrent() || savingGoals || !editingGoals) return;
     const error = el('me-goals-error'), status = el('me-goals-status');
     error.textContent = '';
     if (inputs.some((input) => input.value === '' || !Number.isInteger(Number(input.value)) || Number(input.value) < 0 || Number(input.value) > 100)) {
@@ -1874,19 +1895,20 @@ async function profileView() {
     try {
       const body = Object.fromEntries(inputs.map((input) => [input.dataset.cat, Number(input.value)]));
       await api('/api/me/goals', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Contact-Owner': contactCreateOwner }, body: JSON.stringify(body) });
-      if (stale(nav)) return;
+      if (!isCurrent()) return;
       flash('Goals saved.');
       profileView();
     } catch (e) {
-      if (!stale(nav)) error.textContent = e.message;
+      if (isCurrent()) error.textContent = e.message;
     } finally {
       savingGoals = false;
-      if (!stale(nav)) {
+      if (isCurrent()) {
         controls.forEach((control) => { control.disabled = false; });
         status.textContent = '';
       }
     }
   };
+  await loadActivity();
 }
 
 // --- boot ------------------------------------------------------------------------
