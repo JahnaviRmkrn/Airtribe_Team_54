@@ -21,4 +21,8 @@ describe('content security policy', () => {
       expect(directive(csp, 'base-uri')).toBe("base-uri 'self'");
     }
   });
+
+  it('only the pinned Leaflet path is allowed from unpkg', () => {
+    for (const name of ['img-src', 'style-src']) expect(directive(APP_CSP, name)).not.toMatch(/https:\/\/unpkg\.com(\s|$)/);
+  });
 });

@@ -247,6 +247,7 @@ async function checkVersion(win) {
     if (!res.ok) return true;
     info = await res.json();
   } catch { return true; }
+  if (!info || typeof info !== 'object') return true;
   const current = app.getVersion();
   if (info.minimum && newer(info.minimum, current)) {
     const { response } = await dialog.showMessageBox(win, {

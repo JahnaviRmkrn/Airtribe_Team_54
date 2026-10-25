@@ -86,8 +86,10 @@ jobs:
           export MUOP_KEYSTORE_FILE="$RUNNER_TEMP/muop-release.jks"
           echo "$MUOP_KEYSTORE_B64" | base64 -d > "$MUOP_KEYSTORE_FILE"
           ./gradlew assembleRelease
-          rm -f "$MUOP_KEYSTORE_FILE"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -i "SHA-256"
+      - name: Remove the decoded keystore (even if the build failed)
+        if: always()
+        run: rm -f "$RUNNER_TEMP/muop-release.jks"
       - uses: actions/upload-artifact@v4
         with:
           name: muop-android

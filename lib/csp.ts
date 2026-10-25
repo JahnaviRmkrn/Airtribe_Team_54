@@ -22,9 +22,9 @@ const base = {
   'object-src': ["'none'"],
   'frame-ancestors': ["'none'"],
   'form-action': ["'self'"],
-  'img-src': ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org', 'https://unpkg.com'],
+  'img-src': ["'self'", 'data:', 'blob:', 'https://*.tile.openstreetmap.org', 'https://unpkg.com/leaflet@1.9.4/'],
   'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com'],
-  'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://unpkg.com'],
+  'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://unpkg.com/leaflet@1.9.4/'],
   'media-src': ["'self'", 'blob:', 'mediastream:'],
   'connect-src': [
     "'self'",
@@ -47,7 +47,8 @@ const scripts = {
     'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js',
     'https://unpkg.com/leaflet@1.9.4/',
   ],
-  next: ["'self'", "'unsafe-inline'"],
+  // 'unsafe-eval' only for `next dev` (React Refresh); production never gets it.
+  next: ["'self'", "'unsafe-inline'", ...(process.env.NODE_ENV === 'production' ? [] : ["'unsafe-eval'"])],
 };
 
 const render = (policy: Record<string, string[]>) =>

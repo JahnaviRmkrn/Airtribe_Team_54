@@ -144,6 +144,9 @@ describe('desktop bridge security', () => {
     const ok = load({ versionInfo: { latest: '0.3.0', minimum: '0.2.0' } });
     await ok.settle(); await ok.settle();
     expect(ok.loaded).toEqual(['https://muop.win']);
+    const nullBody = load({ versionInfo: null });
+    await nullBody.settle(); await nullBody.settle();
+    expect(nullBody.loaded).toEqual(['https://muop.win']);
     const offline = load({ fetchFails: true });
     await offline.settle(); await offline.settle();
     expect(offline.loaded).toEqual(['https://muop.win']);
