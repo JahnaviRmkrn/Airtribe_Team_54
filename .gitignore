@@ -56,3 +56,6 @@ data/store.json
 
 # TLC model checker scratch
 spec/states/
+
+# desktop/android installers served at /downloads (built locally, not committed)
+/public/downloads/

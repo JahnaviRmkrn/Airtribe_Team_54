@@ -157,10 +157,25 @@ export default async function Home() {
         </div>
       </section>
 
+      <section className="closing-section section-pad" id="download">
+        <div className="container-wide closing-inner">
+          <span className="eyebrow">Get the apps</span>
+          <h2 className="serif">muop, on your computer<br />and your <em>phone.</em></h2>
+          <p>The desktop apps add local files, screen capture, and — on Mac — Contacts, Notes, Reminders and Messages.</p>
+          <div className="download-links">
+            <a className="closing-button" href="/downloads/Muop-0.1.0-win.zip" download>Windows (.zip) <ArrowUpRight size={17} /></a>
+            <a className="closing-button" href="/downloads/Muop-0.1.0.AppImage" download>Linux (AppImage) <ArrowUpRight size={17} /></a>
+            <a className="closing-button" href="/downloads/Muop-0.1.0-debug.apk" download>Android (.apk) <ArrowUpRight size={17} /></a>
+            <span className="closing-footnote">macOS (.dmg) is built on a Mac — see the desktop folder in the repo. Desktop builds are unsigned, so your OS may warn on first launch.</span>
+          </div>
+        </div>
+      </section>
+
       <footer className="site-footer">
         <div className="container-wide footer-inner">
           <BrandMark />
           <span>Make time for the people who matter.</span>
+          <a href="#download" className="back-top">Download the apps <ArrowUpRight size={14} /></a>
           <a href="/traction" className="back-top">Live traction <ArrowUpRight size={14} /></a>
           <a href="#top" className="back-top">Back to the beginning <ArrowUpRight size={14} /></a>
         </div>
