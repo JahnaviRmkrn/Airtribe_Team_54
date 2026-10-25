@@ -23,6 +23,7 @@ function setup({ clipboard, secure = true, legacy = () => false, room = false, p
     constructor(tag = 'div') {
       this.tagName = tag.toUpperCase(); this.children = []; this.attributes = {};
       this.textContent = ''; this.value = ''; this.className = ''; this.parentNode = null;
+      this.disabled = false;
       elements.push(this);
     }
     get isConnected() { return this === document.body || !!this.parentNode?.isConnected; }
@@ -39,6 +40,7 @@ function setup({ clipboard, secure = true, legacy = () => false, room = false, p
     select() { this.selectionStart = 0; this.selectionEnd = this.value.length; }
     setAttribute(name, value) { this.attributes[name] = String(value); }
     getAttribute(name) { return this.attributes[name]; }
+    removeAttribute(name) { delete this.attributes[name]; }
     querySelectorAll(selector) {
       return this.children.flatMap((child) => [
         ...(selector.startsWith('.') ? child.className.split(' ').includes(selector.slice(1)) : child.tagName === selector.toUpperCase()) ? [child] : [],
@@ -125,9 +127,13 @@ describe('organizer manual copy boundaries', () => {
     const app = setup({ clipboard: { writeText } });
     const copying = app.copy(draft, 'Copy invite text');
     expect(app.button.textContent).toBe('Copy invite text');
+    expect(app.button.disabled).toBe(true);
+    expect(app.button.getAttribute('aria-busy')).toBe('true');
     expect(writeText).toHaveBeenCalledWith(draft);
     pending.resolve(); await copying;
     expect(app.button.textContent).toBe('Copied!');
+    expect(app.button.disabled).toBe(false);
+    expect(app.button.getAttribute('aria-busy')).toBeUndefined();
     expect(app.button.getAttribute('aria-live')).toBe('polite');
     expect(app.document.execCommand).not.toHaveBeenCalled();
     expect(app.panel()).toBeNull();
@@ -229,21 +235,50 @@ describe('organizer manual copy boundaries', () => {
       succeeds ? pending.resolve() : pending.reject(new Error('Late denial'));
       await copying;
       expect(app.panel()).toBeNull(); expect(app.button.textContent).toBe('Copy');
+      expect(app.button.disabled).toBe(false);
+      expect(app.button.getAttribute('aria-busy')).toBeUndefined();
       expect(app.timers).toHaveLength(0); app.assertLocalOnly();
     }
   });
 
-  it('does not let an older completion or timer overwrite a newer attempt', async () => {
-    const pending = deferred(); let count = 0;
-    const app = setup({ clipboard: { writeText: () => ++count === 1 ? pending.promise : Promise.resolve() } });
+  it('blocks duplicate writes from one button and does not let an older timer overwrite a later copy', async () => {
+    const pending = deferred();
+    const writeText = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(undefined);
+    const app = setup({ clipboard: { writeText } });
     const first = app.copy('First'); await app.copy('Second', 'Copy latest');
-    pending.reject(new Error('Old denial')); await first;
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('First');
+    expect(app.button.disabled).toBe(true);
+    pending.resolve(); await first;
     expect(app.panel()).toBeNull(); expect(app.button.textContent).toBe('Copied!');
     const oldTimer = app.timers[0]; await app.copy('Third', 'Copy third');
+    expect(writeText).toHaveBeenCalledTimes(2); expect(writeText).toHaveBeenLastCalledWith('Third');
     oldTimer.callback(); expect(app.button.textContent).toBe('Copied!');
     app.timers[1].callback(); expect(app.button.textContent).toBe('Copy third');
     app.context.location.hash = '#/contacts'; app.button.textContent = 'New view';
     app.timers[1].callback(); expect(app.button.textContent).toBe('New view');
+    app.assertLocalOnly();
+  });
+
+  it('restores the button after a denied pending write so edited text can be retried', async () => {
+    const pending = deferred();
+    const writeText = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(undefined);
+    const app = setup({ clipboard: { writeText } });
+    const first = app.copy('Original'); await app.copy(draft);
+    expect(writeText).toHaveBeenCalledOnce();
+    pending.reject(new Error('Synthetic denial')); await first;
+    expectManual(app, 'Original'); expect(app.button.disabled).toBe(false);
+    await app.copy(draft);
+    expect(writeText).toHaveBeenCalledTimes(2); expect(writeText).toHaveBeenLastCalledWith(draft);
+    expect(app.panel()).toBeNull(); expect(app.button.textContent).toBe('Copied!');
+    app.assertLocalOnly();
+  });
+
+  it('does not start a clipboard write from a removed or disabled control', async () => {
+    const writeText = vi.fn(async () => {});
+    const app = setup({ clipboard: { writeText } });
+    app.button.disabled = true; await app.copy();
+    app.button.disabled = false; app.button.remove(); await app.copy();
+    expect(writeText).not.toHaveBeenCalled(); expect(app.timers).toHaveLength(0);
     app.assertLocalOnly();
   });
 });

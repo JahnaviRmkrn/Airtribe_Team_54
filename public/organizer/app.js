@@ -381,11 +381,17 @@ const copyAttempts = new WeakMap();
 let copyFallbackId = 0;
 async function copyText(text, btn, label) {
   const previous = copyAttempts.get(btn);
+  // Native writes cannot be cancelled. Prevent a second write from this
+  // button racing the first, including direct calls to its click handler.
+  if (previous?.pending || btn.disabled || !btn.isConnected) return;
   clearTimeout(previous?.timer);
   previous?.panel?.remove();
-  const attempt = {}, nav = navGen, hash = location.hash;
+  const attempt = { pending: true }, nav = navGen, hash = location.hash;
   copyAttempts.set(btn, attempt);
   const current = () => copyAttempts.get(btn) === attempt && btn.isConnected && !stale(nav) && location.hash === hash;
+  const wasDisabled = btn.disabled;
+  btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
   btn.textContent = label;
   btn.setAttribute('aria-live', 'polite');
   let copied = false;
@@ -409,6 +415,11 @@ async function copyText(text, btn, label) {
       }
     }
   } catch { /* Denied or unsupported: offer manual copy, never claim success. */ }
+  finally {
+    attempt.pending = false;
+    btn.disabled = wasDisabled;
+    btn.removeAttribute('aria-busy');
+  }
   if (!current()) return;
   if (copied) {
     btn.textContent = 'Copied!';
