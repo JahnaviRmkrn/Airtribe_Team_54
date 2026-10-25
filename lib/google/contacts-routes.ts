@@ -4,7 +4,7 @@ import { HttpError, requireUser } from '../http';
 import { adminClient } from '../supabase/admin';
 import {
   acquireGoogleSession, authorization, consumeGoogleAuthorization, createGoogleSession, deleteGoogleSession, discardGoogleSession, exchangeCode,
-  googleConfig, googleResponse, googleRoute, releaseGoogleSession, requireGoogleConfig,
+  googleConfig, googleConnectorSchemaReady, googleResponse, googleRoute, releaseGoogleSession, requireGoogleConfig,
   sameOrigin, saveGoogleSession, validState, type Session,
 } from './connector';
 import { contactPreview, importSelection, loadContactsPage, type ContactsSession } from './contacts';
@@ -13,9 +13,8 @@ export const status = googleRoute(async (req) => {
   const { user } = await requireUser(req);
   const config = googleConfig('contacts');
   if (!config) return googleResponse({ configured: false, ready: false });
-  // Don't advertise a working connector until the service-only schema exists.
-  const schema = await adminClient().from('google_connector_sessions').select('id').eq('user_id', user.id).eq('purpose', config.purpose).limit(1);
-  if (schema.error) return googleResponse({ configured: false, ready: false });
+  // Require the additive replacement guard too, not just the original table.
+  if (!await googleConnectorSchemaReady()) return googleResponse({ configured: false, ready: false });
   let session;
   try { session = await acquireGoogleSession<ContactsSession>(config, user.id); }
   catch (error) { if (error instanceof HttpError && error.status === 410) return googleResponse({ configured: true, ready: false }); throw error; }

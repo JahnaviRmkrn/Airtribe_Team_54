@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { HttpError, requireUser } from '../http';
 import { acquireGoogleSession, authorization, consumeGoogleAuthorization, createGoogleSession, deleteGoogleSession, discardGoogleSession,
-  exchangeCode, googleAccessToken, googleConfig, googleResponse, googleRoute, releaseGoogleSession, sameOrigin, saveGoogleSession, validState,
+  exchangeCode, googleAccessToken, googleConfig, googleConnectorSchemaReady, googleResponse, googleRoute, releaseGoogleSession, sameOrigin, saveGoogleSession, validState,
   type GoogleConfig, type Session } from './connector';
 import { preparePreview, type ActionPurpose } from './action-content';
 import { actionView, cancelAction, claimAction, contentForAction, finishAction, loadAction, recentActions, storePreview } from './action-store';
@@ -52,7 +52,7 @@ const release = async (config: GoogleConfig, session: Session<unknown>) => { try
 export function actionRoutes(purpose: ActionPurpose) {
   const GET = googleRoute(async (req) => {
     const { user } = await requireUser(req); const config = enabledConfig(purpose);
-    if (!config) return googleResponse({ enabled: false, connected: false, message: setupText, actions: [] });
+    if (!config || !await googleConnectorSchemaReady()) return googleResponse({ enabled: false, connected: false, message: setupText, actions: [] });
     const id = new URL(req.url).searchParams.get('id');
     if (id) { if (!z.uuid().safeParse(id).success) throw new HttpError(400, 'Invalid action ID.'); return googleResponse({ action: actionView(config, await loadAction(config, user.id, id)) }); }
     let connected = false;
@@ -65,6 +65,7 @@ export function actionRoutes(purpose: ActionPurpose) {
   });
   const POST = googleRoute(async (req) => {
     const { user } = await requireUser(req); const config = configRequired(purpose); sameOrigin(req, config);
+    if (!await googleConnectorSchemaReady()) throw new HttpError(503, setupText);
     // Reject both declared and actual oversized bodies, including chunked input.
     if (Number(req.headers.get('content-length') || 0) > 100000) throw new HttpError(413, 'This draft is too large.');
     const body = await parseOperation(req);

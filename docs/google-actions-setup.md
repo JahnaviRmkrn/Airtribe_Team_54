@@ -16,7 +16,7 @@ The linked Google account is the account selected in the separate consent flow, 
 
 ## Operator setup, only after separate approval
 
-1. Review and apply the connector migration `20261025110000_google_contact_import.sql`, then `20261025113000_google_confirmed_actions.sql`, to the intended database. Never apply against an unknown project. The normal anonymous/authenticated roles cannot read connector tokens or action records, nor invoke privileged claim functions.
+1. Review and apply the connector migration `20261025110000_google_contact_import.sql`, then `20261025113000_google_confirmed_actions.sql` and `20261025114000_google_session_replacement.sql`, to the intended database. The shared readiness probe keeps these features disabled until the replacement guard is installed. Never apply against an unknown project. The normal anonymous/authenticated roles cannot read connector tokens or action records, nor invoke privileged claim functions.
 2. Register dedicated OAuth client configuration for each purpose. Review Google's current consent-screen, Gmail API / Calendar API enablement and verification requirements. Configure exact redirect URIs:
    - `https://YOUR-APP/api/me/integrations/google/gmail/callback`
    - `https://YOUR-APP/api/me/integrations/google/calendar/callback`

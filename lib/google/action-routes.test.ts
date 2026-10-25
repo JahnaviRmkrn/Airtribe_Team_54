@@ -3,7 +3,7 @@ vi.mock('server-only', () => ({}));
 vi.mock('../supabase/admin', () => ({ adminClient: () => { throw new Error('Live DB disabled'); } }));
 vi.mock('../http', async (original) => ({ ...await original<typeof import('../http')>(), requireUser: vi.fn() }));
 vi.mock('./connector', async (original) => ({
-  ...await original<typeof import('./connector')>(), googleConfig: vi.fn(), acquireGoogleSession: vi.fn(), releaseGoogleSession: vi.fn(),
+  ...await original<typeof import('./connector')>(), googleConfig: vi.fn(), googleConnectorSchemaReady: vi.fn(), acquireGoogleSession: vi.fn(), releaseGoogleSession: vi.fn(),
   createGoogleSession: vi.fn(), deleteGoogleSession: vi.fn(), discardGoogleSession: vi.fn(), consumeGoogleAuthorization: vi.fn(), saveGoogleSession: vi.fn(), exchangeCode: vi.fn(),
 }));
 vi.mock('./action-store', () => ({ loadAction: vi.fn(), recentActions: vi.fn(), actionView: vi.fn(), contentForAction: vi.fn(), storePreview: vi.fn(), claimAction: vi.fn(), finishAction: vi.fn(), cancelAction: vi.fn() }));
@@ -28,6 +28,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Live network disabled'); }));
   vi.mocked(requireUser).mockResolvedValue({ user: { id: owner } } as Awaited<ReturnType<typeof requireUser>>);
   vi.mocked(connector.googleConfig).mockReturnValue(config);
+  vi.mocked(connector.googleConnectorSchemaReady).mockResolvedValue(true);
   vi.mocked(connector.acquireGoogleSession).mockResolvedValue(session());
   vi.mocked(store.loadAction).mockResolvedValue(row()); vi.mocked(store.recentActions).mockResolvedValue([]);
   vi.mocked(store.claimAction).mockResolvedValue(row('claimed'));
@@ -44,6 +45,15 @@ describe('explicit action endpoint boundaries', () => {
     expect(await (await routes.GET(new Request(config.origin))).json()).toMatchObject({ enabled: false, connected: false });
     expect((await routes.POST(req({ operation: 'start' }))).status).toBe(503);
     expect(connector.createGoogleSession).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each(['gmail', 'calendar'] as const)('keeps %s disabled with a partial connector migration', async (purpose) => {
+    vi.mocked(connector.googleConnectorSchemaReady).mockResolvedValue(false);
+    const routes = actionRoutes(purpose);
+    expect(await (await routes.GET(new Request(config.origin))).json()).toMatchObject({ enabled: false, connected: false });
+    expect((await routes.POST(req({ operation: 'start' }))).status).toBe(503);
+    expect((await routes.POST(req(confirm()))).status).toBe(503);
+    expect(connector.createGoogleSession).not.toHaveBeenCalled(); expect(store.claimAction).not.toHaveBeenCalled();
+    expect(provider.performGoogleAction).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
   });
   it('requires a real app user before disclosing saved content or setup status', async () => {
     vi.mocked(requireUser).mockRejectedValue(new HttpError(401, 'Not signed in'));

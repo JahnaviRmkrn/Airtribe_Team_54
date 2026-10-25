@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mock = vi.hoisted(() => ({
   rows: [], contacts: [], cookieJar: new Map(), cookieWrites: [], owner: '11111111-1111-4111-8111-111111111111',
-  schemaMissing: false, rateAllowed: true, importLostResponse: false, operations: [],
+  schemaMissing: false, replacementMissing: false, rateAllowed: true, importLostResponse: false, operations: [],
 }));
 vi.mock('server-only', () => ({}));
 vi.mock('next/headers', () => ({ cookies: async () => ({
@@ -42,6 +42,17 @@ vi.mock('../lib/supabase/admin', () => ({ adminClient: () => ({
   rpc: async (name, args) => {
     mock.operations.push(name);
     if (name === 'hit_rate_limit') return { data: mock.rateAllowed, error: null };
+    if (name === 'google_connector_session_ready') return { data: !mock.schemaMissing && !mock.replacementMissing, error: null };
+    if (name === 'replace_google_connector_session') {
+      if (mock.schemaMissing || mock.replacementMissing) return { data: null, error: { message: 'Missing connector replacement function' } };
+      const existing = mock.rows.find((row) => row.user_id === args.p_owner && row.purpose === args.p_purpose);
+      if (existing?.locked_until && Date.parse(existing.locked_until) > Date.now()) return { data: null, error: { message: 'connector_busy' } };
+      if (existing?.protected_action && Date.parse(existing.expires_at) > Date.now()) return { data: null, error: { message: 'connector_action_pending' } };
+      mock.rows = mock.rows.filter((row) => row !== existing);
+      mock.rows.push({ id: args.p_id, user_id: args.p_owner, purpose: args.p_purpose, encrypted_payload: args.p_payload, expires_at: args.p_expires_at, lease: null, locked_until: null, protected_action: false });
+      return { data: null, error: null };
+    }
+
     if (name === 'claim_google_connector_session') {
       const row = mock.rows.find((row) => row.id === args.p_id && row.user_id === args.p_owner && row.purpose === args.p_purpose);
       if (!row) return { data: [], error: null };
@@ -76,7 +87,7 @@ const request = (action = '', body) => new Request(origin + '/api/me/integration
 let googleFetch;
 beforeEach(() => {
   mock.rows = []; mock.contacts = []; mock.cookieJar = new Map(); mock.cookieWrites = []; mock.operations = [];
-  mock.owner = '11111111-1111-4111-8111-111111111111'; mock.schemaMissing = false; mock.rateAllowed = true; mock.importLostResponse = false;
+  mock.owner = '11111111-1111-4111-8111-111111111111'; mock.schemaMissing = false; mock.replacementMissing = false; mock.rateAllowed = true; mock.importLostResponse = false;
   vi.stubEnv('GOOGLE_CONTACTS_CLIENT_ID', 'synthetic-client'); vi.stubEnv('GOOGLE_CONTACTS_CLIENT_SECRET', 'synthetic-secret');
   vi.stubEnv('GOOGLE_CONNECTOR_ORIGIN', origin); vi.stubEnv('GOOGLE_CONNECTOR_ENCRYPTION_KEY', Buffer.alloc(32, 42).toString('base64'));
   googleFetch = vi.fn(() => { throw new Error('External requests are forbidden in tests'); }); vi.stubGlobal('fetch', googleFetch);
@@ -110,6 +121,12 @@ describe('Google Contacts mocked request lifecycle', () => {
     vi.stubEnv('GOOGLE_CONTACTS_CLIENT_SECRET', 'synthetic-secret'); mock.schemaMissing = true;
     expect(await (await status(request())).json()).toEqual({ configured: false, ready: false });
     expect(googleFetch).not.toHaveBeenCalled();
+  });
+  it('does not advertise or start Contacts with only the original connector table', async () => {
+    mock.replacementMissing = true;
+    expect(await (await status(request())).json()).toEqual({ configured: false, ready: false });
+    expect((await start(request('/start'))).status).toBe(503);
+    expect(mock.rows).toEqual([]); expect(mock.cookieWrites).toEqual([]); expect(googleFetch).not.toHaveBeenCalled();
   });
   it('requires application authentication and trusted origin', async () => {
     mock.owner = null;
@@ -220,11 +237,14 @@ describe('Google Contacts mocked request lifecycle', () => {
     expect((await pending).status).toBe(410);
     expect(mock.rows).toEqual([]); expect(mock.cookieWrites.at(-1).options.maxAge).toBe(0);
   });
-  it('an old callback cannot erase a new connection started during code exchange', async () => {
+  it('blocks replacement during exchange and preserves a new connection after explicit cancellation', async () => {
     const state = await connect(); let respond;
     googleFetch.mockImplementationOnce(() => new Promise((resolve) => { respond = resolve; }));
     const pending = callback(new Request(origin + '/callback?code=synthetic-code&state=' + state));
     await vi.waitFor(() => expect(respond).toBeTypeOf('function'));
+    expect((await start(request('/start'))).status).toBe(409);
+    expect(mock.cookieWrites).toHaveLength(1);
+    expect((await cancel(request('/cancel'))).status).toBe(200);
     const newState = await connect();
     respond(new Response(JSON.stringify({ access_token: 'synthetic-token', scope: CONTACTS_SCOPE, expires_in: 60, token_type: 'Bearer' })));
     await pending;
