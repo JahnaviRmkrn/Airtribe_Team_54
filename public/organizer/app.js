@@ -228,6 +228,7 @@ function draftPanel(container, contactId, name) {
         <label class="draft-label">Suggested message <span class="muted">(${r.source === 'template' ? 'template' : 'drafted by ' + esc(r.source === 'deepseek' ? 'DeepSeek' : 'AI')} - edit before sending)</span>
           <textarea class="draft-text" rows="3">${esc(r.message)}</textarea>
         </label>
+        ${(r.basis || []).length ? `<p class="draft-basis muted">Based on: ${(r.basis).map((b) => esc(b)).join(' · ')}</p>` : ''}
         <div class="actions">
           <button class="primary draft-copy">Copy</button>
           <a class="button-link draft-wa" target="_blank" rel="noopener">Open in WhatsApp</a>
@@ -602,7 +603,7 @@ function goalsComparison(goals, act) {
       </div>`;
   }).join('');
   return `<section class="card"><h2>Goals vs activity</h2>${rows}
-    <p class="muted">Bars show where your recorded activity actually went, against your goals.</p></section>`;
+    <p class="muted">Bars show where your recorded activity actually went, against your goals. This counts check-ins you logged, not the closeness of any relationship - a quiet week with no notes is not a failing friendship.</p></section>`;
 }
 
 // --- mark a follow-up done ------------------------------------------------
@@ -1111,8 +1112,19 @@ function onboardingView() {
   const p = prefill();
   const rows = (p.contacts && p.contacts.length ? p.contacts.slice(0, 5) : [emptyRow()]).map(toRow);
   const goals = { personal: 50, professional: 30, community: 20, ...(p.goals || {}) };
+  // Who understood the extraction: kept with the rows (and in org_prefill) so
+  // the attribution survives Back from goals and a refresh.
+  let source = typeof p.source === 'string' ? p.source : null;
   let step = 1;
   let voice = null;
+
+  const SOURCE_LABELS = { deepseek: 'DeepSeek', gemini: 'Gemini', openai: 'AI', agenticorg: 'AgenticOrg', rules: 'built-in rules' };
+  const showSource = () => {
+    const box = el('ob-source');
+    if (!box) return;
+    const label = source && Object.hasOwn(SOURCE_LABELS, source) ? SOURCE_LABELS[source] : null;
+    box.textContent = label && rows.some((r) => r.name) ? `Filled from what you said (understood by ${label}). Review each person - nothing is saved until you finish.` : '';
+  };
 
   const finish = (added) => {
     if (voice) voice.stop();
@@ -1159,13 +1171,16 @@ function onboardingView() {
     const merged = [...kept, ...added].slice(0, 5);
     rows.splice(0, rows.length, ...(merged.length ? merged : [emptyRow()]));
     if (res.goals) Object.assign(goals, res.goals);
+    if (typeof res.source === 'string') source = res.source;
     try {
       sessionStorage.setItem('org_prefill', JSON.stringify({
         contacts: merged.map((r) => ({ name: r.name, category: r.category, interests: r.interests, preferred_frequency_days: r.freq })),
         goals,
+        source,
       }));
     } catch { /* storage unavailable: pre-fill still applies on screen */ }
     renderRows();
+    showSource();
     if (merged.length >= 5 && kept.length + added.length > 5) {
       el('ob-error').textContent = 'Only the first 5 people were kept - you can add more from Contacts later.';
     }
@@ -1186,6 +1201,7 @@ function onboardingView() {
         <h2 class="ob-sub">Your people <span class="muted">(up to 5)</span></h2>
         <p class="muted">Anyone I hear or you type appears here. Check them, fix them, make them yours. Nothing is saved until you finish setup.</p>
         <div id="ob-rows"></div>
+        <p class="muted" id="ob-source"></p>
         <p><button class="link-btn" id="ob-add">+ Add another</button></p>
         <p class="error" id="ob-error"></p>
         <div class="quick-actions">
@@ -1195,6 +1211,7 @@ function onboardingView() {
         <p><button class="link-btn" id="ob-welcome">← What can muop do?</button></p>
       </section>`;
     renderRows();
+    showSource();
     el('ob-welcome').onclick = () => go('#/welcome');
     voice = window.Voice ? window.Voice.mount(el('voice-mount'), applyExtraction) : null;
     // Lets the voice assistant (assistant.js) fill this form and move on.

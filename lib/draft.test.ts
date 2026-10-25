@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDraftPrompt, cleanDraft, MAX_DRAFT_CHARS, templateDraft, type DraftContact } from './draft';
+import { buildDraftPrompt, cleanDraft, draftBasis, MAX_DRAFT_CHARS, templateBasis, templateDraft, type DraftContact } from './draft';
 
 const meera: DraftContact = {
   name: 'Meera Iyer',
@@ -24,6 +24,21 @@ describe('buildDraftPrompt', () => {
     expect(p).toContain('Last contact: unknown');
     expect(p).toMatch(/professional/);
     expect(p).not.toContain('Interests:');
+  });
+});
+
+describe('draftBasis', () => {
+  it('lists the facts the suggestion is based on', () => {
+    const basis = draftBasis(meera, [{ occurred_at: '2026-10-04', notes: 'Talked about her new job' }], new Date('2026-10-24T10:00:00+05:30'));
+    expect(basis).toContain('Interested in trekking, filter coffee');
+    expect(basis).toContain('Your note: Moved to Pune in June');
+    expect(basis).toContain('Last contact: 20 days ago');
+    expect(basis).toContain('Earlier check-in: Talked about her new job');
+  });
+
+  it('keeps unknown facts out instead of inventing them', () => {
+    const basis = draftBasis({ name: 'Rahul', category: 'professional' }, []);
+    expect(basis).toEqual(['Last contact: unknown']);
   });
 });
 
@@ -57,5 +72,13 @@ describe('templateDraft', () => {
   it('adapts to the relationship', () => {
     expect(templateDraft({ name: 'Rahul Shah', category: 'professional' })).toMatch(/^Hi Rahul, .*call/);
     expect(templateDraft({ name: 'Sana', category: 'community' })).toMatch(/meetup/);
+  });
+});
+
+describe('templateBasis', () => {
+  it('only lists what the template uses', () => {
+    const basis = templateBasis(meera);
+    expect(basis).toEqual(['Written from a template (no AI)', 'Relationship: personal', 'Interested in trekking']);
+    expect(basis.join(' ')).not.toMatch(/note|check-in|Last contact/i);
   });
 });
