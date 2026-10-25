@@ -232,7 +232,8 @@ describe('organizer manual copy boundaries', () => {
       if (navigation === 'hash changed') app.context.location.hash = '#/contacts';
       if (navigation === 'generation changed') app.run('navGen++');
       if (navigation === 'button removed') app.button.remove();
-      succeeds ? pending.resolve() : pending.reject(new Error('Late denial'));
+      if (succeeds) pending.resolve();
+      else pending.reject(new Error('Late denial'));
       await copying;
       expect(app.panel()).toBeNull(); expect(app.button.textContent).toBe('Copy');
       expect(app.button.disabled).toBe(false);
