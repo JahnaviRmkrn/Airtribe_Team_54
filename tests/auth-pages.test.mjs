@@ -20,7 +20,17 @@ function page(name, auth = {}, search = '', env = {}) {
   let cursor = 0;
   let effectCursor = 0;
   const client = vi.fn(() => ({ auth }));
-  const location = { origin: 'https://example.test', search, href: '' };
+  const location = { origin: 'https://example.test', pathname: '/login', hash: '', search, href: '' };
+  const listeners = new Map();
+  const history = {
+    state: { retained: true },
+    replaceState: vi.fn((_state, _title, url) => { location.search = url.search; location.hash = url.hash; }),
+  };
+  const window = {
+    history,
+    addEventListener: (event, handler) => listeners.set(event, handler),
+    removeEventListener: (event) => listeners.delete(event),
+  };
   const modules = {
     react: {
       useState(initial) {
@@ -45,6 +55,7 @@ function page(name, auth = {}, search = '', env = {}) {
       jsxs: (type, props) => ({ type, props }),
       Fragment: 'fragment',
     },
+    'next/link': { default: (props) => ({ type: 'a', props }) },
     '@/lib/supabase/browser': { browserClient: client },
     '@/lib/password-auth': { passwordAuth },
     '@/lib/urls': { safeNext },
@@ -54,7 +65,7 @@ function page(name, auth = {}, search = '', env = {}) {
     '../login/login.css': {},
   };
   const context = vm.createContext({
-    exports: {}, window: {}, location, URLSearchParams, Error, setTimeout, clearTimeout,
+    exports: {}, window, location, URL, URLSearchParams, Error, setTimeout, clearTimeout,
     fetch: vi.fn().mockResolvedValue({ ok: true, json: async () => ({ external: { google: true } }) }),
     require(id) {
       if (!(id in modules)) throw new Error(`Unexpected page dependency: ${id}`);
@@ -63,7 +74,7 @@ function page(name, auth = {}, search = '', env = {}) {
   });
   vm.runInContext(pages[name], context);
   return {
-    client, location, effects,
+    client, location, effects, listeners, history,
     render() {
       cursor = 0;
       effectCursor = 0;
@@ -101,6 +112,57 @@ describe('reconciled login design and authentication', () => {
     expect(view.client).not.toHaveBeenCalled();
   });
 
+  it('makes the login purpose and separate account choice explicit', () => {
+    const view = page('login');
+    const tree = view.render();
+    expect(text(find(tree, (node) => node.type === 'h1'))).toBe('Log in to muop');
+    expect(button(tree, 'Log in').props['aria-pressed']).toBe(true);
+    expect(button(tree, 'Create account').props['aria-pressed']).toBe(false);
+    expect(text(find(tree, (node) => node.props.type === 'submit'))).toContain('Log in');
+    expect(find(tree, (node) => node.props.id === 'login-email').props.autoComplete).toBe('email');
+    expect(find(tree, (node) => node.props.id === 'login-password').props.autoComplete).toBe('current-password');
+    expect(find(tree, (node) => node.props.id === 'login-password').props.required).toBe(true);
+    expect(button(tree, 'Forgot password?')).toBeDefined();
+  });
+
+  it.each([['signup', 'Create your account'], ['signin', 'Log in to muop'], ['unknown', 'Log in to muop']])(
+    'opens the explicit %s entry without starting authentication', (mode, heading) => {
+      const view = page('login', {}, `?mode=${mode}&next=%2Forganizer`);
+      view.render();
+      const cleanup = view.effects[1]();
+      expect(text(find(view.render(), (node) => node.type === 'h1'))).toBe(heading);
+      expect(view.client).not.toHaveBeenCalled();
+      cleanup();
+      expect(view.listeners.has('popstate')).toBe(false);
+    },
+  );
+
+  it('keeps the selected mode and safe return path when toggling or revisiting login', () => {
+    const view = page('login', {}, '?next=%2Forganizer&error=auth');
+    view.render();
+    const cleanup = view.effects[1]();
+    button(view.render(), 'Create account').props.onClick();
+    expect(text(find(view.render(), (node) => node.type === 'h1'))).toBe('Create your account');
+    expect(find(view.render(), (node) => node.props.id === 'login-password').props.autoComplete).toBe('new-password');
+    expect(view.location.search).toBe('?next=%2Forganizer&error=auth&mode=signup');
+    expect(view.history.replaceState).toHaveBeenLastCalledWith(view.history.state, '', expect.any(URL));
+    button(view.render(), 'Log in').props.onClick();
+    expect(view.location.search).toBe('?next=%2Forganizer&error=auth');
+    view.location.search = '?mode=signup&next=%2Forganizer';
+    view.listeners.get('popstate')();
+    expect(button(view.render(), 'Create account').props['aria-pressed']).toBe(true);
+    cleanup();
+  });
+
+  it('still toggles password visibility without submitting the form', () => {
+    const view = page('login');
+    find(view.render(), (node) => node.props['aria-label'] === 'Show password').props.onClick();
+    expect(find(view.render(), (node) => node.props.id === 'login-password').props.type).toBe('text');
+    find(view.render(), (node) => node.props['aria-label'] === 'Hide password').props.onClick();
+    expect(find(view.render(), (node) => node.props.id === 'login-password').props.type).toBe('password');
+    expect(view.client).not.toHaveBeenCalled();
+  });
+
   it('uses explicit signup and waits for email confirmation instead of redirecting', async () => {
     const auth = {
       signUp: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
@@ -108,7 +170,7 @@ describe('reconciled login design and authentication', () => {
     };
     const view = page('login', auth, '?next=%2Forganizer');
     let tree = view.render();
-    button(tree, 'Create Account').props.onClick();
+    button(tree, 'Create account').props.onClick();
     field(tree, 'login-email', ' user@example.test ');
     field(tree, 'login-password', 'password');
     await submit(view.render());
@@ -169,7 +231,7 @@ describe('reconciled login design and authentication', () => {
     const auth = { resetPasswordForEmail: vi.fn().mockResolvedValue({ error: null }) };
     const view = page('login', auth);
     field(view.render(), 'login-email', 'user@example.test');
-    await button(view.render(), 'Forgot?').props.onClick();
+    await button(view.render(), 'Forgot password?').props.onClick();
     expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('user@example.test', {
       redirectTo: 'https://example.test/auth/callback?next=%2Freset-password',
     });
@@ -184,7 +246,7 @@ describe('reconciled login design and authentication', () => {
     field(view.render(), 'login-password', 'password');
     const pending = submit(view.render());
     const tree = view.render();
-    for (const node of nodes(tree).filter((node) => node.props.role === 'tab' || node.props.className === 'magic-toggle')) {
+    for (const node of nodes(tree).filter((node) => typeof node.props['aria-pressed'] === 'boolean' || node.props.className === 'magic-toggle')) {
       expect(node.props.disabled).toBe(true);
     }
     resolve({ data: { session: null }, error: null });
@@ -198,7 +260,7 @@ describe('reconciled login design and authentication', () => {
     field(view.render(), 'login-email', 'user@example.test');
     if (kind === 'magic') find(view.render(), (node) => node.props.className === 'magic-toggle').props.onClick();
     const action = () => kind === 'magic' ? submit(view.render())
-      : kind === 'forgot' ? button(view.render(), 'Forgot?').props.onClick()
+      : kind === 'forgot' ? button(view.render(), 'Forgot password?').props.onClick()
         : find(view.render(), (node) => node.props['data-provider'] === 'google').props.onClick();
     await action();
     expect(text(view.render())).toContain('Network unavailable');
@@ -212,7 +274,7 @@ describe('reconciled login design and authentication', () => {
     const view = page('login');
     field(view.render(), 'login-email', 'user@example.test');
     view.client.mockImplementationOnce(() => { throw new Error('Auth configuration unavailable'); });
-    await button(view.render(), 'Forgot?').props.onClick();
+    await button(view.render(), 'Forgot password?').props.onClick();
     expect(text(view.render())).toContain('Auth configuration unavailable');
     expect(find(view.render(), (node) => node.props.type === 'submit').props.disabled).toBe(false);
   });

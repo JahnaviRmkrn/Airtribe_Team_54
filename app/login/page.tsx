@@ -7,6 +7,7 @@
 // docs/social-auth-setup.md. Only providers the Supabase project reports as
 // enabled (GET /auth/v1/settings) get a button, so unconfigured ones never show.
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import type { Provider } from '@supabase/supabase-js';
 import { browserClient } from '@/lib/supabase/browser';
 import { supabaseAnonKey, supabaseUrl } from '@/lib/env';
@@ -169,6 +170,27 @@ export default function LoginPage() {
   // after mount so server and client first renders match.
   const next = typeof window === 'undefined' ? '/' : safeNext(new URLSearchParams(location.search).get('next'), location.origin);
 
+  // A separate landing-page entry opens account creation without changing any
+  // authentication behavior. Default/unknown modes always remain login.
+  useEffect(() => {
+    const syncMode = () => setMode(new URLSearchParams(location.search).get('mode') === 'signup' ? 'signup' : 'signin');
+    syncMode();
+    window.addEventListener('popstate', syncMode);
+    return () => window.removeEventListener('popstate', syncMode);
+  }, []);
+
+  function selectMode(nextMode: Mode) {
+    setMode(nextMode);
+    setMsg('');
+    setIsError(false);
+    const url = new URL(location.pathname + location.search + location.hash, location.origin);
+    if (nextMode === 'signup') url.searchParams.set('mode', 'signup');
+    else url.searchParams.delete('mode');
+    // Keep the return path and callback errors, and make refresh match the
+    // selected mode without adding an extra Back-button step for each toggle.
+    window.history.replaceState(window.history.state, '', url);
+  }
+
   // Surfaced by /auth/callback when the code exchange fails, or by Supabase on a
   // cancelled/failed OAuth attempt (?error=...&error_description=...).
   useEffect(() => {
@@ -296,48 +318,41 @@ export default function LoginPage() {
         : useMagic
           ? 'Send Magic Link'
           : mode === 'signup'
-            ? 'Create Account'
-            : 'Sign In';
+            ? 'Create account'
+            : 'Log in';
 
   return (
-    <main className="login-page">
+    <main className="login-page" aria-labelledby="login-title">
       <div className="login-card">
         <div className="login-brand">
-          <LogoMark />
-          <h1>muop</h1>
+          <Link className="login-brand-link" href="/" aria-label="muop home">
+            <LogoMark />
+            <span>muop</span>
+          </Link>
+          <h1 id="login-title">{mode === 'signup' ? 'Create your account' : 'Log in to muop'}</h1>
           <p className="login-sub">
-            {mode === 'signup' ? 'Create your account to get started' : 'Welcome back. Sign in to continue'}
+            {mode === 'signup' ? 'New here? Make a little room for your people.' : 'Welcome back. Keep your people close.'}
           </p>
         </div>
 
-        <div className="login-tabs" role="tablist" aria-label="Sign in or create account">
+        <div className="login-tabs" role="group" aria-label="Log in or create account">
           <button
             type="button"
-            role="tab"
             disabled={busy !== null}
-            aria-selected={mode === 'signin'}
+            aria-pressed={mode === 'signin'}
             className={mode === 'signin' ? 'active' : ''}
-            onClick={() => {
-              setMode('signin');
-              setMsg('');
-              setIsError(false);
-            }}
+            onClick={() => selectMode('signin')}
           >
-            Sign In
+            Log in
           </button>
           <button
             type="button"
-            role="tab"
             disabled={busy !== null}
-            aria-selected={mode === 'signup'}
+            aria-pressed={mode === 'signup'}
             className={mode === 'signup' ? 'active' : ''}
-            onClick={() => {
-              setMode('signup');
-              setMsg('');
-              setIsError(false);
-            }}
+            onClick={() => selectMode('signup')}
           >
-            Create Account
+            Create account
           </button>
         </div>
 
@@ -366,6 +381,7 @@ export default function LoginPage() {
             <input
               id="login-email"
               type="email"
+              autoComplete="email"
               required
               placeholder="you@example.com"
               value={email}
@@ -380,7 +396,7 @@ export default function LoginPage() {
                   Password
                 </label>
                 <button type="button" className="forgot-link" disabled={busy !== null} onClick={forgotPassword}>
-                  {busy === 'forgot' ? 'Sending...' : 'Forgot?'}
+                  {busy === 'forgot' ? 'Sending...' : 'Forgot password?'}
                 </button>
               </div>
               <div className="field">
@@ -388,7 +404,9 @@ export default function LoginPage() {
                 <input
                   id="login-password"
                   type={showPassword ? 'text' : 'password'}
-                  placeholder="Your password"
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  required
+                  placeholder={mode === 'signup' ? 'Create a password' : 'Enter your password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
@@ -435,7 +453,7 @@ export default function LoginPage() {
         </p>
 
         {(msg || initialError) && (
-          <p className={`login-msg ${isError || initialError ? 'error' : 'info'}`}>{msg || initialError}</p>
+          <p role={isError || initialError ? 'alert' : 'status'} className={`login-msg ${isError || initialError ? 'error' : 'info'}`}>{msg || initialError}</p>
         )}
       </div>
     </main>

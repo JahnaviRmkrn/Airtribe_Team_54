@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { userClient } from '@/lib/supabase/server';
 import { LandingHeader } from './components/landing-header';
-import { ArrowDown, ArrowRight, ArrowUpRight, BrandMark, CalendarDays, Check, Heart, MessageCircle } from './components/icons';
+import { ArrowRight, ArrowUpRight, BrandMark, CalendarDays, Check, Heart, MessageCircle } from './components/icons';
 import './home.css';
 
 const people = [
@@ -32,8 +32,8 @@ export default async function Home() {
           <h1 className="serif rise-in rise-delay-1">Keep Your People Close.</h1>
           <p className="hero-description rise-in rise-delay-2">Busy Days Happen. A Little Hello Goes A Long Way.</p>
           <div className="hero-actions rise-in rise-delay-2">
-            <Link className="button-primary hero-cta" href="/login">Maintain Your Relationships Better <span className="hero-cta-arrow"><ArrowRight size={17} /></span></Link>
-            <a className="text-link" href="#why">A little more about it <ArrowDown size={15} /></a>
+            <Link className="button-primary hero-cta" href="/login">Log in to muop <span className="hero-cta-arrow"><ArrowRight size={17} /></span></Link>
+            <Link className="text-link" href="/login?mode=signup">New here? Create account <ArrowRight size={15} /></Link>
           </div>
           <p className="hero-footnote rise-in rise-delay-2"><span className="caption-line" /> One Warm Hello Can Change A Day.</p>
         </div>

@@ -19,9 +19,11 @@
   width: 100%;
   max-width: 420px;
 }
-.login-brand { text-align: center; }
-.login-brand { display: flex; flex-direction: column; align-items: center; }
+.login-brand { text-align: center; display: flex; flex-direction: column; align-items: center; }
+.login-brand-link { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font: 600 26px/1 var(--app-font-serif); letter-spacing: -.045em; margin: 0 0 24px; }
 .login-logo-icon { color: var(--ink); margin: 6px 0 10px; scale: 1.25; }
+.login-brand-link .login-logo-icon { margin: 0; scale: 1; }
+.login-card button:focus-visible, .login-card a:focus-visible { outline: 3px solid var(--teal); outline-offset: 3px; }
 .login-card h1 {
   font-family: var(--app-font-serif);
   font-size: 34px;
@@ -30,9 +32,10 @@
   letter-spacing: -0.045em;
   margin: 2px 0 8px;
 }
+.login-card #login-title { line-height: 1.1; }
 .login-sub { color: var(--soft-ink); font-size: 14px; margin: 0 0 22px; }
 
-/* Sign In / Create Account segmented control */
+/* Separate login and account-creation choices. */
 .login-tabs {
   display: flex;
   background: var(--sand);
@@ -45,6 +48,7 @@
   border: 0;
   background: transparent;
   padding: 9px 0;
+  min-height: 44px;
   font-size: 14px;
   font-weight: 600;
   color: var(--soft-ink);
@@ -63,6 +67,8 @@
   align-items: center;
   justify-content: space-between;
   margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .login-label {
   font-size: 11px;
