@@ -124,6 +124,9 @@ fieldset legend { font-family: "Newsreader", Georgia, serif; font-size: 15px; pa
 .ob-row .remove-row { margin-bottom: 4px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
 .form-grid .full { grid-column: 1 / -1; }
+/* Native millisecond date inputs must not widen the meetup editor's card. */
+#me-form .form-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+#me-form .form-grid > *, #me-form input, #me-form textarea { min-width: 0; max-width: 100%; }
 
 .state-box { padding: 28px; text-align: center; }
 .state-box p { margin: 6px 0; }
@@ -154,6 +157,7 @@ fieldset legend { font-family: "Newsreader", Georgia, serif; font-size: 15px; pa
   .ob-row { grid-template-columns: 1fr; }
   .ob-row .remove-row { margin-bottom: 0; }
   .form-grid { grid-template-columns: 1fr; }
+  #me-form .form-grid { grid-template-columns: minmax(0, 1fr); }
   .row { flex-direction: column; align-items: flex-start; }
   .meetup-row > :first-child { flex: initial; }
   .container { margin: 14px auto; }
