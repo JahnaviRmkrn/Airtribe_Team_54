@@ -6,13 +6,14 @@
 // Never prints values.
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { relative, resolve, isAbsolute } from 'node:path';
+import { relative, resolve, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import { createClient } from '@supabase/supabase-js';
 
 // Node's dotenv-compatible parser: handles `KEY = value`, quotes, `export`
-// and trailing `# comments`, so a value never silently carries junk.
+// and trailing `# comments`. Note `#` starts a comment even without a space,
+// so quote any value that contains one (A="x#y").
 const parse = (file) => (existsSync(file) ? parseEnv(readFileSync(file, 'utf8')) : {});
 
 const src = process.argv[2];
@@ -27,7 +28,8 @@ const repo = realpathSync(fileURLToPath(new URL('..', import.meta.url)));
 const rel = relative(repo, realpathSync(resolve(src)));
 const git = (...args) => spawnSync('git', ['-C', repo, ...args], { stdio: 'ignore' }).status;
 // check-ignore: 0 = ignored. ls-files --error-unmatch: 1 = untracked. Anything else blocks.
-if (!rel.startsWith('..') && !isAbsolute(rel) && !(git('check-ignore', '-q', '--no-index', rel) === 0 && git('ls-files', '--error-unmatch', rel) === 1)) {
+const outside = isAbsolute(rel) || rel === '..' || rel.startsWith('..' + sep);
+if (!outside && !(git('check-ignore', '-q', '--no-index', rel) === 0 && git('ls-files', '--error-unmatch', rel) === 1)) {
   console.error(`${src} is inside the repo but not git-ignored (or is tracked); name it secrets.env (or .env.*) or keep it outside the repo`);
   process.exit(1);
 }
