@@ -214,6 +214,8 @@ function render() {
 
 function renderMissing() {
   stopPolling();
+  locationGeneration++;
+  pendingLocation = undefined;
   $('main').innerHTML = `
     <section class="card hero">
       <p class="eyebrow">Hmm</p>
@@ -425,9 +427,11 @@ function renderPrefs() {
   const mine = view.attendees.find((a) => a.id === meId) || { guest_name: '', preferences: {}, availability: [] };
   const p = mine.preferences || {};
   prefsFor = meId;
-  const hasPrefs = !!(p.area || p.budget_max || p.budget_min || (p.food || []).length || (p.activities || []).length || (mine.availability || []).length);
+  locationGeneration++;
+  pendingLocation = undefined;
+  const hasPrefs = !!(p.area || p.budget_max != null || p.budget_min != null || (p.food || []).length || (p.activities || []).length || (mine.availability || []).length);
   $('prefs-details').open = !hasPrefs;
-  $('prefs-summary').textContent = hasPrefs ? [p.area, p.budget_max ? 'up to ₹' + p.budget_max : '', (p.food || []).join(', '), (mine.availability || []).length ? mine.availability.length + ' time slots' : ''].filter(Boolean).join(' · ') : 'Tell us your area, budget and when you are free so the shortlist fits everyone.';
+  $('prefs-summary').textContent = hasPrefs ? [p.area, p.budget_max != null ? 'up to ₹' + p.budget_max : p.budget_min != null ? 'from ₹' + p.budget_min : '', (p.food || []).join(', '), (mine.availability || []).length ? mine.availability.length + ' time slots' : ''].filter(Boolean).join(' · ') : 'Tell us your area, budget and when you are free so the shortlist fits everyone.';
   const areas = [...new Set([view.meetup.area, ...view.shortlist.map((s) => s.venue.area)].filter(Boolean))];
   $('prefs-form').innerHTML = `
     <label class="field"><span class="field-label">Your name</span>
@@ -458,18 +462,23 @@ function renderPrefs() {
     <button class="btn primary" type="submit">Save preferences</button>`;
   $('prefs-form').onsubmit = savePrefs;
   $('loc-btn').onclick = async () => {
+    const generation = ++locationGeneration;
+    const current = () => generation === locationGeneration && view?.me?.attendee_id === meId && view.meetup.status === 'open';
     $('loc-status').textContent = 'Finding you...';
     try {
       const at = await window.MeetMiddle.locate();
+      if (!current()) return;
       pendingLocation = { ...at, label: 'Shared location' };
       $('loc-status').textContent = '✓ Got it - tap Save preferences to share (others see about 1 km).';
-    } catch (err) { $('loc-status').textContent = err.message; }
+    } catch (err) { if (current()) $('loc-status').textContent = err.message; }
   };
-  if ($('loc-clear')) $('loc-clear').onclick = () => { pendingLocation = null; $('loc-status').textContent = 'Location will be removed when you save.'; };
+  if ($('loc-clear')) $('loc-clear').onclick = () => { locationGeneration++; pendingLocation = null; $('loc-status').textContent = 'Location will be removed when you save.'; };
 }
 
 // undefined = unchanged (server keeps what it has), null = stop sharing, object = new location
 let pendingLocation;
+// Ignore results from a superseded request, saved/replaced form, or cleared location.
+let locationGeneration = 0;
 
 async function savePrefs(e) {
   e.preventDefault();
