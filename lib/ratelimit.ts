@@ -22,7 +22,7 @@ export const LIMITS = {
   transcribe: { max: 10, windowSeconds: 60 }, // per signed-in user (Gemini audio)
   // Per client IP across ALL rooms / tokens: random-token probing and signup-farmed accounts
   // can't dodge the per-token and per-user buckets by spreading out. Generous for shared NATs.
-  roomIp: { max: 300, windowSeconds: 60 },
+  roomIp: { max: 1200, windowSeconds: 60 },
   llmIp: { max: 300, windowSeconds: 600 },
 } satisfies Record<string, Limit>;
 export type Preset = keyof typeof LIMITS;
