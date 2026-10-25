@@ -44,7 +44,13 @@ describe('guest checkout controls', () => {
     await b.run('updatePayment(false)');
     expect(b.$('payment-status').textContent).toContain(status);
     expect(b.location.assign).not.toHaveBeenCalled();
-    expect(b.$('pay-btn').disabled).toBe(status === 'paid');
+    expect(b.$('pay-btn').disabled).toBe(true);
+    expect(b.$('payment-check').disabled).toBe(false);
+    if (status !== 'paid') {
+      expect(b.$('payment-status').textContent).toContain('needs reconciliation');
+      await b.run('updatePayment(true)');
+      expect(b.api).toHaveBeenCalledTimes(1);
+    }
   });
   it('disables new checkout for a closed room', () => {
     const b = boot(); b.run("view.meetup.status='closed'; renderPayment()");
