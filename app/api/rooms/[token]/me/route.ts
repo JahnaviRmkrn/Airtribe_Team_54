@@ -1,5 +1,5 @@
 import { guestUpdate } from '@/lib/schemas';
-import { handle, ok, parseBody } from '@/lib/http';
+import { handle, HttpError, ok, parseBody } from '@/lib/http';
 import { getRoom, requireGuest, requireOpen, roomView, roomWriteError } from '@/lib/room';
 import { adminClient } from '@/lib/supabase/admin';
 import { LIMITS, limitRoom, rateLimit } from '@/lib/ratelimit';
@@ -33,7 +33,10 @@ export const PATCH = handle(async (req: Request, { params }: Ctx) => {
   if (body.preferences) {
     const prefs: Record<string, unknown> = { ...body.preferences };
     if (prefs.location === undefined) {
-      const { data: cur } = await adminClient().from('meetup_attendees').select('preferences').eq('id', me.id).single();
+      const { data: cur, error } = await adminClient().from('meetup_attendees').select('preferences').eq('id', me.id).eq('meetup_id', room.id).single();
+      // An unavailable read is not proof that this guest stopped sharing.
+      // Do not replace their preferences unless the retained value is known.
+      if (error || !cur) throw new HttpError(503, 'Could not load your preferences, please retry');
       const kept = (cur?.preferences as Record<string, unknown> | null)?.location;
       if (kept) prefs.location = kept;
     } else if (prefs.location === null) {
