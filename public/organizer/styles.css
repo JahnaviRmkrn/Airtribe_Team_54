@@ -416,3 +416,15 @@ a.button:hover { border-color: #75e4de; }
 .qr-slot { padding: 4px 0 14px; }
 .qr-box { width: 200px; max-width: 70vw; background: #fff; border: 1px solid #f3ecdc; border-radius: 12px; padding: 8px; }
 .qr-box svg { display: block; width: 100%; height: auto; }
+
+/* --- linked messaging (WhatsApp / SMS) ------------------------------------- */
+.notice-box { margin: 10px 0; padding: 12px 14px; border-radius: 12px; background: rgba(246, 172, 13, 0.12); border: 1px solid #ecd9a8; font-size: 14px; }
+.notice-box p { margin: 0 0 6px; }
+.notice-box ul { margin: 0; padding-left: 20px; }
+.check { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0; font-size: 14px; }
+.check input { width: auto; margin-top: 3px; }
+.pair-code { font: 600 32px/1.2 "Inter", monospace; letter-spacing: 0.18em; text-align: center; margin: 14px 0; }
+#wa-qr { max-width: 260px; margin: 8px auto; }
+.send-picker select { max-width: 100%; }
+.send-status { font-size: 13px; }
+.status-open { background: rgba(63, 174, 156, 0.18); }

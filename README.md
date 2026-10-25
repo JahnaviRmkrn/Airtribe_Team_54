@@ -82,6 +82,28 @@ Ported from Arindom Chetia's PR #3 (FastAPI `routers/voice.py`, `static/voice.*`
 Contact fields: `name, category, interests[], notes, preferred_frequency_days,
 last_interaction_at, next_followup_at` (ISO timestamps with offset).
 
+## Linked WhatsApp and SMS (opt-in)
+
+Organisers can link their own WhatsApp (unofficial linked-device method, ban risk,
+explicit warning in the UI) and/or an Android phone's SMS (SMS Gateway for Android)
+to send check-ins and invites as themselves. Setup, env vars and the systemd unit:
+[services/whatsapp/README.md](services/whatsapp/README.md). Without linking, the app
+keeps its `wa.me`, `sms:` and `mailto:` hand-off links.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| POST | `/api/me/whatsapp/link` | `{ accept: true, phone? }` | starts a session; `phone` asks for a pairing code instead of a QR |
+| GET | `/api/me/whatsapp/status` | | `state`: unlinked, connecting, waiting_qr, connected, logged_out, error; `qr` string while waiting_qr |
+| POST | `/api/me/whatsapp/unlink` | | logs the device out and deletes the stored session |
+| GET | `/api/me/whatsapp/contacts` | `?q=&offset=&limit=` | import preview (contacts + groups) |
+| POST | `/api/me/whatsapp/import` | `{ jids: [...], category? }` | max 200; `source='whatsapp'`, `source_ref`=JID |
+| POST | `/api/me/send` | `{ contact_id \| jid, text, channel? }` | best linked channel (WhatsApp, else SMS); 20/hour/user; own contacts and groups only |
+| POST | `/api/me/whatsapp/send` | same | WhatsApp only |
+| GET | `/api/me/channels` | | `{ whatsapp: {linked}, sms: {linked, mode} }` |
+| POST | `/api/me/sms/link` | `{ accept: true, mode: 'cloud'\|'local', url?, username, password }` | credentials are write-only |
+| POST | `/api/me/sms/test` | `{ to }` | fixed text, 3/hour |
+| POST | `/api/me/sms/unlink` | | deletes the credentials |
+
 ## Public room API (no account; scoped to the room token)
 
 | Method | Path | Body | Who |

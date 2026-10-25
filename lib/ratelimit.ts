@@ -20,6 +20,13 @@ export const LIMITS = {
   voice: { max: 50, windowSeconds: 600 }, // per signed-in user (Gemini Live / transcribe sessions; demo-friendly)
   draft: { max: 20, windowSeconds: 60 }, // per signed-in user (LLM spend)
   transcribe: { max: 10, windowSeconds: 60 }, // per signed-in user (Gemini audio)
+  // Linked messaging (WhatsApp / SMS), all per signed-in user.
+  send: { max: 20, windowSeconds: 3600 }, // messages sent as the organiser, across both channels
+  waLink: { max: 5, windowSeconds: 600 }, // starting WhatsApp link sessions
+  waStatus: { max: 120, windowSeconds: 60 }, // QR polling
+  waImport: { max: 10, windowSeconds: 60 }, // contact preview + import
+  smsLink: { max: 10, windowSeconds: 600 }, // saving / replacing gateway credentials
+  smsTest: { max: 3, windowSeconds: 3600 }, // test SMS to a number the organiser types
 } satisfies Record<string, Limit>;
 export type Preset = keyof typeof LIMITS;
 

@@ -75,9 +75,12 @@ function checkInEmail(c) {
   const about = (c.interests || []).length ? ` How's the ${c.interests[0]} going?` : '';
   return mailtoHref(c.email, 'Catching up', `Hi ${first},\n\nIt's been a while - I was just thinking of you.${about} Free for a coffee or a call this week?\n\nCheers`);
 }
-function meetupInviteEmail(m, url) {
+function meetupInviteText(m, url) {
   const when = m.starts_at ? ' on ' + fmtDate(m.starts_at) : '';
-  return mailtoHref('', `Join me: ${m.title}`, `Hi!\n\nI'm planning "${m.title}"${when}${m.area ? ' around ' + m.area : ''}. Pick a venue and tell us when you're free here:\n${url}\n\nNo sign-up needed. See you there!`);
+  return `Hi!\n\nI'm planning "${m.title}"${when}${m.area ? ' around ' + m.area : ''}. Pick a venue and tell us when you're free here:\n${url}\n\nNo sign-up needed. See you there!`;
+}
+function meetupInviteEmail(m, url) {
+  return mailtoHref('', `Join me: ${m.title}`, meetupInviteText(m, url));
 }
 
 // Each navigation bumps navGen; a view that finishes loading after the user
@@ -126,6 +129,7 @@ function route() {
     '#/onboarding': () => onboardingView(),
     '#/welcome': welcomeView,
     '#/profile': profileView,
+    '#/messaging': () => Messaging.view(),
   };
   (views[hash] || dashboardView)();
 }
@@ -232,11 +236,20 @@ function draftPanel(container, contactId, name) {
           <button class="primary draft-copy">Copy</button>
           <a class="button-link draft-wa" target="_blank" rel="noopener">Open in WhatsApp</a>
           <button class="draft-again">Try another</button>
-        </div>`;
+        </div>
+        <div class="actions send-slot"></div>`;
       const text = box.querySelector('.draft-text');
       const wa = box.querySelector('.draft-wa');
-      const syncWa = () => { wa.href = 'https://wa.me/?text=' + encodeURIComponent(text.value); };
+      let phone = '';
+      const syncWa = () => { wa.href = Messaging.waHref(phone, text.value); };
       syncWa();
+      // Linked WhatsApp / SMS: send as yourself. Needs the contact's phone / WhatsApp id.
+      api('/api/me/contacts/' + encodeURIComponent(contactId)).then((rc) => {
+        const c = rc.contact || rc;
+        if (c.phone) { phone = c.phone; syncWa(); }
+        const slot = box.querySelector('.send-slot');
+        if (slot) Messaging.mountSend(slot, c, () => text.value);
+      }).catch(() => {});
       text.oninput = syncWa;
       box.querySelector('.draft-copy').onclick = (e) => copyText(text.value, e.currentTarget, 'Copy');
       box.querySelector('.draft-again').onclick = load;
@@ -933,6 +946,7 @@ function createdCard(r) {
       <div class="quick-actions">
         <button class="primary" id="copy-room">Copy link</button>
         ${r.invite_text ? '<button id="copy-invite">Copy invite text</button>' : ''}
+        ${r.invite_text ? `<button id="send-invite" data-invite="${esc(r.invite_text)}">Send invite</button>` : ''}
         <a href="${esc(url)}" target="_blank" rel="noopener"><button type="button">Open room</button></a>
       </div>` : ''}
       ${r.invite_text ? `<div class="invite-box">${esc(r.invite_text)}</div>` : ''}
@@ -955,6 +969,7 @@ function meetupRow(m) {
         ${url ? `<button data-copy="${esc(url)}">Copy link</button>` : ''}
         ${url && !closed ? `<button data-qr="${esc(url)}">QR code</button>` : ''}
         ${url && !closed ? `<a class="button" href="${esc(meetupInviteEmail(m, url))}">Email invite</a>` : ''}
+        ${url && !closed ? `<button data-invite="${esc(meetupInviteText(m, url))}">Send invite</button>` : ''}
         ${!closed ? `<button class="danger" data-close="${esc(m.id)}">Close</button>` : ''}
       </div>
     </div>`;
@@ -963,6 +978,7 @@ function meetupRow(m) {
 function wireMeetupRows() {
   document.querySelectorAll('[data-copy]').forEach((b) => { b.onclick = () => copyText(b.dataset.copy, b, 'Copy link'); });
   document.querySelectorAll('[data-qr]').forEach((b) => { b.onclick = () => toggleQr(b); });
+  document.querySelectorAll('[data-invite]').forEach((b) => { b.onclick = () => Messaging.invitePicker(b, b.dataset.invite); });
   document.querySelectorAll('[data-close]').forEach((b) => {
     b.onclick = async () => {
       if (!confirm('Close this meetup? Guests will no longer be able to vote.')) return;
@@ -1361,6 +1377,11 @@ async function profileView() {
       </div>
     </section>
     <section class="card">
+      <h2>Messaging</h2>
+      <p class="muted">Link your own WhatsApp or your Android phone's SMS to send check-ins and invites as yourself, and import people from WhatsApp. Optional.</p>
+      <div class="quick-actions"><button id="me-messaging">Set up messaging</button></div>
+    </section>
+    <section class="card">
       <h2>Activity log</h2>
       <p class="muted">Everything you have logged, newest first.</p>
       ${interactions.length ? `<ol class="timeline me-log">${interactions.map((i) => `
@@ -1373,6 +1394,7 @@ async function profileView() {
       : '<p class="muted">Nothing logged yet. Log a check-in from a contact page or the dashboard.</p>'}
     </section>`;
 
+  el('me-messaging').onclick = () => go('#/messaging');
   el('me-edit-goals').onclick = () => { el('me-goals-form').classList.remove('hidden'); el('me-edit-goals').classList.add('hidden'); };
   el('me-goals-cancel').onclick = () => { el('me-goals-form').classList.add('hidden'); el('me-edit-goals').classList.remove('hidden'); };
   const inputs = [...document.querySelectorAll('.me-goal-input')];

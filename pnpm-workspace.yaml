@@ -1,3 +1,13 @@
+packages:
+  - services/*
 allowBuilds:
   # eslint-config-next's native resolver; its install script fetches the platform binary
+  '@whiskeysockets/baileys': false
+  protobufjs: false
   unrs-resolver: true
+# Baileys depends on libsignal via a git URL (no npm release). pnpm 11 blocks
+# exotic subdeps by default; allow it, but pin the exact commit (v6.0.0) so
+# the install can't float to a newer upstream HEAD.
+blockExoticSubdeps: false
+overrides:
+  libsignal: git+https://github.com/whiskeysockets/libsignal-node.git#bcea72df9ec34d9d9140ab30619cf479c7c144c7

@@ -1,0 +1,16 @@
+{
+  "name": "muop-whatsapp-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Loopback-only service that holds each organiser's linked WhatsApp (Baileys) sessions for muop.",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.24",
+    "pino": "9.9.5"
+  },
+  "engines": { "node": ">=20" }
+}
