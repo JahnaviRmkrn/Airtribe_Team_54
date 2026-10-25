@@ -12,10 +12,12 @@ export default function PaymentPanel({ callApi, closed, price }: {
   const [busy, setBusy] = useState(false);
   const [availability, setAvailability] = useState('unavailable');
   const [startUncertain, setStartUncertain] = useState(false);
-  const checkoutBlocked = availability !== 'ready' || startUncertain || (!!payment && (payment.checkout_state === 'creating' || payment.checkout_state === 'reconciliation_required' || (payment.status === 'pending' && !payment.redirect_url)));
+  const checkoutBlocked = availability !== 'ready' || startUncertain || (!!payment && (payment.status === 'failed' || payment.status === 'cancelled' || payment.checkout_state === 'creating' || payment.checkout_state === 'reconciliation_required' || (payment.status === 'pending' && !payment.redirect_url)));
   const recoveryMessage = availability === 'setup_required'
     ? 'Checkout is unavailable until the operator completes the payment safety upgrade. You can still check an existing payment status.'
     : availability !== 'ready' ? 'Check payment status before paying. Checkout is unavailable until that check succeeds.'
+    : payment?.status === 'failed' || payment?.status === 'cancelled'
+    ? 'This payment attempt needs reconciliation. Do not pay again. Check payment status or ask the organiser to reconcile it before starting another payment.'
     : payment?.checkout_state === 'creating'
     ? 'Payment is being created. Check payment status; do not start another checkout.'
     : checkoutBlocked ? 'Payment creation needs checking. Do not pay again. Check payment status or ask the organiser to reconcile it.' : '';

@@ -79,7 +79,7 @@ describe('payment attempts with real PostgreSQL receipts and authorization', () 
     expect(deps.createOrder).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['failed', 'cancelled'])('fences an old-version %s retry before provider invocation, but permits a fresh-reference retry', async status => {
+  it.each(['failed', 'cancelled'])('fences an old-version %s retry and holds the new route on the same order', async status => {
     expect((await invoke(POST)).status).toBe(201);
     const original = (await service('select * from meetup_payments')).rows[0];
     deps.getOrderStatus.mockResolvedValueOnce(status);
@@ -98,24 +98,31 @@ describe('payment attempts with real PostgreSQL receipts and authorization', () 
     expect((await service('select * from meetup_payments')).rows[0]).toMatchObject({
       status, pine_order_id: original.pine_order_id, merchant_order_reference: original.merchant_order_reference,
     });
-    expect((await invoke(POST)).status).toBe(201);
-    const replacement = (await service('select * from meetup_payments')).rows[0];
-    expect(replacement.merchant_order_reference).toMatch(/^[a-f0-9]{32}$/);
-    expect(replacement.merchant_order_reference).not.toBe(original.merchant_order_reference);
-    expect(replacement.pine_order_id).not.toBe(original.pine_order_id);
-    expect((await service('select * from meetup_payment_attempts')).rows).toHaveLength(2);
-    expect(deps.createOrder).toHaveBeenCalledTimes(2);
+    deps.getOrderStatus.mockResolvedValue(status);
+    const retries = await Promise.all([invoke(POST), invoke(POST), invoke(POST)]);
+    expect(retries.map(response => response.status)).toEqual([409, 409, 409]);
+    expect((await service('select * from meetup_payments')).rows[0]).toMatchObject({
+      status, pine_order_id: original.pine_order_id, merchant_order_reference: original.merchant_order_reference,
+    });
+    expect((await service('select * from meetup_payment_attempts')).rows).toHaveLength(1);
+    expect(deps.createOrder).toHaveBeenCalledTimes(1);
+    // Hypothetical provider change, not a claim that this happens in production.
+    deps.getOrderStatus.mockResolvedValue('paid');
+    expect((await (await invoke()).json()).payment.status).toBe('paid');
+    expect((await invoke(POST)).status).toBe(200);
+    expect(deps.createOrder).toHaveBeenCalledTimes(1);
   });
 
   it('rejects missing, blank and previously used references for terminal retries', async () => {
     expect((await invoke(POST)).status).toBe(201);
     const first = (await service('select * from meetup_payments')).rows[0];
-    deps.getOrderStatus.mockResolvedValueOnce('failed');
-    expect((await invoke(POST)).status).toBe(201);
+    const earlierRef = 'synthetic-earlier-terminal-reference';
+    await service(`insert into meetup_payment_attempts (merchant_order_reference, payment_id, amount_paise,
+      state, pine_order_id, redirect_url) values ($1, $2, 50000, 'received', 'synthetic-earlier-order', 'https://pay.example/earlier')`, [earlierRef, first.id]);
     deps.getOrderStatus.mockResolvedValueOnce('cancelled');
     expect((await invoke()).status).toBe(200);
     const current = (await service('select * from meetup_payments')).rows[0];
-    for (const reference of [null, '', '   ', first.merchant_order_reference, current.merchant_order_reference]) {
+    for (const reference of [null, '', '   ', earlierRef, current.merchant_order_reference]) {
       await expect(service(`update meetup_payments set status = 'pending', pine_order_id = null,
         redirect_url = null, merchant_order_reference = $1 where id = $2`, [reference, current.id]))
         .rejects.toThrow('payment_retry_requires_fresh_reference');
@@ -125,8 +132,9 @@ describe('payment attempts with real PostgreSQL receipts and authorization', () 
     await service('update meetup_payments set merchant_order_reference = null where id = $1', [current.id]);
     await expect(service("update meetup_payments set status = 'pending', pine_order_id = null, redirect_url = null where id = $1", [current.id]))
       .rejects.toThrow('payment_retry_requires_fresh_reference');
-    expect((await invoke(POST)).status).toBe(201);
-    expect(deps.createOrder).toHaveBeenCalledTimes(3);
+    deps.getOrderStatus.mockResolvedValue('cancelled');
+    expect((await invoke(POST)).status).toBe(409);
+    expect(deps.createOrder).toHaveBeenCalledTimes(1);
   });
 
   it('never frees an uncertain create, even after arbitrary elapsed time or a price change', async () => {

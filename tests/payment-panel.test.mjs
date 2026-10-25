@@ -59,6 +59,19 @@ describe('React payment reconciliation controls', () => {
     expect(panel.location.assign).not.toHaveBeenCalled();
   });
 
+  it.each(['failed', 'cancelled'])('blocks a %s retry even from a mixed-version ready response', async status => {
+    const api = vi.fn().mockResolvedValue({ checkout_availability: 'ready', payment: { ...ready, status, redirect_url: null } });
+    const { panel } = await loaded(api);
+    expect(panel.render().pay.disabled).toBe(true);
+    expect(panel.render().status).toContain('needs reconciliation');
+    expect(panel.render().status).toContain('Do not pay again');
+    await panel.render().pay.onClick();
+    expect(api).toHaveBeenCalledTimes(1);
+    await panel.render().check.onClick();
+    expect(api).toHaveBeenCalledTimes(2);
+    expect(panel.location.assign).not.toHaveBeenCalled();
+  });
+
   it('requires status reconciliation after a lost POST response without automatically redirecting', async () => {
     const api = vi.fn().mockResolvedValueOnce({ checkout_availability: 'ready', payment: null }).mockRejectedValueOnce(new Error('Synthetic response loss'));
     const { panel } = await loaded(api);

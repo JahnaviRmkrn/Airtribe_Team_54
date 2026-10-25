@@ -16,7 +16,7 @@ Do not run this checklist without explicit authorization for the intended system
   is not established. Missing receipt persistence still blocks provider creation
   if the schema changes after the probe. There is no unsafe creation fallback.
 - GET may read only the original payment columns when setup is missing. For an
-  existing pending payment with a known provider order ID it may read provider
+  existing unpaid payment with a known provider order ID it may read provider
   status, but does not save that result to the database. Already-paid rows are
   displayed without provider access. No receipt recovery, claim changes, or
   checkout links are returned in this mode. Unknown/no-ID rows remain blocked.
@@ -83,3 +83,44 @@ The boolean probe verifies required columns, RLS and enabled named guards. It is
 not a full database integrity attestation and does not detect an administrator
 rewriting a trigger function's body after rollout. Privileged DDL must remain
 controlled and reviewed. Its response does not prove provider availability.
+
+## Retained-order retry policy (2026-10-25)
+
+The application no longer creates a replacement order after a known order is
+reported as `failed` or `cancelled`. It keeps the same provider ID, merchant
+reference, amount and receipt; both clients disable Pay and explain that the
+attempt needs reconciliation. Manual status checks re-read that same order,
+including after a failed/cancelled observation. A later paid result remains
+attributable to the retained order. Paid rows are sticky and are not repolled.
+A pending result can only continue the original checkout at the original amount,
+never create a second order. Returning from checkout does not confirm payment.
+
+This is an intentional availability restriction, not evidence of a Pine Labs
+incident or proof that its terminal statuses can change. Public sources reviewed:
+
+- [Order lifecycle](https://www.pinelabs.com/docs/online-payments/payment-lifecycle/orders):
+  the non-preauthorization diagram draws FAILED and CANCELLED as endpoints, and
+  the status table permits retry from ATTEMPTED. The reviewed text does not
+  explicitly guarantee immutable terminal orders. Our local `cancelled` label
+  also combines CANCELLED and FULLY_REFUNDED, so neither authorizes replacement.
+- [Payment lifecycle](https://www.pinelabs.com/docs/online-payments/payment-lifecycle/payments):
+  late-authorization handling concerns payment attempts and reversals. It is not
+  proof that an order previously reported FAILED can or cannot later be paid.
+
+No automatic cancellation, refund, receipt deletion, claim reset, timer-based
+release or provider replay was added. Re-enabling replacement orders requires
+an authoritative provider contract and a reviewed reconciliation design, not
+simply changing a local status or clearing an ID. Operators must preserve the
+ledger and reconcile the actual financial outcome through approved tooling.
+
+This policy requires every payment-serving instance to run this release. The
+existing SQL guards still permit a correctly fenced fresh-reference terminal
+retry; they do not enforce the stronger route policy against an older binary.
+Do not mix old and new payment writers or roll back while accepting checkout.
+No new migration is required or was applied by this change.
+
+Regression tests exercise retained failed/cancelled orders, concurrent retries,
+a hypothetical late paid result, stale status-write races, same-order pending
+continuation, old-schema read-only status and both clients' disabled controls.
+The provider boundary is synthetic; PGlite serializes database transactions and
+is not a real multi-connection isolation or live-payment guarantee.

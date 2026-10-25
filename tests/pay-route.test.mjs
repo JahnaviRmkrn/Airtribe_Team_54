@@ -247,17 +247,80 @@ describe('payment creation claim fencing', () => {
     expect(deps.createOrder).not.toHaveBeenCalled();
   });
 
-  it.each(['failed', 'cancelled'])('permits a fresh attempt only after provider-confirmed %s', async status => {
+  it.each(['failed', 'cancelled'])('retains a provider-confirmed %s order without a fresh attempt', async status => {
     deps.createOrder.mockResolvedValueOnce(order('A')).mockResolvedValueOnce(order('B'));
     expect((await post()).status).toBe(201);
     const firstRef = payment.merchant_order_reference;
-    deps.getOrderStatus.mockResolvedValueOnce(status);
-    expect((await post()).status).toBe(201);
-    expect(payment.pine_order_id).toBe('B');
-    expect(payment.merchant_order_reference).not.toBe(firstRef);
+    deps.getOrderStatus.mockResolvedValue(status);
+    for (let i = 0; i < 3; i++) {
+      const response = await post();
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toContain('Do not pay again');
+    }
+    const body = await (await get()).json();
+    expect(body.payment).toMatchObject({ status, redirect_url: null, checkout_state: 'reconciliation_required' });
+    expect(payment.pine_order_id).toBe('A');
+    expect(payment.merchant_order_reference).toBe(firstRef);
     expect(receipts.get(firstRef).pine_order_id).toBe('A');
-    expect(receipts.size).toBe(2);
-    expect(deps.createOrder).toHaveBeenCalledTimes(2);
+    expect(receipts.size).toBe(1);
+    expect(deps.createOrder).toHaveBeenCalledTimes(1);
+    expect(deps.cancelOrder).not.toHaveBeenCalled();
+  });
+
+  it.each(['failed', 'cancelled'])('tracks a hypothetical late success of the retained %s order', async status => {
+    deps.createOrder.mockResolvedValue(order('A'));
+    expect((await post()).status).toBe(201);
+    deps.getOrderStatus.mockResolvedValue(status);
+    expect((await post()).status).toBe(409);
+    deps.getOrderStatus.mockResolvedValue('paid');
+    expect((await (await get()).json()).payment.status).toBe('paid');
+    expect((await post()).status).toBe(200);
+    expect(payment.pine_order_id).toBe('A');
+    expect(receipts.size).toBe(1);
+    expect(deps.createOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['failed', 'cancelled'])('resumes only the original order if %s later reads as pending', async status => {
+    deps.createOrder.mockResolvedValue(order('A'));
+    expect((await post()).status).toBe(201);
+    deps.getOrderStatus.mockResolvedValue(status);
+    expect((await post()).status).toBe(409);
+    deps.getOrderStatus.mockResolvedValue('pending');
+    const response = await post();
+    expect(response.status).toBe(200);
+    expect((await response.json()).payment.redirect_url).toBe(order('A').redirectUrl);
+    expect(deps.createOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not create or cancel an order when a retained-order status check fails', async () => {
+    deps.createOrder.mockResolvedValue(order('A'));
+    expect((await post()).status).toBe(201);
+    deps.getOrderStatus.mockResolvedValue('failed');
+    expect((await post()).status).toBe(409);
+    const original = { ...payment };
+    deps.getOrderStatus.mockRejectedValue(new Error('Synthetic provider read loss'));
+    expect((await post()).status).toBeGreaterThanOrEqual(500);
+    expect(payment).toEqual(original);
+    expect(deps.createOrder).toHaveBeenCalledTimes(1);
+    expect(deps.cancelOrder).not.toHaveBeenCalled();
+  });
+
+  it('cannot replace or downgrade an order when stale retry and paid status reads race', async () => {
+    deps.createOrder.mockResolvedValue(order('A'));
+    expect((await post()).status).toBe(201);
+    const originalRef = payment.merchant_order_reference;
+    const readStarted = deferred(), staleRead = deferred();
+    deps.getOrderStatus.mockImplementationOnce(() => { readStarted.resolve(); return staleRead.promise; });
+    const retry = post();
+    await readStarted.promise;
+    deps.getOrderStatus.mockResolvedValue('paid');
+    expect((await (await get()).json()).payment.status).toBe('paid');
+    staleRead.resolve('failed');
+    expect((await retry).status).toBe(409);
+    expect(payment).toMatchObject({ status: 'paid', pine_order_id: 'A', merchant_order_reference: originalRef });
+    expect(receipts.size).toBe(1);
+    expect(deps.createOrder).toHaveBeenCalledTimes(1);
+    expect(deps.cancelOrder).not.toHaveBeenCalled();
   });
 
   it('never re-creates after provider-confirmed payment', async () => {
@@ -321,7 +384,7 @@ describe('payment schema rollout readiness', () => {
     expect(deps.createOrder).not.toHaveBeenCalled();
     expect(deps.getOrderStatus).not.toHaveBeenCalled();
   });
-  it.each(['pending', 'paid'])('keeps legacy %s status available with no schema/provider writes or checkout links', async status => {
+  it.each(['pending', 'failed', 'cancelled', 'paid'])('keeps legacy %s status available with no schema/provider writes or checkout links', async status => {
     missingReference = true;
     payment = oldPayment(status);
     const original = { ...payment };
@@ -335,7 +398,7 @@ describe('payment schema rollout readiness', () => {
     });
     expect(payment).toEqual(original);
     expect(writes).toEqual([]);
-    expect(deps.getOrderStatus).toHaveBeenCalledTimes(status === 'pending' ? 1 : 0);
+    expect(deps.getOrderStatus).toHaveBeenCalledTimes(status === 'paid' ? 0 : 1);
     expect(deps.createOrder).not.toHaveBeenCalled();
   });
   it('detects a missing reference column even after a stale successful probe and reads legacy status only', async () => {

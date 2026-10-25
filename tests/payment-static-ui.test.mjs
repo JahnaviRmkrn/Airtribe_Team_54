@@ -16,6 +16,20 @@ function room(api) {
   return { location, nodes, run: script => vm.runInContext(script, context) };
 }
 describe('static room checkout availability', () => {
+  it.each(['failed', 'cancelled'])('blocks a %s retry even from a mixed-version ready response', async status => {
+    const api = vi.fn().mockResolvedValue({ ...ready, payment: { ...ready.payment, status, redirect_url: null } });
+    const ui = room(api);
+    await ui.run('updatePayment(false)');
+    expect(ui.nodes.get('pay-btn').disabled).toBe(true);
+    expect(ui.nodes.get('payment-status').textContent).toContain('needs reconciliation');
+    expect(ui.nodes.get('payment-status').textContent).toContain('Do not pay again');
+    await ui.run('updatePayment(true)');
+    expect(api).toHaveBeenCalledTimes(1);
+    await ui.run('updatePayment(false)');
+    expect(api).toHaveBeenCalledTimes(2);
+    expect(ui.location.assign).not.toHaveBeenCalled();
+  });
+
   it('disables setup-required checkout, displays paid status and allows only manual checks', async () => {
     const api = vi.fn().mockResolvedValue({ checkout_availability: 'setup_required', payment: { ...ready.payment, status: 'paid', redirect_url: null } });
     const ui = room(api);

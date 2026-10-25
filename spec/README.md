@@ -1,11 +1,13 @@
 # TLA+ models
 
-Two models of the concurrent parts of the app. TLC checks every interleaving
+Two models of the concurrent parts of the app at the PR #41 snapshot. TLC checks every interleaving
 within small bounds. They check the design, not the TypeScript itself.
 `scripts/smoke.mjs` checks that the running code behaves the way the room model
-assumes. Nothing checks the running checkout against the payment model:
-`smoke.mjs` never calls the pay route, and `lib/pay-route.test.ts` covers single
-requests, not the concurrent interleavings the model explores.
+assumes. The original `smoke.mjs` does not call checkout. Additional actual-handler
+regressions now exist in `tests/pay-route.test.mjs` and
+`tests/payment-attempts-sql.test.mjs`, including deterministic overlapping
+requests and PostgreSQL receipt/authorization checks. These bounded synthetic
+checks are not an exhaustive refinement proof or live-provider validation.
 
 ```bash
 # needs Java 11+ and tla2tools.jar (github.com/tlaplus/tlaplus/releases)
@@ -41,6 +43,14 @@ Temporal properties: a confirmed venue never changes, a closed room never reopen
 
 ## Guest checkout (`MeetupPayment.tla`)
 
+**Historical model boundary, 2026-10-25:** the results below describe the PR #41
+fresh-order retry policy, not the current route. The route now holds a known
+failed/cancelled order for reconciliation and keeps polling that same order on
+manual status checks. It never automatically replaces it. See
+[the retained-order policy](../docs/payment-safety-rollout.md#retained-order-retry-policy-2026-10-25).
+The model and its recorded counts have not been rerun or revised to claim
+verification of this stronger policy.
+
 One guest's payment row, attempt receipts and provider orders
 (`app/api/rooms/[token]/pay/route.ts` and the payment migrations). Several POSTs
 for the same guest run at once, statement by statement, and any of them can stop
@@ -71,7 +81,7 @@ Vacuity checks: `NeverPaid`, `NeverRetried` and `NeverRecoverable` are each
 violated when used as the only invariant, so payment, retry with a fresh
 reference, and receipt recovery are all reachable.
 
-**Assumption to confirm with Pine Labs.** The retry path (a new order after the
+**Assumption in this historical model.** The former retry path (a new order after the
 row is `failed`) is only safe if an order whose status is `FAILED` can never be
 paid later. Otherwise the guest can pay the old checkout link and the new one
 (shortest trace: order 1 fails, the row syncs to failed, the retry creates order
