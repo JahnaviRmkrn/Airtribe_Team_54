@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { APP_CSP, NEXT_CSP } from "./lib/csp";
 
 const nextConfig: NextConfig = {
   // Guest meetup room: /m/<token> serves the static page in public/room/,
@@ -24,6 +25,24 @@ const nextConfig: NextConfig = {
       // Browsers (and the desktop shell) remember to use HTTPS only, so a
       // hostile network can't serve the app over plain http. Ignored on http.
       { source: "/:path*", headers: [{ key: "Strict-Transport-Security", value: "max-age=15552000" }] },
+      // Strict CSP for the static apps (built from user data), Next's for the rest.
+      // The two sources never overlap, so each path gets exactly one policy.
+      ...["/organizer", "/organizer/:path*", "/room/:path*", "/m/:path*"].map((source) => ({
+        source,
+        headers: [
+          { key: "Content-Security-Policy", value: APP_CSP },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      })),
+      {
+        source: "/((?!organizer(?:/|$)|room/|m/).*)",
+        headers: [
+          { key: "Content-Security-Policy", value: NEXT_CSP },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
     ];
   },
 };
