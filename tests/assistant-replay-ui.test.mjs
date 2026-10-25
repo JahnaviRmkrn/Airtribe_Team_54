@@ -3,14 +3,14 @@ import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 const source = readFileSync(new URL('../public/organizer/live.js', import.meta.url), 'utf8');
 function fixture() {
-  let socket;
-  class Socket { static OPEN = 1; constructor() { socket = this; this.readyState = 1; this.send = vi.fn(); this.close = vi.fn(); } }
+  const sockets = [];
+  class Socket { static OPEN = 1; constructor() { sockets.push(this); this.readyState = 1; this.send = vi.fn(); this.close = vi.fn(); } }
   class AudioContext { audioWorklet = { addModule: async () => {} }; close = async () => {}; createMediaStreamSource() { return { connect() {} }; } }
   const window = {};
   vm.runInNewContext(source, { window, document: { readyState: 'complete' }, navigator: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } }, location: { origin: 'https://example.test' }, URL, AbortController, AudioContext, AudioWorkletNode: class { port = {}; }, WebSocket: Socket,
     fetch: async () => ({ ok: true, json: async () => ({ token: 'synthetic', model: 'synthetic', voice: 'synthetic' }) }),
   });
-  return { start: window.LiveVoice.start, packet: (call) => socket.onmessage({ data: JSON.stringify({ toolCall: { functionCalls: [call] } }) }), responses: () => socket.send.mock.calls.map(([raw]) => JSON.parse(raw)).filter((r) => r.toolResponse).flatMap((r) => r.toolResponse.functionResponses) };
+  return { start: window.LiveVoice.start, packet: (call) => sockets[0].onmessage({ data: JSON.stringify({ toolCall: { functionCalls: [call] } }) }), responses: () => sockets[0].send.mock.calls.map(([raw]) => JSON.parse(raw)).filter((r) => r.toolResponse).flatMap((r) => r.toolResponse.functionResponses) };
 }
 const original = { id: 'same-id', name: 'create_meetup', args: { title: 'Synthetic brunch', area: 'Central' } };
 describe('Gemini Live replay identity', () => {
