@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 // Exercise the shipped browser script without starting its automatic boot request.
@@ -17,15 +18,18 @@ function organizer(overrides = {}) {
     },
     querySelectorAll: () => [],
   };
+  const storage = new Map();
   const context = vm.createContext({
     document,
     location: { origin: 'https://example.test', hash: '' },
-    window: {},
+    window: {}, crypto: webcrypto,
     sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
-    localStorage: { getItem: () => null, setItem() {} },
+    localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
     ...overrides,
   });
+  context.window.localStorage = context.localStorage; context.window.sessionStorage = context.sessionStorage;
   vm.runInContext(source, context);
+  vm.runInContext("contactCreateOwner = '11111111-1111-4111-8111-111111111111'; contactCreateRetryEnabled = true;", context);
   return { context, document };
 }
 
@@ -108,7 +112,6 @@ describe('onboarding retries', () => {
     let failGoals = true;
     const { context, document } = organizer({
       window: { ORGANIZER_PREFILL: { contacts: [{ name: 'Alice', category: 'personal' }] } },
-      localStorage: { setItem() {} },
       sessionStorage: { removeItem() {} },
       fetch: async (path) => {
         calls.push(path);

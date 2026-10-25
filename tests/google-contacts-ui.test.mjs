@@ -62,7 +62,7 @@ describe('Google Contacts selection UI', () => {
     const appSource = readFileSync(new URL('../public/organizer/app.js', import.meta.url), 'utf8').replace(/\nboot\(\);\s*$/, '');
     const context = vm.createContext({ window: {}, location: { hash }, localStorage: { getItem: () => null }, destination: null });
     vm.runInContext(appSource, context);
-    vm.runInContext("renderLoading = () => 0; api = async () => ({ is_empty: true }); installFlash = () => {}; route = () => {}; go = (hash) => { destination = hash; };", context);
+    vm.runInContext("renderLoading = () => 0; api = async () => ({ is_empty: true, user: { id: '11111111-1111-4111-8111-111111111111' } }); installFlash = () => {}; route = () => {}; go = (hash) => { destination = hash; };", context);
     await vm.runInContext('boot()', context);
     expect(context.destination).toBeNull();
   });

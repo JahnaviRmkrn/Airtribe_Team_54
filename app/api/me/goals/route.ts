@@ -1,5 +1,5 @@
 import { goalsPut } from '@/lib/schemas';
-import { dbError, handle, ok, parseBody, requireUser } from '@/lib/http';
+import { dbError, handle, HttpError, ok, parseBody, requireUser } from '@/lib/http';
 
 type Goals = { personal: number; professional: number; community: number };
 
@@ -17,6 +17,10 @@ export const GET = handle(async (req: Request) => {
 // PUT /api/me/goals  body: { personal, professional, community } (must total 100)
 export const PUT = handle(async (req: Request) => {
   const { supabase, user } = await requireUser(req);
+  // Onboarding saves goals before contacts. Bind this first mutation to the
+  // same displayed account, not whichever session another tab switched to.
+  const expectedOwner = req.headers.get('X-Contact-Owner');
+  if (expectedOwner !== null && expectedOwner !== user.id) throw new HttpError(409, 'Your signed-in account changed. Reload before saving.');
   const g = await parseBody(req, goalsPut);
   const rows = (Object.keys(g) as (keyof Goals)[]).map((category) => ({
     user_id: user.id,

@@ -267,3 +267,8 @@ See [setup, scopes, replay protection and verification limits](docs/google-actio
 ### Checkout recovery
 
 Checkout creation safety, required receipt migration, recovery limits, and offline fault-injection coverage are documented in [Pine Labs readiness](docs/readiness/pine-labs-status.md#creation-uncertainty-and-receipt-recovery-2026-10-25).
+
+Optional manual-contact retry protection uses owner-scoped idempotency keys. It
+stays off until the reviewed migration and readiness-checked operator setting are
+enabled; existing manual contact entry remains available. See
+[retry guarantees, migration rollout, and storage limits](docs/contact-create-retries.md).

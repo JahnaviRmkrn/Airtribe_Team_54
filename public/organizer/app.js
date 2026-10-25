@@ -1,7 +1,7 @@
 // Organizer app - Team 54, AI Builders Day.
 // Talks only to Person A's real API: same-origin /api/me/* with a Supabase
 // cookie session. Nothing is ever sent automatically - every action is an
-// explicit tap. All state lives on the server, so everything survives refresh.
+// explicit tap. Contact-create retry intents also use owner-scoped browser storage.
 
 const CATEGORIES = ['personal', 'professional', 'community'];
 const ACTIVITIES = ['dinner', 'coffee', 'drinks', 'brunch', 'activity'];
@@ -52,13 +52,129 @@ async function api(path, opts = {}) {
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || ('Request failed (' + res.status + ')'));
+    const error = new Error(err.error || ('Request failed (' + res.status + ')'));
+    error.code = err.code;
+    throw error;
   }
   if (res.status === 201 && opts.method === 'POST' && path === '/api/me/meetups') {
     window.team54Track?.('meetup_created');
   }
   if (res.status === 204) return null;
   return res.json();
+}
+
+// A retry is a saved create intent, not a name match. Keep only the current
+// intent for each owner/surface; never adopt another account's pending payload.
+let contactCreateOwner = null;
+let contactCreateRetryEnabled = false;
+const contactIntentMemory = new Map();
+function browserStore(kind, operation, ...args) {
+  try { return window[kind][operation](...args); } catch { return null; }
+}
+function contactIntentStorageKey(kind) {
+  if (!contactCreateOwner) throw new Error('Reload this page before saving contacts.');
+  return 'org_contact_create_v1:' + contactCreateOwner + ':' + kind;
+}
+function readContactIntent(kind) {
+  const key = contactIntentStorageKey(kind);
+  let latest = contactIntentMemory.get(key) || null;
+  for (const storage of ['localStorage', 'sessionStorage']) {
+    try {
+      const value = JSON.parse(browserStore(storage, 'getItem', key) || 'null');
+      if (value && value.version === 1 && typeof value.key === 'string' &&
+          ['pending', 'complete'].includes(value.state) && Number.isFinite(value.updatedAt) &&
+          (!latest || value.updatedAt > latest.updatedAt)) latest = value;
+    } catch { /* Damaged storage is not a valid retry receipt. */ }
+  }
+  if (latest) contactIntentMemory.set(key, latest);
+  return latest;
+}
+function writeContactIntent(kind, value) {
+  const key = contactIntentStorageKey(kind);
+  const previous = readContactIntent(kind);
+  const entry = { ...value, version: 1, updatedAt: Math.max(Date.now(), (previous?.updatedAt || 0) + 1) };
+  contactIntentMemory.set(key, entry);
+  const serialized = JSON.stringify(entry);
+  let durable = false;
+  for (const storage of ['localStorage', 'sessionStorage']) {
+    browserStore(storage, 'setItem', key, serialized);
+    if (browserStore(storage, 'getItem', key) === serialized) durable = true;
+  }
+  return durable;
+}
+function pendingContactIntent(kind) {
+  const entry = contactCreateOwner && readContactIntent(kind);
+  return entry?.state === 'pending' ? entry : null;
+}
+function startNewContactIntent(kind) {
+  if (pendingContactIntent(kind) && !confirm('The previous save may already have succeeded. Check Contacts first. Starting a new add can create another person, even with identical details. Start a new add anyway?')) return false;
+  writeContactIntent(kind, { key: '', state: 'complete', body: null });
+  return true;
+}
+function acknowledgeContactIntent(kind, action) {
+  // An old tab must not erase a newer deliberate create in another tab.
+  if (action.entry && readContactIntent(kind)?.key === action.entry.key) {
+    writeContactIntent(kind, { key: '', state: 'complete', body: null });
+  }
+}
+function contactRetryBlocked(entry) {
+  if (!entry) return '';
+  if (entry.mode === 'legacy') return 'An earlier save may already have succeeded. Check Contacts before starting a new add. This save cannot be safely retried.';
+  if (!contactCreateRetryEnabled) return 'Safe contact retries are temporarily unavailable. Check Contacts or wait until safe retries are available; this pending save will not be sent without its original key.';
+  return '';
+}
+function contactRetryNotice(entry) {
+  return contactRetryBlocked(entry) || (contactCreateRetryEnabled
+    ? (entry ? 'An earlier save is awaiting confirmation. Retry these original details safely, then edit the saved person if needed.' : 'Retries reuse the same save key. Refresh recovery needs browser storage; if it is blocked, keep this tab open.')
+    : 'Retry-safe saving is not enabled. If a save response is lost, check Contacts before adding again.');
+}
+function checkContactRetryBody(entry, body) {
+  const blocked = contactRetryBlocked(entry);
+  if (blocked) throw new Error(blocked);
+  if (entry && JSON.stringify(entry.body) !== JSON.stringify(body)) {
+    throw new Error('A previous save may already have succeeded. Retry the original details first, then edit the saved person. Or check Contacts and choose Start a new add.');
+  }
+}
+async function createContactsOnce(kind, body, action) {
+  const owner = action?.owner || contactCreateOwner;
+  if (owner !== contactCreateOwner) throw new Error('Your signed-in account changed. Reload before saving.');
+  const serialized = JSON.stringify(body);
+  const stored = pendingContactIntent(kind);
+  let entry = action?.entry || stored;
+  checkContactRetryBody(entry, body);
+  if (!entry) entry = { key: crypto.randomUUID(), mode: contactCreateRetryEnabled ? 'keyed' : 'legacy', state: 'pending', body: JSON.parse(serialized), attempts: 0 };
+  // Missing mode means a pre-rollout keyed intent, never a legacy fallback.
+  const keyed = entry.mode !== 'legacy';
+  // Missing attempt history is conservatively treated as uncertain. Persist
+  // the attempt before sending, so refresh cannot erase an ambiguous outcome.
+  const priorAttempts = Number.isInteger(entry.attempts) && entry.attempts >= 0 ? entry.attempts : 1;
+  entry = { ...entry, attempts: priorAttempts + 1 };
+  if (action) action.entry = entry;
+  // Legacy markers prevent accidental resubmission after an uncertain response;
+  // their local ID is NOT sent as a server idempotency key or called retry-safe.
+  const durable = stored && stored.key !== entry.key ? false : writeContactIntent(kind, entry);
+  try {
+    const receipt = await api('/api/me/contacts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Contact-Owner': owner, ...(keyed ? { 'Idempotency-Key': entry.key } : {}) },
+      body: serialized,
+    });
+    return receipt;
+  } catch (error) {
+    // A first request explicitly rejected before any DB call is safe to edit.
+    // Never clear on generic 400s, DB errors, or after a prior uncertain attempt:
+    // a later schema change cannot disprove an earlier committed creation.
+    const latest = readContactIntent(kind);
+    if (error.code === 'contact_input_rejected' && priorAttempts === 0 && latest?.key === entry.key && latest.attempts === 1) {
+      acknowledgeContactIntent(kind, action || { entry });
+      if (action) action.entry = null;
+    } else if (!(error instanceof AuthError)) {
+      if (!keyed) error.message += ' ' + contactRetryBlocked(entry);
+      if (!durable) error.message += keyed
+        ? ' This retry is only available in this tab: keep this tab open to retry safely. After a refresh, check Contacts before adding again.'
+        : ' Browser recovery storage is unavailable. After a refresh, check Contacts before adding again.';
+    }
+    throw error;
+  }
 }
 
 // --- routing -------------------------------------------------------------
@@ -152,8 +268,8 @@ function renderError(err, retry) {
 
 // A disabled button alone does not stop keyboard/programmatic submissions.
 // Keep the guard synchronous, scoped to this rendered form, and ignore callbacks
-// from older views. This prevents overlapping creates, not response-loss retries
-// after a server commit (those require durable server-side idempotency).
+// from older views. Contact creates also use durable idempotency below; other
+// creates still only have this in-flight guard.
 function wireCreateForm(formId, prefix, nav, pendingText, save) {
   const form = el(formId), button = el(prefix + '-submit');
   const error = el(prefix + '-error'), status = el(prefix + '-status');
@@ -348,7 +464,7 @@ async function dashboardView() {
         <p><button class="link-btn" id="qa-guide">What can muop do?</button></p>
       </div>`;
     el('qa-guide').onclick = () => go('#/welcome');
-    el('qa-add').onclick = () => { sessionStorage.setItem('org_new_contact', '1'); go('#/contacts'); };
+    el('qa-add').onclick = () => { browserStore('sessionStorage', 'setItem', 'org_new_contact', '1'); go('#/contacts'); };
     el('qa-meetup').onclick = () => go('#/meetups');
     return;
   }
@@ -440,7 +556,7 @@ async function dashboardView() {
     ${peopleCard(graphContacts)}`;
 
   document.querySelectorAll('[data-person]').forEach((b) => { b.onclick = () => go('#/contacts/' + encodeURIComponent(b.dataset.person)); });
-  el('qa-add').onclick = () => { sessionStorage.setItem('org_new_contact', '1'); go('#/contacts'); };
+  el('qa-add').onclick = () => { browserStore('sessionStorage', 'setItem', 'org_new_contact', '1'); go('#/contacts'); };
   el('qa-meetup').onclick = () => go('#/meetups');
   document.querySelectorAll('[data-jump]').forEach((b) => { b.onclick = () => el(b.dataset.jump)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   wireCalendar();
@@ -690,7 +806,7 @@ function markDoneForm(btn) {
 
 async function contactsView() {
   const nav = renderLoading('Loading contacts...');
-  const filter = sessionStorage.getItem('org_filter') || '';
+  const filter = browserStore('sessionStorage', 'getItem', 'org_filter') || '';
   let contacts;
   try {
     const r = await api('/api/me/contacts' + (filter ? '?category=' + encodeURIComponent(filter) : ''));
@@ -698,7 +814,12 @@ async function contactsView() {
   } catch (e) { if (stale(nav)) return; return renderError(e, contactsView); }
 
   if (stale(nav)) return;
-  const openForm = !!sessionStorage.getItem('org_new_contact') || !contacts.length;
+  const retry = pendingContactIntent('add');
+  const createAction = { entry: retry, owner: contactCreateOwner };
+  const retryNext = retry?.body?.next_followup_at;
+  const retryDate = retryNext ? new Date(retryNext) : null;
+  const retryDay = retryDate ? [retryDate.getFullYear(), String(retryDate.getMonth() + 1).padStart(2, '0'), String(retryDate.getDate()).padStart(2, '0')].join('-') : '';
+  const openForm = !!browserStore('sessionStorage', 'getItem', 'org_new_contact') || !contacts.length || !!retry;
   el('app').innerHTML = `
     <div class="page-head"><div><h1>Contacts</h1><p class="muted lede">${contacts.length} ${contacts.length === 1 ? 'person' : 'people'}${filter ? ' in ' + esc(filter) : ''}</p></div></div>
     <p><a class="button" href="#/google-contacts">Import Google Contacts</a></p>
@@ -728,7 +849,9 @@ async function contactsView() {
         </div>
         <p class="error" id="add-error" role="alert"></p>
         <p class="muted" id="add-status" role="status"></p>
-        <button class="primary" id="add-submit" type="submit">Add</button>
+        <p class="muted">${esc(contactRetryNotice(retry))}</p>
+        <button class="primary" id="add-submit" type="submit">${retry ? (contactRetryBlocked(retry) ? 'Save pending review' : 'Retry save') : 'Add'}</button>
+        <button id="add-new" type="button">Start a new add</button>
       </form>
     </details>`;
 
@@ -746,7 +869,17 @@ async function contactsView() {
   };
   el('c-search').oninput = paint;
   paint();
-  document.querySelectorAll('[data-filter]').forEach((b) => { b.onclick = () => { sessionStorage.setItem('org_filter', b.dataset.filter); contactsView(); }; });
+  document.querySelectorAll('[data-filter]').forEach((b) => { b.onclick = () => { browserStore('sessionStorage', 'setItem', 'org_filter', b.dataset.filter); contactsView(); }; });
+  if (retry?.body) {
+    const c = retry.body;
+    el('c-name').value = c.name || ''; el('c-cat').value = c.category || 'personal';
+    el('c-interests').value = (c.interests || []).join(', '); el('c-notes').value = c.notes || '';
+    el('c-email').value = c.email || ''; el('c-freq').value = c.preferred_frequency_days || '';
+    el('c-next').value = retryDay;
+  }
+  el('add-new').onclick = () => {
+    if (!el('add-submit').disabled && !stale(nav) && startNewContactIntent('add')) contactsView();
+  };
   wireCreateForm('add-form', 'add', nav, 'Adding person...', async () => {
     const body = {
       name: el('c-name').value.trim(),
@@ -759,14 +892,19 @@ async function contactsView() {
     const freq = parseInt(el('c-freq').value, 10);
     if (freq > 0) body.preferred_frequency_days = freq;
     const next = el('c-next').value;
-    if (next) body.next_followup_at = new Date(next + 'T12:00:00').toISOString();
-    await api('/api/me/contacts', { method: 'POST', body: JSON.stringify(body) });
+    // Preserve the original instant when retrying an unchanged restored date,
+    // including after a timezone change. Editing the date is a changed body.
+    if (next) body.next_followup_at = retryNext && next === retryDay ? retryNext : new Date(next + 'T12:00:00').toISOString();
+    const receipt = await createContactsOnce('add', body, createAction);
     if (stale(nav)) return;
-    flash(body.name + ' added. Open them to log a check-in or plan a meetup.');
+    acknowledgeContactIntent('add', createAction);
+    flash(receipt.missing_ids?.length
+      ? 'That earlier save was already completed, but the person has since been deleted. Nothing was recreated.'
+      : (receipt.contacts?.[0]?.name || body.name) + ' saved. Open them to log a check-in or plan a meetup.');
     contactsView();
   });
-  if (sessionStorage.getItem('org_new_contact')) {
-    sessionStorage.removeItem('org_new_contact');
+  if (browserStore('sessionStorage', 'getItem', 'org_new_contact')) {
+    browserStore('sessionStorage', 'removeItem', 'org_new_contact');
     el('add-details').scrollIntoView({ block: 'center' });
     el('c-name').focus();
   }
@@ -1036,7 +1174,7 @@ function prefill() {
   try {
     const raw = window.ORGANIZER_PREFILL || sessionStorage.getItem('org_prefill');
     const p = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    return p && typeof p === 'object' ? p : {};
+    return p && typeof p === 'object' && (!p.owner || p.owner === contactCreateOwner) ? p : {};
   } catch { return {}; }
 }
 
@@ -1114,7 +1252,7 @@ function wireGuideCard() {
 
 function welcomeView(opts = {}) {
   ++navGen;
-  const returning = !!opts.returning || localStorage.getItem('org_onboarded') === '1';
+  const returning = !!opts.returning || browserStore('localStorage', 'getItem', 'org_onboarded') === '1';
   el('app').innerHTML = `
     <section class="card welcome ob-cute">
       <div class="ob-deco" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
@@ -1132,7 +1270,7 @@ function welcomeView(opts = {}) {
           : '<button class="primary" id="w-start">Get started</button><button id="w-skip">Skip, take me to the dashboard</button>'}
       </div>
     </section>`;
-  const done = () => { localStorage.setItem('org_onboarded', '1'); go('#/dashboard'); };
+  const done = () => { browserStore('localStorage', 'setItem', 'org_onboarded', '1'); go('#/dashboard'); };
   if (returning) { el('w-dash').onclick = () => go('#/dashboard'); el('w-setup').onclick = () => go('#/onboarding'); }
   else { el('w-start').onclick = () => go('#/onboarding'); el('w-skip').onclick = done; }
 }
@@ -1158,6 +1296,9 @@ function installFlash() {
 function onboardingView() {
   const nav = ++navGen;
   const p = prefill();
+  const retry = pendingContactIntent('onboarding');
+  const createAction = { entry: retry, owner: contactCreateOwner };
+  if (retry?.body?.contacts) p.contacts = retry.body.contacts;
   const rows = (p.contacts && p.contacts.length ? p.contacts.slice(0, 5) : [emptyRow()]).map(toRow);
   const goals = { personal: 50, professional: 30, community: 20, ...(p.goals || {}) };
   // Who understood the extraction: kept with the rows (and in org_prefill) so
@@ -1178,37 +1319,36 @@ function onboardingView() {
     box.textContent = label && rows.some((r) => r.name) ? `Filled from what you said (understood by ${label}). Review each person - nothing is saved until you finish.` : '';
   };
 
-  const finish = (added) => {
+  const finish = (added, missing = 0) => {
     if (stale(nav)) return;
     if (voice) voice.stop();
-    localStorage.setItem('org_onboarded', '1');
-    sessionStorage.removeItem('org_prefill');
+    browserStore('localStorage', 'setItem', 'org_onboarded', '1');
+    browserStore('sessionStorage', 'removeItem', 'org_prefill');
     delete window.ORGANIZER_PREFILL;
     step = 3;
-    if (added && added.length) return renderDone(added);
+    if (added?.length || missing) return renderDone(added || [], missing);
     go('#/dashboard');
   };
 
-  function renderDone(added) {
+  function renderDone(added, missing) {
     el('app').innerHTML = `
       <section class="card welcome ob-cute">
         <div class="ob-deco" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
         <p class="ob-yay" aria-hidden="true">🎉 ⭐ 💛</p>
         <p class="eyebrow">All set</p>
-        <h1>${added.length} ${added.length === 1 ? 'person' : 'people'} added - lovely! What next?</h1>
+        <h1>${missing ? 'Earlier save confirmed' : `${added.length} ${added.length === 1 ? 'person' : 'people'} added - lovely! What next?`}</h1>
+        ${missing ? `<p class="muted">${added.length} saved ${added.length === 1 ? 'person is' : 'people are'} still available. ${missing} ${missing === 1 ? 'person has' : 'people have'} since been deleted. Nothing was recreated.</p>` : ''}
         <div class="next-grid">
-          <button class="next-card" id="d-checkin"><strong>Log a check-in</strong><span class="muted">Record a recent catch-up with ${esc(added[0].name)}.</span></button>
+          ${added.length ? `<button class="next-card" id="d-checkin"><strong>Log a check-in</strong><span class="muted">Record a recent catch-up with ${esc(added[0].name)}.</span></button>` : ''}
           <button class="next-card" id="d-meetup"><strong>Plan a meetup</strong><span class="muted">Create a room link to share with friends.</span></button>
           <button class="next-card" id="d-dash"><strong>See your dashboard</strong><span class="muted">Your network map and calendar.</span></button>
         </div>
       </section>`;
-    el('d-checkin').onclick = async () => {
+    if (added.length) el('d-checkin').onclick = async () => {
       try {
-        const r = await api('/api/me/contacts');
-        const list = Array.isArray(r) ? r : (r.contacts || []);
-        const m = list.find((c) => c.name === added[0].name);
+        const m = added[0];
         if (stale(nav)) return;
-        go(m ? '#/contacts/' + encodeURIComponent(m.id) : '#/contacts');
+        go(m?.id ? '#/contacts/' + encodeURIComponent(m.id) : '#/contacts');
       } catch { if (!stale(nav)) go('#/contacts'); }
     };
     el('d-meetup').onclick = () => go('#/meetups');
@@ -1242,6 +1382,7 @@ function onboardingView() {
 
   function persistDraft() {
     const draft = {
+      owner: contactCreateOwner,
       contacts: rows.map((r) => ({ name: r.name, category: r.category, interests: r.interests, preferred_frequency_days: r.freq })),
       goals: { ...goals },
       sources: [...sources],
@@ -1268,6 +1409,8 @@ function onboardingView() {
         <div id="ob-rows"></div>
         <p class="muted" id="ob-source"></p>
         <p><button class="link-btn" id="ob-add">+ Add another</button></p>
+        <p class="muted">${esc(contactRetryNotice(createAction.entry || pendingContactIntent('onboarding')))}</p>
+        <p><button class="link-btn" id="ob-new">Start a new add</button></p>
         <p class="error" id="ob-error"></p>
         <div class="quick-actions">
           <button class="primary" id="ob-next">Next: your goals →</button>
@@ -1277,6 +1420,11 @@ function onboardingView() {
       </section>`;
     renderRows();
     showSource();
+    el('ob-new').onclick = () => {
+      if (saving || stale(nav) || !startNewContactIntent('onboarding')) return;
+      createAction.entry = null;
+      rows.splice(0, rows.length, emptyRow()); persistDraft(); renderStep1();
+    };
     el('ob-welcome').onclick = () => go('#/welcome');
     voice = window.Voice ? window.Voice.mount(el('voice-mount'), applyExtraction) : null;
     // Lets the voice assistant (assistant.js) fill this form and move on.
@@ -1388,14 +1536,21 @@ function onboardingView() {
         preferred_frequency_days: r.freq,
       }));
       try {
+        checkContactRetryBody(createAction.entry || pendingContactIntent('onboarding'), { contacts });
         // Goals are an idempotent PUT. Save them before creating contacts so a
         // failed goals request can be retried without duplicating every person.
-        await api('/api/me/goals', { method: 'PUT', body: JSON.stringify(goalBody) });
+        await api('/api/me/goals', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Contact-Owner': createAction.owner }, body: JSON.stringify(goalBody) });
         if (inactive()) return;
+        let added = []; let missing = 0;
         if (contacts.length) {
-          await api('/api/me/contacts', { method: 'POST', body: JSON.stringify({ contacts }) });
+          const receipt = await createContactsOnce('onboarding', { contacts }, createAction);
+          added = receipt.contacts || contacts;
+          missing = receipt.missing_ids?.length || 0;
         }
-        if (!inactive()) finish(contacts);
+        if (!inactive()) {
+          finish(added, missing);
+          acknowledgeContactIntent('onboarding', createAction);
+        }
       } catch (e) {
         if (!inactive()) el('ob-error').textContent = e.message;
       } finally {
@@ -1524,7 +1679,7 @@ async function profileView() {
     status.textContent = 'Saving goals...';
     try {
       const body = Object.fromEntries(inputs.map((input) => [input.dataset.cat, Number(input.value)]));
-      await api('/api/me/goals', { method: 'PUT', body: JSON.stringify(body) });
+      await api('/api/me/goals', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Contact-Owner': contactCreateOwner }, body: JSON.stringify(body) });
       if (stale(nav)) return;
       flash('Goals saved.');
       profileView();
@@ -1546,12 +1701,18 @@ async function boot() {
   renderLoading();
   let d;
   try {
-    d = await api('/api/me/dashboard');
+    const [dashboard, me] = await Promise.all([api('/api/me/dashboard'), api('/api/me')]);
+    if (!me?.user?.id) throw new Error('Could not verify your account. Please reload.');
+    contactCreateOwner = me.user.id;
+    contactCreateRetryEnabled = me.capabilities?.contact_create_retry === true;
+    d = dashboard;
   } catch (e) {
+    contactCreateOwner = null;
+    contactCreateRetryEnabled = false;
     if (e instanceof AuthError) return; // redirecting to /login
     return renderError(e, boot);
   }
-  const onboarded = localStorage.getItem('org_onboarded') === '1';
+  const onboarded = browserStore('localStorage', 'getItem', 'org_onboarded') === '1';
   const hash = location.hash || '#/dashboard';
   window.onhashchange = route;
   installFlash();
