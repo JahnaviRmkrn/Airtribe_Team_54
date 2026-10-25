@@ -1,3 +1,8 @@
 allowBuilds:
   # eslint-config-next's native resolver; its install script fetches the platform binary
   unrs-resolver: true
+
+overrides:
+  # Next 15 pins an older PostCSS; stay on the patched 8.x version already in this lockfile.
+  # https://github.com/postcss/postcss/security/advisories/GHSA-fxqj-rqcc-2cmp
+  "next@15.5.28>postcss": 8.5.31
