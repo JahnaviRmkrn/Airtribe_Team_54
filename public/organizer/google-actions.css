@@ -10,3 +10,6 @@
 .ga-history { display: flex; flex-direction: column; gap: .5rem; align-items: stretch; }
 .ga-history button { overflow-wrap: anywhere; text-align: left; }
 @media (max-width: 540px) { .ga-grid { grid-template-columns: 1fr; } .ga-details { grid-template-columns: 1fr; gap: .3rem; } .ga-details dd { margin-bottom: .6rem; } .ga-buttons button { width: 100%; } }
+
+.google-action .ga-ack { display: flex; align-items: flex-start; gap: .65rem; }
+.google-action .ga-ack input { width: auto; flex: 0 0 auto; margin-top: .2rem; }

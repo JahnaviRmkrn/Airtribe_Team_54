@@ -6,13 +6,15 @@ const eventUrl = 'https://www.googleapis.com/calendar/v3/calendars/primary/event
 
 // One invocation, one HTTP write, zero retries. Every transport failure, 5xx,
 // malformed success or conflict is uncertain. Do not use the read helper here.
-export async function performGoogleAction(preview: ActionPreview, id: string, hash: string, token: string): Promise<ProviderOutcome> {
+export async function performGoogleAction(preview: ActionPreview, id: string, hash: string, token: string, createdAt: string): Promise<ProviderOutcome> {
   try {
+    const date = new Date(createdAt);
+    if (!Number.isFinite(date.getTime())) return { state: 'uncertain' };
     const gmail = preview.kind === 'gmail';
-    const response = await fetch(gmail ? 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send' : `${eventUrl}?sendUpdates=${preview.sendUpdates}`, {
+    const response = await fetch(gmail ? `https://gmail.googleapis.com/gmail/v1/users/${encodeURIComponent(preview.from)}/messages/send` : `${eventUrl}?sendUpdates=${preview.sendUpdates}`, {
       method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10000),
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(gmail ? { raw: gmailRaw(preview) } : calendarBody(preview, id, hash)),
+      body: JSON.stringify(gmail ? { raw: gmailRaw(preview, date) } : calendarBody(preview, id, hash)),
     });
     if ([400, 401, 403, 404, 413, 422, 429].includes(response.status)) return { state: 'rejected' };
     if (!response.ok) return { state: 'uncertain' };

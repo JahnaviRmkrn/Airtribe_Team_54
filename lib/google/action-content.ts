@@ -7,7 +7,7 @@ export type ActionPurpose = 'gmail' | 'calendar';
 const unicodeText = (max: number) => z.string().max(max).refine((s) => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(s) && !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(s), 'Use valid Unicode text without control characters');
 const line = (max: number) => unicodeText(max).refine((s) => !/[\r\n]/.test(s), 'Must be a single line');
 const addresses = z.array(z.string().max(254)).max(25);
-export const emailDraftSchema = z.object({ to: addresses.min(1), subject: line(200).min(1), body: unicodeText(20000).min(1) }).strict();
+export const emailDraftSchema = z.object({ from: z.string().max(254), to: addresses.min(1), subject: line(200).min(1), body: unicodeText(20000).min(1) }).strict();
 export const calendarDraftSchema = z.object({
   title: line(200).min(1), description: unicodeText(10000), location: line(500),
   localStart: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/), timeZone: z.string().min(1).max(100),
@@ -17,7 +17,7 @@ export const calendarDraftSchema = z.object({
 }).strict();
 export type EmailDraft = z.infer<typeof emailDraftSchema>;
 export type CalendarDraft = z.infer<typeof calendarDraftSchema>;
-export type EmailPreview = EmailDraft & { kind: 'gmail'; sender: string };
+export type EmailPreview = EmailDraft & { kind: 'gmail' };
 export type CalendarPreview = CalendarDraft & { kind: 'calendar'; calendar: 'primary'; start: string; end: string; endLocal: string; notificationNote: string };
 export type ActionPreview = EmailPreview | CalendarPreview;
 
@@ -47,7 +47,10 @@ function localParts(instant: number, timeZone: string) {
 }
 export function resolveLocalTime(local: string, timeZone: string, disambiguation: 'reject' | 'earlier' | 'later') {
   let canonical: string;
-  try { canonical = new Intl.DateTimeFormat('en', { timeZone }).resolvedOptions().timeZone; }
+  try {
+    canonical = new Intl.DateTimeFormat('en', { timeZone }).resolvedOptions().timeZone;
+    if (/^[+-]/.test(canonical)) throw new Error('An offset is not an IANA zone');
+  }
   catch { throw new HttpError(400, 'Choose a valid IANA time zone, for example Asia/Kolkata.'); }
   const naive = Date.parse(`${local}:00Z`);
   if (!Number.isFinite(naive) || new Date(naive).toISOString().slice(0, 16) !== local || Number(local.slice(0, 4)) < 2000 || Number(local.slice(0, 4)) > 2100) {
@@ -67,8 +70,8 @@ export function resolveLocalTime(local: string, timeZone: string, disambiguation
 export function preparePreview(purpose: ActionPurpose, raw: unknown): ActionPreview {
   if (purpose === 'gmail') {
     const parsed = emailDraftSchema.safeParse(raw);
-    if (!parsed.success) throw new HttpError(400, 'Check recipients, subject and plain-text message. Only these fields are supported.');
-    return { kind: 'gmail', ...parsed.data, to: normalizeAddresses(parsed.data.to), sender: 'The Google account selected for this Gmail connection' };
+    if (!parsed.success) throw new HttpError(400, 'Check your primary sender address, recipients, subject and plain-text message. Only these fields are supported.');
+    return { kind: 'gmail', ...parsed.data, from: normalizeAddresses([parsed.data.from])[0], to: normalizeAddresses(parsed.data.to) };
   }
   const parsed = calendarDraftSchema.safeParse(raw);
   if (!parsed.success) throw new HttpError(400, 'Check the event details, duration, attendees and notification choice.');
@@ -87,11 +90,12 @@ function encodedSubject(value: string) {
   if (chunk) words.push(chunk);
   return words.map((part) => `=?UTF-8?B?${Buffer.from(part).toString('base64')}?=`).join('\r\n ');
 }
-export function gmailRaw(preview: EmailPreview) {
-  // Gmail supplies the authenticated account's sender. No aliases, custom From,
-  // CC/BCC, HTML, attachments, private notes, or address-book auto-population.
+export function gmailRaw(preview: EmailPreview, date: Date) {
+  // The same explicit primary mailbox is used in the From header and provider
+  // userId. Never silently fall back to me or substitute an invented sender.
+  // Date comes from the immutable action creation timestamp, not browser input.
   const body = Buffer.from(preview.body.replace(/\r\n|\r|\n/g, '\r\n'), 'utf8').toString('base64').match(/.{1,76}/g)?.join('\r\n') || '';
-  return Buffer.from([`To: ${preview.to.join(',\r\n ')}`, `Subject: ${encodedSubject(preview.subject)}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', body].join('\r\n'), 'utf8').toString('base64url');
+  return Buffer.from([`From: ${preview.from}`, `Date: ${date.toUTCString().replace('GMT', '+0000')}`, `To: ${preview.to.join(',\r\n ')}`, `Subject: ${encodedSubject(preview.subject)}`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', body].join('\r\n'), 'utf8').toString('base64url');
 }
 export function calendarBody(preview: CalendarPreview, id: string, hash: string) {
   const description = preview.description.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r\n|\r|\n/g, '<br>');

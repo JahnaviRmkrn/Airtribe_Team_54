@@ -16,7 +16,7 @@ const operationSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('start') }).strict(),
   z.object({ operation: z.literal('disconnect') }).strict(),
   z.object({ operation: z.literal('preview'), draft: z.unknown() }).strict(),
-  z.object({ operation: z.literal('confirm'), id: z.uuid(), previewHash: z.string().regex(/^[a-f0-9]{64}$/), confirmed: z.literal(true) }).strict(),
+  z.object({ operation: z.literal('confirm'), id: z.uuid(), previewHash: z.string().regex(/^[a-f0-9]{64}$/), confirmed: z.literal(true), senderAcknowledged: z.literal(true).optional() }).strict(),
   z.object({ operation: z.literal('cancel'), id: z.uuid() }).strict(),
   z.object({ operation: z.literal('reconcile'), id: z.uuid() }).strict(),
 ]);
@@ -94,6 +94,7 @@ export function actionRoutes(purpose: ActionPurpose) {
       }
       // Confirmation accepts only the ID + digest shown in the preview, never
       // recipients, message text or mutable event details from the browser.
+      if (purpose === 'gmail' && body.senderAcknowledged !== true) throw new HttpError(400, 'Confirm that the previewed primary sender address is the Google mailbox you selected.');
       const existing = await loadAction(config, user.id, body.id);
       if (existing.preview_hash !== body.previewHash) throw new HttpError(409, 'This confirmation does not match the saved preview. Review the draft again.');
       if (existing.state !== 'preview') return googleResponse({ action: actionView(config, existing) });
@@ -102,7 +103,7 @@ export function actionRoutes(purpose: ActionPurpose) {
       const claimed = await claimAction(config, session, body.id, body.previewHash);
       if (!claimed) return googleResponse({ action: actionView(config, await loadAction(config, user.id, body.id)) });
       const preview = contentForAction(config, claimed);
-      const outcome = await performGoogleAction(preview, claimed.id, claimed.preview_hash, token);
+      const outcome = await performGoogleAction(preview, claimed.id, claimed.preview_hash, token, claimed.created_at);
       try {
         await finishAction(config, user.id, claimed.id, outcome);
         return googleResponse({ action: actionView(config, { ...claimed, state: outcome.state, provider_ref: outcome.providerRef || null }) });

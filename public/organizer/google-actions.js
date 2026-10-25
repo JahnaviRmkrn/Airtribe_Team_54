@@ -27,14 +27,14 @@
         const button = field(id); if (!button) return;
         const v = view; let busy = false;
         button.onclick = async () => {
-          if (busy || !live(v)) return;
+          if (busy || !live(v) || button.disabled) return;
           busy = true; button.disabled = true;
           try { await callback(v); } catch (error) { if (live(v)) showError(error); }
           finally { if (live(v)) { busy = false; button.disabled = false; } }
         };
       }
       function draftFromPreview(p) {
-        return gmail ? { to: p.to, subject: p.subject, body: p.body } : {
+        return gmail ? { from: p.from, to: p.to, subject: p.subject, body: p.body } : {
           title: p.title, description: p.description, location: p.location, localStart: p.localStart, timeZone: p.timeZone,
           durationMinutes: p.durationMinutes, attendees: p.attendees, disambiguation: p.disambiguation, sendUpdates: p.sendUpdates,
         };
@@ -42,9 +42,9 @@
       function renderAction(action) {
         const p = action.preview;
         const preview = !p ? '<p>The stored content has expired; the action history is retained to prevent replay.</p>' : gmail ? `
-          <dl class="ga-details"><dt>From</dt><dd>${esc(p.sender)}</dd><dt>To</dt><dd>${p.to.map(esc).join('<br>')}</dd><dt>Subject</dt><dd>${esc(p.subject)}</dd></dl>
-          <h3>Plain-text message</h3><pre class="ga-text">${esc(p.body)}</pre>` : `
-          <dl class="ga-details"><dt>Calendar</dt><dd>Primary calendar of the Google account selected in this connection</dd>
+          <dl class="ga-details"><dt>From</dt><dd>${esc(p.from)}</dd><dt>Date header</dt><dd>${esc(new Date(action.createdAt).toUTCString())}</dd><dt>To</dt><dd>${p.to.map(esc).join('<br>')}</dd><dt>Subject</dt><dd>${esc(p.subject)}</dd></dl>
+          <p class="muted">This is the sender address you entered, not an independently verified profile. Google must authorize this exact mailbox. No account or sender substitution is attempted.</p><h3>Plain-text message</h3><pre class="ga-text">${esc(p.body)}</pre>` : `
+          <dl class="ga-details"><dt>Calendar</dt><dd>Primary calendar of the Google account selected when this preview was created</dd>
           <dt>Title</dt><dd>${esc(p.title)}</dd><dt>Starts</dt><dd>${esc(p.localStart.replace('T', ' '))} (${esc(p.timeZone)})<br><span class="muted">${esc(p.start)} UTC instant</span></dd>
           <dt>Ends</dt><dd>${esc(p.endLocal.replace('T', ' '))} (${esc(p.timeZone)})<br><span class="muted">${esc(p.end)} UTC instant</span></dd>
           <dt>Duration</dt><dd>${esc(p.durationMinutes)} elapsed minutes</dd><dt>Location</dt><dd>${esc(p.location || 'None')}</dd>
@@ -62,20 +62,22 @@
           expired: 'This preview expired before submission. Create and review a fresh draft to continue.',
         }[action.state] || 'Check the saved action status.';
         frame(`<div class="card"><p role="status" class="${pending ? 'error' : ''}">${esc(text)}</p>${pending ? `<p>${gmail ? 'Check the selected Google account’s Sent mailbox yourself. Send-only access cannot read it.' : 'Check the selected Google account’s calendar, or use the read-only check below. A missing event is not proof that creation failed.'}</p>` : ''}
-          ${preview}<p class="muted">Action reference: ${esc(action.id)}</p>
+          ${preview}${gmail && action.state === 'preview' ? '<label class="ga-ack"><input type="checkbox" id="ga-sender-check"> I confirm the From address is the primary Gmail mailbox of the Google account I selected, not an alias.</label>' : ''}<p class="muted">Action reference: ${esc(action.id)}</p>
           <p id="ga-error" class="error" role="alert"></p><div class="ga-buttons">
-          ${action.state === 'preview' ? `<button id="ga-confirm">${gmail ? 'Confirm and send email' : 'Confirm and create event'}</button><button id="ga-edit" class="secondary">Back to edit</button><button id="ga-cancel" class="secondary">Cancel preview</button>` : ''}
+          ${action.state === 'preview' ? `<button id="ga-confirm" ${gmail ? 'disabled' : ''}>${gmail ? 'Confirm and send email' : 'Confirm and create event'}</button><button id="ga-edit" class="secondary">Back to edit</button><button id="ga-cancel" class="secondary">Cancel preview</button>` : ''}
           <button id="ga-check" class="secondary">Check saved status</button>
           ${pending && !gmail ? '<button id="ga-reconcile" class="secondary">Check this event in Google (read only)</button>' : ''}
           <button id="ga-home" class="secondary">Back to ${gmail ? 'Gmail' : 'Calendar'}</button></div>
           ${action.state === 'preview' ? '<p class="muted">Once confirmed, leaving the page cannot undo a send or event creation.</p>' : ''}</div>`);
+        if (gmail && action.state === 'preview') field('ga-sender-check').onchange = () => { field('ga-confirm').disabled = !field('ga-sender-check').checked; };
         bind('ga-confirm', async (v) => {
+          if (gmail && !field('ga-sender-check').checked) return;
           // On transport failure never re-enable confirmation. The request may
           // have committed even though this browser did not receive a response.
           field('ga-confirm').textContent = gmail ? 'Sending…' : 'Creating…';
-          ['ga-edit', 'ga-cancel'].forEach((id) => { if (field(id)) field(id).disabled = true; });
+          ['ga-edit', 'ga-cancel', 'ga-sender-check'].forEach((id) => { if (field(id)) field(id).disabled = true; });
           try {
-            const result = await send({ operation: 'confirm', id: action.id, previewHash: action.previewHash, confirmed: true });
+            const result = await send({ operation: 'confirm', id: action.id, previewHash: action.previewHash, confirmed: true, ...(gmail ? { senderAcknowledged: true } : {}) });
             if (live(v)) renderAction(result.action);
           } catch {
             if (live(v)) renderAction({ ...action, state: 'uncertain' });
@@ -91,6 +93,8 @@
         const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
         frame(`<form id="ga-form" class="card"><p>No contacts or private notes are added automatically. Enter only what you want to share.</p>
           ${gmail ? `
+          <label>Your primary Gmail address<input id="ga-from" type="email" required maxlength="254" value="${esc(draft.from || '')}" autocomplete="off"></label>
+          <p class="muted">Enter the primary mailbox address for the Google account you selected. This app cannot read your Google profile and does not support send-as aliases.</p>
           <label>Recipient email addresses, separated by commas<textarea id="ga-to" rows="2" required maxlength="6400">${esc((draft.to || []).join(', '))}</textarea></label>
           <label>Subject<input id="ga-subject" required maxlength="200" value="${esc(draft.subject || '')}"></label>
           <label>Plain-text message<textarea id="ga-body" rows="10" required maxlength="20000">${esc(draft.body || '')}</textarea></label>` : `
@@ -112,7 +116,7 @@
         form.onsubmit = async (e) => {
           e.preventDefault(); if (pending || !live(v)) return;
           const split = (value) => value.split(',').map((s) => s.trim()).filter(Boolean);
-          const body = gmail ? { to: split(field('ga-to').value), subject: field('ga-subject').value, body: field('ga-body').value } : {
+          const body = gmail ? { from: field('ga-from').value, to: split(field('ga-to').value), subject: field('ga-subject').value, body: field('ga-body').value } : {
             title: field('ga-title').value, description: field('ga-description').value, location: field('ga-location').value,
             localStart: field('ga-start').value, timeZone: field('ga-zone').value, durationMinutes: Number(field('ga-duration').value),
             attendees: split(field('ga-attendees').value), disambiguation: field('ga-dst').value, sendUpdates: field('ga-notifications').value,
@@ -129,7 +133,7 @@
       try {
         const status = await api(base); if (!active()) return;
         const disclosure = gmail
-          ? 'Gmail permission only allows sending mail. This feature cannot read your inbox, contacts or Sent mailbox. The sender is the Google account you select, not necessarily your muop sign-in account.'
+          ? 'Gmail permission only allows sending mail. This feature cannot read your inbox, contacts or Sent mailbox. You must enter and confirm that account’s primary Gmail address. It is not inferred from your muop sign-in account, and send-as aliases are not supported.'
           : 'Google’s owned-calendar event permission can view, create, change and delete events on calendars you own. This feature only creates your reviewed event in the selected account’s primary calendar, and can check that exact event after an uncertain result. It does not list calendars or other events.';
         frame(`<div class="card"><p>${esc(status.enabled ? disclosure : status.message)}</p>
           ${status.enabled ? `<p>${status.connected ? 'Temporary Google connection is ready.' : 'Connect the Google account you want to use. Connecting never sends an email or creates an event.'} Connections expire after 15 minutes. Reconnecting requires a fresh preview.</p><div class="ga-buttons">

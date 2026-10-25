@@ -3,8 +3,9 @@ vi.mock('server-only', () => ({}));
 vi.mock('../supabase/admin', () => ({ adminClient: () => { throw new Error('No live database'); } }));
 import { calendarBody, calendarEventId, gmailRaw, normalizeAddresses, preparePreview, previewHash, resolveLocalTime, type CalendarPreview, type EmailPreview } from './action-content';
 import { performGoogleAction, reconcileCalendarAction } from './action-provider';
+const createdAt = '2026-10-25T04:00:00.000Z';
 const id = '6f7ca671-f74a-4bc9-9c3b-f42590fe08a5';
-const draft = { to: ['person@example.test'], subject: '你好 café 🐈', body: 'Hello\nUnicode café ✓' };
+const draft = { from: 'sender@example.test', to: ['person@example.test'], subject: '你好 café 🐈', body: 'Hello\nUnicode café ✓' };
 const email = () => preparePreview('gmail', draft) as EmailPreview;
 const eventDraft = { title: 'Tea', description: 'Explicit description', location: 'Cafe', localStart: '2026-10-25T14:30', timeZone: 'Asia/Kolkata', durationMinutes: 60, attendees: ['person@example.test'], sendUpdates: 'all' };
 const event = () => preparePreview('calendar', eventDraft) as CalendarPreview;
@@ -19,22 +20,23 @@ describe('explicit action content validation', () => {
     expect(() => preparePreview('gmail', { ...draft, to: [address] })).toThrow();
   });
   it('rejects extras, missing recipients, injection, invalid Unicode and oversized messages', () => {
-    for (const change of [{ bcc: ['hidden@example.test'] }, { from: 'other@example.test' }, { to: [] }, { to: Array(26).fill('p@example.test') }, { subject: 'hi\r\nBcc: hidden@example.test' }, { body: '\uD800' }, { body: 'x'.repeat(20001) }, { body: '\u0000' }]) {
+    for (const change of [{ bcc: ['hidden@example.test'] }, { from: 'bad\r\nBcc: evil@example.test' }, { to: [] }, { to: Array(26).fill('p@example.test') }, { subject: 'hi\r\nBcc: hidden@example.test' }, { body: '\uD800' }, { body: 'x'.repeat(20001) }, { body: '\u0000' }]) {
       expect(() => preparePreview('gmail', { ...draft, ...change })).toThrow();
     }
     expect(email().body).toContain('✓');
   });
   it('encodes UTF-8 subject/body safely with MIME line folding and base64url', () => {
-    const raw = gmailRaw(email()); expect(raw).toMatch(/^[A-Za-z0-9_-]+$/);
+    const raw = gmailRaw(email(), new Date(createdAt)); expect(raw).toMatch(/^[A-Za-z0-9_-]+$/);
     const mime = Buffer.from(raw, 'base64url').toString();
     expect(mime).toContain('To: person@example.test\r\n');
     expect(mime).toContain('Content-Type: text/plain; charset=UTF-8');
-    expect(mime).not.toContain('Bcc:'); expect(mime).not.toContain('From:');
+    expect(mime).not.toContain('Bcc:'); expect(mime).toContain('From: sender@example.test\r\n');
+    expect(mime).toMatch(/Date: [A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} \+0000\r\n/);
     const [header, body] = mime.split('\r\n\r\n');
     const decodedSubject = [...header.matchAll(/=\?UTF-8\?B\?([^?]+)\?=/g)].map((m) => Buffer.from(m[1], 'base64').toString()).join('');
     expect(decodedSubject).toBe(draft.subject);
     expect(Buffer.from(body.replace(/\r\n/g, ''), 'base64').toString()).toBe('Hello\r\nUnicode café ✓');
-    const long = gmailRaw(preparePreview('gmail', { ...draft, subject: '🐈'.repeat(60) }) as EmailPreview);
+    const long = gmailRaw(preparePreview('gmail', { ...draft, subject: '🐈'.repeat(60) }) as EmailPreview, new Date(createdAt));
     expect(Buffer.from(long, 'base64url').toString().split('\r\n').every((line) => line.length < 998)).toBe(true);
   });
   it('resolves normal local time and derives a strictly later end', () => {
@@ -54,7 +56,10 @@ describe('explicit action content validation', () => {
     expect(Date.parse(p.end) - Date.parse(p.start)).toBe(3600000); expect(p.endLocal).toBe(p.localStart);
   });
   it('rejects invalid dates, zones and silent extra calendar options', () => {
-    for (const change of [{ localStart: '2026-02-30T10:00' }, { localStart: '1900-01-01T10:00' }, { timeZone: 'Not/AZone' }, { recurrence: ['RRULE:FREQ=DAILY'] }, { sendUpdates: 'externalOnly' }]) expect(() => preparePreview('calendar', { ...eventDraft, ...change })).toThrow();
+    for (const change of [{ localStart: '2026-02-30T10:00' }, { localStart: '1900-01-01T10:00' }, { timeZone: 'Not/AZone' }, { timeZone: '+01:00' }, { timeZone: '+0100' }, { timeZone: '-05:00' }, { recurrence: ['RRULE:FREQ=DAILY'] }, { sendUpdates: 'externalOnly' }]) expect(() => preparePreview('calendar', { ...eventDraft, ...change })).toThrow();
+  });
+  it('binds sender edits to a different preview digest', () => {
+    expect(previewHash(preparePreview('gmail', { ...draft, from: 'another@example.test' }))).not.toBe(previewHash(email()));
   });
   it('changes the content digest for every meaningful destination/content/notification edit', () => {
     expect(previewHash(email())).toBe(previewHash(email()));
@@ -77,29 +82,40 @@ describe('one-shot Google writes and read-only reconciliation', () => {
   it.each(['gmail', 'calendar'] as const)('makes exactly one %s POST using only previewed content', async (purpose) => {
     const p = purpose === 'gmail' ? email() : event();
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ id: purpose === 'gmail' ? 'abc123' : calendarEventId(id) })));
-    expect(await performGoogleAction(p, id, previewHash(p), 'synthetic-token')).toMatchObject({ state: 'completed' });
+    expect(await performGoogleAction(p, id, previewHash(p), 'synthetic-token', createdAt)).toMatchObject({ state: 'completed' });
     expect(fetch).toHaveBeenCalledTimes(1);
     const [url, init] = vi.mocked(fetch).mock.calls[0];
-    expect(url).toBe(purpose === 'gmail' ? 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send' : 'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all');
+    expect(url).toBe(purpose === 'gmail' ? 'https://gmail.googleapis.com/gmail/v1/users/sender%40example.test/messages/send' : 'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all');
     expect(init).toMatchObject({ method: 'POST', redirect: 'error', cache: 'no-store', headers: { Authorization: 'Bearer synthetic-token' } });
   });
   it.each([409, 500, 502, 503])('treats HTTP %s as uncertain without retry or logging', async (status) => {
     vi.mocked(fetch).mockResolvedValue(new Response('SECRET diagnostics', { status }));
     const log = vi.spyOn(console, 'error');
-    expect(await performGoogleAction(email(), id, previewHash(email()), 'synthetic-token')).toEqual({ state: 'uncertain' });
+    expect(await performGoogleAction(email(), id, previewHash(email()), 'synthetic-token', createdAt)).toEqual({ state: 'uncertain' });
     expect(fetch).toHaveBeenCalledTimes(1); expect(log).not.toHaveBeenCalled();
+  });
+  it('uses exact primary sender target and never falls back to me after mismatch', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response('Mailbox not authorized', { status: 403 }));
+    const p = preparePreview('gmail', { ...draft, from: 'different@example.test' }) as EmailPreview;
+    expect(await performGoogleAction(p, id, previewHash(p), 'synthetic-token', createdAt)).toEqual({ state: 'rejected' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe('https://gmail.googleapis.com/gmail/v1/users/different%40example.test/messages/send');
+    const mime = Buffer.from(JSON.parse(String(init?.body)).raw, 'base64url').toString();
+    expect(mime).toContain('From: different@example.test\r\n');
+    expect(mime).toContain('Date: Sun, 25 Oct 2026 04:00:00 +0000\r\n');
   });
   it.each([400, 401, 403, 404, 413, 422, 429])('records explicit HTTP %s rejection without automatic retry', async (status) => {
     vi.mocked(fetch).mockResolvedValue(new Response('', { status }));
-    expect(await performGoogleAction(email(), id, previewHash(email()), 'synthetic-token')).toEqual({ state: 'rejected' }); expect(fetch).toHaveBeenCalledTimes(1);
+    expect(await performGoogleAction(email(), id, previewHash(email()), 'synthetic-token', createdAt)).toEqual({ state: 'rejected' }); expect(fetch).toHaveBeenCalledTimes(1);
   });
   it('treats timeout, body parse failure and wrong event ID as unknown', async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error('timeout'));
-    expect((await performGoogleAction(email(), id, previewHash(email()), 'synthetic-token')).state).toBe('uncertain');
+    expect((await performGoogleAction(email(), id, previewHash(email()), 'synthetic-token', createdAt)).state).toBe('uncertain');
     vi.mocked(fetch).mockResolvedValueOnce(new Response('not json'));
-    expect((await performGoogleAction(email(), id, previewHash(email()), 'synthetic-token')).state).toBe('uncertain');
+    expect((await performGoogleAction(email(), id, previewHash(email()), 'synthetic-token', createdAt)).state).toBe('uncertain');
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ id: 'wrong' })));
-    expect((await performGoogleAction(event(), id, previewHash(event()), 'synthetic-token')).state).toBe('uncertain');
+    expect((await performGoogleAction(event(), id, previewHash(event()), 'synthetic-token', createdAt)).state).toBe('uncertain');
     expect(fetch).toHaveBeenCalledTimes(3);
   });
   it('reconciles only an exact ID plus private action/content binding with GET', async () => {

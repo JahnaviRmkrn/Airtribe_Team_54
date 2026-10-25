@@ -8,11 +8,11 @@ The organizer exposes `/organizer/#/gmail` and `/organizer/#/calendar`. Without 
 
 ## Deliberate scope choices
 
-- Gmail: `https://www.googleapis.com/auth/gmail.send` only. No inbox, message read, modify, labels, contacts, profile or send-as-settings permission. Only plain-text messages with explicitly entered To addresses are supported. No CC/BCC, attachments, HTML, custom From/aliases, automatic signatures, private-note insertion, scheduled sending or background sending.
+- Gmail: `https://www.googleapis.com/auth/gmail.send` only. No inbox, message read, modify, labels, contacts, profile or send-as-settings permission. Only plain-text messages with explicitly entered To addresses are supported. No CC/BCC, attachments, HTML, send-as aliases, automatic signatures, private-note insertion, scheduled sending or background sending.
 - Calendar: `https://www.googleapis.com/auth/calendar.events.owned` only. This Google scope can view/create/change/delete events on calendars the account owns; the UI discloses that capability. Application code only inserts the specifically previewed event in `primary`, or reads that exact event ID after an unknown result. No CalendarList, broad calendar management, Drive or mail-read scope is requested.
 - `calendar.app.created` was considered but not selected: it would require creating a separate app calendar instead of using the existing primary calendar. Adding that feature requires a separate scope/destination design and approval.
 
-The linked Google account is the account selected in the separate consent flow, **not necessarily the app's sign-in email**. These scopes do not provide a verified Gmail profile address. The preview therefore names the sender/destination as the selected Google account rather than fabricating its email. Gmail chooses the authenticated sender because no custom From header is supplied; authorized live acceptance and sender behavior remain a release-verification item. Reconnecting invalidates the old preview's authorization binding and requires a fresh preview.
+The linked Google account is the account selected in the separate consent flow, **not necessarily the app's sign-in email**. Send-only scope cannot read a verified Gmail profile address. The user must therefore enter the selected account's primary Gmail mailbox address; the UI labels it user-entered, not independently verified. The immutable preview shows that exact normalized From address. A separate acknowledgment confirms it is the primary mailbox selected at Google, not an alias. The same address is both the MIME From header and the encoded `users/{address}/messages/send` authorization target. There is no fallback to `me`, no sender substitution and no assertion that this app verified primary identity. Google must authorize the requested mailbox; an explicit rejection is terminal for that action. Reconnecting requires a fresh preview. Calendar still describes its destination as the selected account's primary calendar.
 
 ## Operator setup, only after separate approval
 
@@ -33,7 +33,7 @@ POST `/api/me/integrations/google/{gmail|calendar}` accepts one strict operation
 
 - `start`: user-initiated temporary OAuth connection.
 - `preview`: validates the draft and stores an encrypted, immutable owner/purpose/session-bound version and SHA-256 digest. No provider write occurs.
-- `confirm`: accepts only `id`, `previewHash` and `confirmed: true`. It never accepts replacement recipients or event details. The server atomically claims this exact preview before making a single provider request.
+- `confirm`: accepts only `id`, `previewHash`, `confirmed: true`, plus mandatory Gmail `senderAcknowledged: true`. It never accepts replacement recipients or event details. The server atomically claims this exact preview before making a single provider request.
 - `cancel`: cancels an unclaimed preview. Cancellation cannot undo a claimed/in-flight/completed action.
 - `reconcile`: Calendar only, a read-only GET of the one deterministic event ID. No second insert.
 - `disconnect`: removes only this temporary connector session; durable action records remain.
@@ -44,7 +44,7 @@ The PostgreSQL one-time claim has **no reclaim timeout**. Once claimed, it canno
 
 ## Provider outcomes and uncertainty
 
-- Gmail calls `users.messages.send` with `users/me` and base64url-encoded UTF-8 MIME. Unicode subject words and message bodies are MIME-encoded, recipient/header injection is rejected, addresses are normalized and shown exactly in preview. IDN domains become ASCII; SMTPUTF8 local parts and display-name address syntax are rejected explicitly.
+- Gmail calls `users.messages.send` with the exact previewed primary mailbox address as `userId` and base64url-encoded UTF-8 MIME. Required From and Date headers are included; Date is the immutable action creation timestamp shown in preview, not later browser input. Unicode subject words and message bodies are MIME-encoded, recipient/header injection is rejected, addresses are normalized and shown exactly in preview. IDN domains become ASCII; SMTPUTF8 local parts and display-name address syntax are rejected explicitly.
 - Calendar uses a UUID-derived lowercase legal base32hex event ID. The event stores private action/digest markers; GET reconciliation requires an exact match. Start and end are absolute RFC3339 instants with the previewed IANA time zone. DST gaps are rejected; overlapping times require an explicit earlier/later choice. Duration is elapsed minutes, so a DST transition may produce an unusual local end time that is shown in preview. End is always later than start. Plain-text descriptions are escaped for Calendar’s HTML-capable description field so markup cannot change the previewed meaning.
 - Guest notifications are explicitly previewed as `all` or `none`. Google warns some emails may still be sent with `none`, and external calendar sync may be impaired. Attendees can see the event details and attendee list. No default reminders, recurrence, Meet links or attachments are added.
 - There are **zero automatic provider-write retries**. Transport errors, timeouts, malformed successes, 5xx responses and conflicts are marked uncertain. A failed outcome-storage write leaves the durable claim intact. The UI offers status checking, not resend/recreate.
@@ -58,11 +58,13 @@ Encrypted message/event previews are removed after seven days by the approved cl
 
 Mock/unit tests cover MIME and Unicode, bad addresses/header injection, exact content hashes, DST gaps/overlaps (including half-hour shifts), provider status/timeout handling, no automatic retries, account/session swapping, explicit confirmation, callback-state replay and read-only reconciliation. PGlite tests exercise role privileges, immutability, concurrent claims, edit/cancel races, lost-session replay protection and cleanup.
 
-Before live rollout, an explicitly authorized operator must verify the intended Google project, consent/verification status, migration grants, clean callback logs, token cleanup, Gmail raw-message acceptance/default sender, Calendar primary ownership, notifications, and one controlled end-to-end action in dedicated test accounts with approved recipients. Neither mock tests nor local UI QA prove live OAuth, mail delivery or Calendar notifications work.
+Before live rollout, an explicitly authorized operator must verify the intended Google project, consent/verification status, migration grants, clean callback logs, token cleanup, Gmail raw-message acceptance/exact sender and wrong-mailbox rejection, Calendar primary ownership, notifications, and one controlled end-to-end action in dedicated test accounts with approved recipients. Neither mock tests nor local UI QA prove live OAuth, mail delivery or Calendar notifications work.
 
 ## Official references
 
 - [Gmail send method](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send)
+- [Gmail profile method and its scopes](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/getProfile)
+- [Gmail send-as identity requirements](https://developers.google.com/workspace/gmail/api/guides/alias_and_signature_settings)
 - [Gmail MIME sending guide](https://developers.google.com/workspace/gmail/api/guides/sending)
 - [Calendar scopes](https://developers.google.com/workspace/calendar/api/auth)
 - [Calendar event insert, event IDs and notifications](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert)

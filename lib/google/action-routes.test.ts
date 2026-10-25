@@ -17,12 +17,12 @@ import { preparePreview, previewHash } from './action-content';
 import type { StoredAction } from './action-store';
 const owner = '11111111-1111-4111-8111-111111111111', id = '44444444-4444-4444-8444-444444444444';
 const config: connector.GoogleConfig = { purpose: 'gmail', clientId: 'synthetic', clientSecret: 'synthetic', origin: 'https://example.test', redirectUri: 'https://example.test/api/me/integrations/google/gmail/callback', key: Buffer.alloc(32, 9), scope: 'https://www.googleapis.com/auth/gmail.send' };
-const preview = preparePreview('gmail', { to: ['person@example.test'], subject: 'Hello', body: 'Explicit body' });
+const preview = preparePreview('gmail', { from: 'sender@example.test', to: ['person@example.test'], subject: 'Hello', body: 'Explicit body' });
 const hash = previewHash(preview);
 const session = () => ({ id: 'a'.repeat(64), owner, lease: id, expiresAt: new Date(Date.now() + 600000).toISOString(), payload: { phase: 'ready', token: 'synthetic-token', tokenExpiresAt: Date.now() + 600000 } });
 const row = (state: StoredAction['state'] = 'preview'): StoredAction => ({ id, user_id: owner, purpose: 'gmail', session_id: 'a'.repeat(64), preview_hash: hash, encrypted_preview: 'synthetic-encrypted', state, provider_ref: null, created_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60000).toISOString() });
 const req = (body: unknown, origin: string | null = config.origin) => new Request(config.origin + '/api/me/integrations/google/gmail', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(body) });
-const confirm = () => ({ operation: 'confirm', id, previewHash: hash, confirmed: true });
+const confirm = () => ({ operation: 'confirm', id, previewHash: hash, confirmed: true, senderAcknowledged: true });
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubEnv('GOOGLE_GMAIL_ENABLED', 'true'); vi.stubEnv('GOOGLE_CALENDAR_ENABLED', 'true');
   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Live network disabled'); }));
@@ -69,12 +69,16 @@ describe('explicit action endpoint boundaries', () => {
   });
   it('preview stores only bounded validated data without any external write', async () => {
     vi.mocked(store.storePreview).mockResolvedValue(row());
-    expect((await actionRoutes('gmail').POST(req({ operation: 'preview', draft: { to: ['person@example.test'], subject: 'Hello', body: 'Explicit body' } }))).status).toBe(200);
+    expect((await actionRoutes('gmail').POST(req({ operation: 'preview', draft: { from: 'sender@example.test', to: ['person@example.test'], subject: 'Hello', body: 'Explicit body' } }))).status).toBe(200);
     expect(store.storePreview).toHaveBeenCalledWith(config, expect.objectContaining({ owner }), preview);
     expect(provider.performGoogleAction).not.toHaveBeenCalled();
   });
   it.each([{ ...confirm(), confirmed: false }, { ...confirm(), to: ['evil@example.test'] }, { ...confirm(), body: 'replacement' }, { ...confirm(), previewHash: 'wrong' }])('rejects unconfirmed or mutable confirmation payload %j', async (body) => {
     expect((await actionRoutes('gmail').POST(req(body))).status).toBe(400); expect(store.claimAction).not.toHaveBeenCalled();
+  });
+  it('requires explicit sender/account acknowledgment before sending', async () => {
+    const body = { ...confirm() }; delete (body as { senderAcknowledged?: boolean }).senderAcknowledged;
+    expect((await actionRoutes('gmail').POST(req(body))).status).toBe(400); expect(provider.performGoogleAction).not.toHaveBeenCalled();
   });
   it('rejects an altered preview binding and switched account/session', async () => {
     expect((await actionRoutes('gmail').POST(req({ ...confirm(), previewHash: 'f'.repeat(64) }))).status).toBe(409);
@@ -84,7 +88,7 @@ describe('explicit action endpoint boundaries', () => {
   it('claims durably before its single write and saves the outcome', async () => {
     const response = await actionRoutes('gmail').POST(req(confirm()));
     expect(await response.json()).toMatchObject({ action: { state: 'completed' } });
-    expect(provider.performGoogleAction).toHaveBeenCalledExactlyOnceWith(preview, id, hash, 'synthetic-token');
+    expect(provider.performGoogleAction).toHaveBeenCalledExactlyOnceWith(preview, id, hash, 'synthetic-token', expect.any(String));
     expect(vi.mocked(store.claimAction).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(provider.performGoogleAction).mock.invocationCallOrder[0]);
     expect(store.finishAction).toHaveBeenCalledWith(config, owner, id, { state: 'completed', providerRef: 'provider123' });
   });
