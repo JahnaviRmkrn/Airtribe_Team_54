@@ -63,10 +63,20 @@ an entire Google project grant and inadvertently disconnect other purposes.
    credentials in URLs. Key creation/storage and access changes require the
    operator's explicit authorization.
 5. Apply reviewed migration
-   `supabase/migrations/20261025110000_google_contact_import.sql` through the
+   `supabase/migrations/20261025110000_google_contact_import.sql` and additive
+   `supabase/migrations/20261025114000_google_session_replacement.sql` through the
    deployment's normal authorized procedure. The service-role client needs
    `SUPABASE_SERVICE_ROLE_KEY` and the normal Supabase URL/anon settings. The
-   migration is authored code, not evidence it has been applied.
+   migrations are authored code, not evidence they have been applied. The
+   replacement RPC and protected-action column are required for all shared
+   connector purposes, including Contacts, Sheets, Gmail and Calendar. A missing
+   migration blocks new sessions and mutation checkpoints; there is no upsert
+   fallback.
+
+   Status uses a read-only schema capability probe; environment variables alone
+   do not make this feature ready. Upgrade backfill protects all already-live
+   sessions until explicit disconnect or their original expiry, since encrypted
+   legacy payloads cannot safely be classified in SQL.
 6. Schedule `cleanup_google_connector_sessions()` at least every 15 minutes
    using the platform's supported scheduler. No scheduler is installed by the
    migration. Expired sessions are already rejected; scheduled cleanup removes
@@ -126,7 +136,14 @@ not logged with credentials or contact payloads.
 Final confirmations submit only the stored preview's random action ID. They
 cannot supply alternate contacts, spreadsheet IDs or cell values. A client ref
 blocks same-tick double clicks; a server lease and persisted operation state
-handle separate requests. Every operation checkpoints its intent before the
+handle separate requests. New connection creation is atomic by owner/purpose:
+row/advisory locks reject an active lease or protected action even if a new
+browser has no cookie, and close the gap between a cookie precheck and a
+concurrent confirmation. Action checkpoints set a persistent protection marker;
+reads, OAuth consumption, final saves and stale leases never clear it. Reconnect
+after any action requires checking its result and explicitly ending that purpose
+connection (or original session expiry). The same connected session can still
+prepare subsequent batches after completion. Every operation checkpoints its intent before the
 external action and retains that state on uncertainty.
 
 Export creates a file only after confirmation, then checkpoints the returned

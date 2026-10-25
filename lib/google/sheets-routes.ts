@@ -6,7 +6,7 @@ import { HttpError, requireUser } from '@/lib/http';
 import { adminClient } from '@/lib/supabase/admin';
 import {
   acquireGoogleSession, authorization, checkpointGoogleSession, consumeGoogleAuthorization,
-  createGoogleSession, deleteGoogleSession, discardGoogleSession, exchangeCode, googleConfig,
+  createGoogleSession, deleteGoogleSession, discardGoogleSession, exchangeCode, googleConfig, googleConnectorSchemaReady,
   googleResponse, googleRoute, releaseGoogleSession, requireGoogleConfig, sameOrigin,
   saveGoogleSession, validState, type GoogleConfig, type Session,
 } from './connector';
@@ -67,8 +67,9 @@ async function withSession(req: Request, mode: SheetsMode, work: (config: Google
 export const sheetsStatus = (mode: SheetsMode) => googleRoute(async req => {
   const { user, supabase } = await requireUser(req);
   const config = googleConfig(purpose(mode));
+  const configured = !!config && await googleConnectorSchemaReady();
   let sessionView: SheetsSessionView = { connected: false };
-  if (config) {
+  if (config && configured) {
     let session: Session<SheetsPayload> | undefined;
     try { session = await acquireGoogleSession<SheetsPayload>(config, user.id); sessionView = view(session.payload); }
     catch (error) { if (!(error instanceof HttpError && error.status === 410)) throw error; }
@@ -82,7 +83,7 @@ export const sheetsStatus = (mode: SheetsMode) => googleRoute(async req => {
     contactsTruncated = (result.data?.length ?? 0) > 1000;
     contacts = (result.data || []).slice(0, 1000);
   }
-  return googleResponse({ configured: !!config, session: sessionView, contacts, contactsTruncated });
+  return googleResponse({ configured, session: sessionView, contacts, contactsTruncated });
 });
 
 export const sheetsConnect = (mode: SheetsMode) => googleRoute(async req => {
@@ -167,7 +168,9 @@ export const sheetsImportPreview = googleRoute(async req => {
     const known: SheetContact[] = [];
     const previewRows = rows.map(row => {
       const duplicate = duplicateIds.has(String(row.row)) || !!row.contact && known.some(previous => previous.email && row.contact!.email ? previous.email.toLowerCase() === row.contact!.email!.toLowerCase() : previous.name.toLowerCase() === row.contact!.name.toLowerCase());
-      if (row.contact) known.push(row.contact);
+      // A skipped name-only row must not bridge two distinct nonempty emails.
+      // Only rows that this batch will actually import affect later candidates.
+      if (row.contact && !duplicate) known.push(row.contact);
       return { ...row, duplicate };
     });
     session.payload.importPreview = { id: randomUUID(), rows: previewRows, includeNotes: input.includeNotes };

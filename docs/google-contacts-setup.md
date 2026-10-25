@@ -48,14 +48,19 @@ connector settings are deliberately not added to the existing Vault bootstrap.
    Local development may use an explicitly configured `http://localhost:PORT`
    or `http://127.0.0.1:PORT` only outside production. Do not use real data for
    development. No `NEXT_PUBLIC_` Google credential variables are supported.
-4. Review and apply `20261025110000_google_contact_import.sql` through the normal
+4. Review and apply `20261025110000_google_contact_import.sql` and the additive
+   `20261025114000_google_session_replacement.sql` through the normal
    authorized database-change process. It creates an RLS-protected service-only
    session table and service-only import/preview/cleanup RPCs. The ordinary
-   signed-in user and anonymous roles cannot access them directly.
+   signed-in user and anonymous roles cannot access them directly. The second
+   migration is required by every shared connector purpose (Contacts, Sheets,
+   Gmail and Calendar): missing RPC/column schema fails closed, not back to an
+   unsafe upsert.
 5. Schedule `select public.cleanup_google_connector_sessions();` at least every
    15 minutes using the deployment's supported privileged scheduler. This
    migration does **not** install cron or create a schedule. Expired rows are
-   also removed on new connection starts and expired-session access. Access is
+   also removed on expired-session access; a new connection safely replaces an
+   expired same-owner/purpose row only after checking its lease. Access is
    rejected after 15 minutes even if cleanup has not run; scheduled cleanup
    bounds physical ciphertext retention for abandoned imports.
 6. Redact query strings for the OAuth callback in edge/proxy/access logging and
@@ -124,7 +129,15 @@ These later purposes use their own `GOOGLE_SHEETS_*`, `GOOGLE_GMAIL_*`, and
 `GOOGLE_CALENDAR_*` client settings and purpose-specific consent UI. Their scope
 entries do not enable them or imply approval to send messages/create events.
 
-- `createGoogleSession(config, owner, payload)` stores an encrypted new session.
+- `createGoogleSession(config, owner, payload)` calls an atomic service-only
+  owner/purpose replacement RPC. An active lease or unexpired protected action
+  blocks replacement regardless of cookies, including a different browser.
+  Check the prior result and explicitly disconnect before reconnecting.
+- `googleConnectorSchemaReady()` calls the read-only service-role readiness RPC.
+  Status routes must check it before reporting configuration ready. It verifies
+  the replacement function and protection column, without creating a session.
+  Upgrade backfill conservatively protects all already-live ciphertext because
+  a migration cannot inspect its encrypted action state.
 - `googleAccessToken(session)` is a server-only expiry check after acquiring the
   authenticated owner's session; it never refreshes or makes a provider request.
 - `acquireGoogleSession<T>(config, owner)` returns
@@ -137,6 +150,10 @@ entries do not enable them or imply approval to send messages/create events.
   result while retaining/renewing an unexpired 30-second lease. It never extends
   the absolute session lifetime or revives an expired lease. Checkpoint before
   a side effect, not only afterward; an uncertain action must not be replayed.
+  Checkpoint atomically sets `protected_action=true`. Ordinary saves, reads,
+  OAuth consumption and lease release cannot clear this marker. It remains until
+  explicit disconnect or original session expiry, including after completed
+  actions; the same session may still prepare subsequent confirmed batches.
 - `discardGoogleSession(config, session)` removes only that session;
   `deleteGoogleSession(config, owner)` is explicit current-purpose cancellation.
 - `googleJson` is for bounded provider requests and never automatically retries.

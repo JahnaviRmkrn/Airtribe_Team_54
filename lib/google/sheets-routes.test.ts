@@ -55,7 +55,7 @@ beforeEach(() => {
   const persist = async (config: GoogleConfig, session: Session<SheetsPayload>) => { stored.set(config.purpose, structuredClone(session)); };
   mocks.save.mockImplementation(persist); mocks.checkpoint.mockImplementation(persist);
   mocks.remove.mockImplementation(async (config: GoogleConfig) => { stored.delete(config.purpose); });
-  mocks.rpc.mockImplementation(async (name: string) => ({ data: name === 'preview_google_contact_duplicates' ? [] : { added: 1, skipped: 0 }, error: null }));
+  mocks.rpc.mockImplementation(async (name: string) => ({ data: name === 'google_connector_session_ready' ? true : name === 'preview_google_contact_duplicates' ? [] : { added: 1, skipped: 0 }, error: null }));
   vi.stubGlobal('fetch', vi.fn(() => { throw new Error('No network: configure a synthetic mock'); }));
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
@@ -75,6 +75,12 @@ describe('Sheets session and consent isolation', () => {
     mocks.requireUser.mockRejectedValue(new HttpError(401, 'Not signed in'));
     expect((await sheetsStatus('export')(request())).status).toBe(401);
   });
+  it('does not advertise a ready connector when the additive schema probe is missing', async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { message: 'Missing readiness RPC' } });
+    const result = await (await sheetsStatus('export')(request())).json();
+    expect(result.configured).toBe(false); expect(result.session.connected).toBe(false);
+    expect(mocks.acquire).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
+  });
   it.each([['import', 'spreadsheets.readonly'], ['export', 'drive.file']] as const)('requests only %s scope and creates no Google file', async (mode, scope) => {
     const result = await (await sheetsConnect(mode)(request({}))).json();
     const url = new URL(result.url);
@@ -82,6 +88,23 @@ describe('Sheets session and consent isolation', () => {
     expect(url.searchParams.get('include_granted_scopes')).toBe('false');
     expect(url.searchParams.get('redirect_uri')).toBe(`${origin}/api/me/integrations/google/sheets-${mode}/callback`);
     expect(fetch).not.toHaveBeenCalled(); expect(mocks.create).toHaveBeenCalledOnce();
+  });
+  it('honors the owner/purpose database guard when another browser has no current cookie', async () => {
+    const previewId = await prepareExport();
+    payload().exportRun = { previewId, state: 'uncertain' };
+    const before = structuredClone(payload());
+    mocks.acquire.mockRejectedValueOnce(new HttpError(410, 'No cookie in this browser'));
+    mocks.create.mockRejectedValueOnce(new HttpError(409, 'A previous Google action may have completed.'));
+    expect((await sheetsConnect('export')(request({}))).status).toBe(409);
+    expect(mocks.create).toHaveBeenCalledOnce(); expect(payload()).toEqual(before);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('honors the atomic replacement guard when confirm starts after the cookie precheck releases its lease', async () => {
+    const previewId = await prepareExport();
+    mocks.release.mockImplementationOnce(async () => { payload().exportRun = { previewId, state: 'creating' }; });
+    mocks.create.mockImplementationOnce(async () => { throw new HttpError(409, 'A Google action is still running.'); });
+    expect((await sheetsConnect('export')(request({}))).status).toBe(409);
+    expect(payload().exportRun?.state).toBe('creating'); expect(fetch).not.toHaveBeenCalled();
   });
   it('invalid state and cancelled consent never import, export, or exchange a token', async () => {
     payload('import').phase = 'oauth'; payload('import').state = 'a'.repeat(43); payload('import').verifier = 'verifier';
@@ -144,6 +167,14 @@ describe('Sheets source, mapping and imports', () => {
     expect(payload('import').importPreview?.rows.map(r => r.duplicate)).toEqual([false, true]);
     expect(payload('import').importPreview?.rows[0].contact?.notes).toBeNull();
     expect(mocks.rpc.mock.calls.every(call => call[0] === 'preview_google_contact_duplicates')).toBe(true); expect(fetch).not.toHaveBeenCalled();
+  });
+  it('never lets a skipped name-only duplicate bridge two distinct email contacts', async () => {
+    payload('import').source!.values = [['Name', 'Email'], ['Ada', 'a@example.test'], ['Ada', ''], ['Ada', 'b@example.test']];
+    await sheetsImportPreview(request({ rows: [2, 3, 4], mapping: { name: 0, email: 1 }, defaultCategory: 'personal' }));
+    expect(payload('import').importPreview!.rows.map(row => row.duplicate)).toEqual([false, true, false]);
+    await sheetsImportConfirm(request({ previewId: payload('import').importPreview!.id }));
+    const write = mocks.rpc.mock.calls.find(call => call[0] === 'import_google_contacts')!;
+    expect(write[1].p_contacts.map((contact: { email: string }) => contact.email)).toEqual(['a@example.test', 'b@example.test']);
   });
   it('saves only the server-side reviewed rows on explicit confirmation; repeat clicks have no second write', async () => {
     await sheetsImportPreview(request({ rows: [2], mapping: { name: 0, email: 1, notes: 2 }, defaultCategory: 'personal', includeNotes: true }));

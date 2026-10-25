@@ -104,20 +104,27 @@ export function googleAccessToken(session: Session<{ token: string | null; token
   }
   return session.payload.token;
 }
+export async function googleConnectorSchemaReady() {
+  const { data, error } = await adminClient().rpc('google_connector_session_ready');
+  return !error && data === true;
+}
 export async function createGoogleSession(config: GoogleConfig, owner: string, payload: unknown) {
   const handle = randomBytes(32).toString('base64url');
   const id = hashHandle(handle);
   const db = adminClient();
-  // Opportunistic cleanup supplements the operator's scheduled expiry cleanup.
-  const cleanup = await db.from(TABLE).delete().lte('expires_at', new Date().toISOString());
-  if (cleanup.error) throw new HttpError(503, SETUP);
-  const result = await db.from(TABLE).upsert({
-    id, user_id: owner, purpose: config.purpose,
-    encrypted_payload: seal(payload, config, id, owner),
-    expires_at: new Date(Date.now() + SESSION_SECONDS * 1000).toISOString(),
-    lease: null, locked_until: null,
-  }, { onConflict: 'user_id,purpose' });
-  if (result.error) throw new HttpError(503, SETUP);
+  // The database checks the owner's current purpose row even when this browser
+  // has no cookie. Its row lock also closes the connect/confirm race window.
+  // Do not delete expired rows first: their lease may still be in flight.
+  const result = await db.rpc('replace_google_connector_session', {
+    p_id: id, p_owner: owner, p_purpose: config.purpose,
+    p_payload: seal(payload, config, id, owner),
+    p_expires_at: new Date(Date.now() + SESSION_SECONDS * 1000).toISOString(),
+  });
+  if (result.error) {
+    if (result.error.message?.includes('connector_busy')) throw new HttpError(409, 'A Google action is still running. Wait and check its result before reconnecting.');
+    if (result.error.message?.includes('connector_action_pending')) throw new HttpError(409, 'A previous Google action may have completed. Check its result, then explicitly end this connection before reconnecting.');
+    throw new HttpError(503, SETUP);
+  }
   await setGoogleCookie(config, handle);
 }
 
@@ -148,6 +155,7 @@ export async function checkpointGoogleSession<T>(config: GoogleConfig, session: 
   const now = new Date().toISOString();
   const { data, error } = await adminClient().from(TABLE).update({
     encrypted_payload: seal(session.payload, config, session.id, session.owner),
+    protected_action: true,
     locked_until: new Date(Math.min(Date.now() + 30_000, Date.parse(session.expiresAt))).toISOString(),
   }).eq('id', session.id).eq('user_id', session.owner).eq('purpose', config.purpose).eq('lease', session.lease)
     .gt('expires_at', now).gt('locked_until', now).select('id');
