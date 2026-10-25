@@ -29,4 +29,16 @@ describe('write-downloads-info script', () => {
     const manifest = JSON.parse(readFileSync(join(dir, 'downloads.json'), 'utf8'));
     expect(manifest.files.map((f) => f.name)).toEqual(['Muop-9.9.9.apk']);
   });
+
+  it('labels universal macOS builds as Intel + Apple Silicon', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'muop-downloads-'));
+    writeFileSync(join(dir, 'Muop-9.9.9-universal.dmg'), 'dmg');
+    writeFileSync(join(dir, 'Muop-9.9.9-universal-mac.zip'), 'zip');
+    execFileSync(process.execPath, [new URL('../scripts/write-downloads-info.mjs', import.meta.url).pathname, dir]);
+    const manifest = JSON.parse(readFileSync(join(dir, 'downloads.json'), 'utf8'));
+    expect(manifest.files.map((f) => f.label)).toEqual([
+      'macOS (.zip) · Intel + Apple Silicon',
+      'macOS (.dmg) · Intel + Apple Silicon',
+    ]);
+  });
 });
