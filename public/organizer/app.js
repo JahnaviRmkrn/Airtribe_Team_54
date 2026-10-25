@@ -40,14 +40,20 @@ const parseInterests = (text) => String(text || '').split(',').map((s) => s.trim
 class AuthError extends Error {}
 
 async function api(path, opts = {}) {
+  // A late auth failure belongs to the view that started this request, not
+  // a newer navigation (including a hash change before hashchange runs).
+  const requestNav = navGen;
+  const requestHash = location.hash || '';
   const res = await fetch(path, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   });
   if (res.status === 401) {
-    const next = '/organizer/' + (location.hash || '');
-    location.href = '/login?next=' + encodeURIComponent(next);
+    if (!stale(requestNav) && (location.hash || '') === requestHash) {
+      const next = '/organizer/' + requestHash;
+      location.href = '/login?next=' + encodeURIComponent(next);
+    }
     throw new AuthError('Not signed in - redirecting to login.');
   }
   if (!res.ok) {
