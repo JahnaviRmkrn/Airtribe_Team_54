@@ -17,25 +17,8 @@
   const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
 
   // Mic -> 16 kHz mono Int16 frames, done in an AudioWorklet so the UI thread stays free.
-  const WORKLET = `
-    class Pcm16 extends AudioWorkletProcessor {
-      constructor() { super(); this.buf = []; this.ratio = sampleRate / 16000; this.pos = 0; }
-      process(inputs) {
-        const ch = inputs[0] && inputs[0][0];
-        if (!ch) return true;
-        for (; this.pos < ch.length; this.pos += this.ratio) {
-          const s = Math.max(-1, Math.min(1, ch[Math.floor(this.pos)]));
-          this.buf.push(s < 0 ? s * 0x8000 : s * 0x7fff);
-        }
-        this.pos -= ch.length;
-        if (this.buf.length >= 1600) { // 100 ms
-          this.port.postMessage(Int16Array.from(this.buf).buffer, []);
-          this.buf = [];
-        }
-        return true;
-      }
-    }
-    registerProcessor('pcm16', Pcm16);`;
+  // Served as a file so the page CSP can keep script-src free of blob:.
+  const WORKLET_URL = '/organizer/pcm16-worklet.js';
 
   const b64 = (buf) => {
     const bytes = new Uint8Array(buf);
@@ -64,9 +47,7 @@
     });
     const micCtx = new AudioContext();
     const outCtx = new AudioContext({ sampleRate: 24000 });
-    const workletUrl = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
-    await micCtx.audioWorklet.addModule(workletUrl);
-    URL.revokeObjectURL(workletUrl);
+    await micCtx.audioWorklet.addModule(WORKLET_URL);
     const src = micCtx.createMediaStreamSource(stream);
     const node = new AudioWorkletNode(micCtx, 'pcm16');
     src.connect(node);
