@@ -159,12 +159,11 @@ enabled = true
 # in emails.
 # Local only. Hosted Auth URLs are set in the dashboard (DEPLOY.md); do not run
 # `supabase config push` with these values or prod links will point at localhost.
-site_url = "https://muop.win"
+site_url = "http://localhost:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
-# Public Supabase auth URL (api.muop.win via the Cloudflare tunnel) so OAuth providers call back to a fixed address.
-external_url = "https://api.muop.win/auth/v1"
+# external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["http://localhost:3000/**", "http://127.0.0.1:3000/**", "https://*.trycloudflare.com/**", "https://cachyos-x8664.tail389ef0.ts.net:8443/**", "https://muop.win/**"]
+additional_redirect_urls = ["http://localhost:3000/**", "http://127.0.0.1:3000/**"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -348,7 +347,7 @@ email_optional = false
 # (`custom:instagram`) configured in the dashboard - same guide.
 
 [auth.external.google]
-enabled = true
+enabled = false
 client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
 secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
 # Overrides the default auth callback URL derived from auth.external_url.
@@ -357,13 +356,13 @@ redirect_uri = ""
 skip_nonce_check = true
 
 [auth.external.facebook]
-enabled = true
+enabled = false
 client_id = "env(SUPABASE_AUTH_EXTERNAL_FACEBOOK_CLIENT_ID)"
 secret = "env(SUPABASE_AUTH_EXTERNAL_FACEBOOK_SECRET)"
 redirect_uri = ""
 
 [auth.external.linkedin_oidc]
-enabled = true
+enabled = false
 client_id = "env(SUPABASE_AUTH_EXTERNAL_LINKEDIN_OIDC_CLIENT_ID)"
 secret = "env(SUPABASE_AUTH_EXTERNAL_LINKEDIN_OIDC_SECRET)"
 redirect_uri = ""
