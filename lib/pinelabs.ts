@@ -38,6 +38,28 @@ export function amountPaise(pricePerPerson: number | null | undefined): number |
   return Number.isSafeInteger(pricePerPerson * 100) ? pricePerPerson * 100 : null;
 }
 
+// Pine Labs rejects (HTTP 400) a customer first_name with brackets, emoji,
+// ZWJ, curly quotes or over 50 UTF-16 units; guest names allow all of those,
+// and a rejected create locks the guest into reconciliation. Keep letters,
+// non-enclosing marks after a base, digits and ' - . (verified against UAT
+// 2026-10-26), else fall back to "Guest".
+export function customerName(guestName: string | null | undefined): string {
+  const clean = (guestName ?? '')
+    .replace(/[‘’]/g, "'")
+    .replace(/[\p{Cf}\p{Me}︀-️\u{E0100}-\u{E01EF}]/gu, '')
+    .replace(/[^\p{L}\p{M}\p{N}' .-]+/gu, ' ')
+    .replace(/(^|[^\p{L}\p{M}\p{N}])\p{M}+/gu, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  let name = '';
+  for (const ch of clean) {
+    if (name.length + ch.length > 50) break;
+    name += ch;
+  }
+  name = name.trim();
+  return /[\p{L}\p{N}]/u.test(name) ? name : 'Guest';
+}
+
 // Pine Labs order statuses -> ours. Unknown or in-flight states stay pending.
 // AUTHORIZED is not captured money (we never pre-auth), so it is not "paid".
 export function mapOrderStatus(status: string | null | undefined): PaymentStatus {
@@ -74,7 +96,7 @@ export async function createOrder(o: { amountPaise: number; merchantRef: string;
     merchant_order_reference: o.merchantRef,
     order_amount: { value: o.amountPaise, currency: 'INR' },
     callback_url: o.callbackUrl,
-    purchase_details: { customer: { first_name: o.guestName } },
+    purchase_details: { customer: { first_name: customerName(o.guestName) } },
   });
   if (typeof res.order_id !== 'string' || typeof res.redirect_url !== 'string') {
     throw new HttpError(502, 'Payment provider error, please retry');
