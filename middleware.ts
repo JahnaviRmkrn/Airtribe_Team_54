@@ -16,9 +16,19 @@ function httpsRedirect(request: NextRequest) {
   return NextResponse.redirect(new URL(request.nextUrl.pathname + request.nextUrl.search, SITE.origin), 308);
 }
 
+// Pine Labs returns the guest to callback_url (/m/:token?payment=done) with a
+// form POST, which a page answers with 405. Turn it into a GET of the same
+// path. The POST body is ignored: the room checks status via getOrder. A
+// relative Location keeps the visitor on whatever host they are using.
+function paymentReturn(request: NextRequest) {
+  if (request.method !== 'POST' || !/^\/m\/[A-Za-z0-9_-]+$/.test(request.nextUrl.pathname)) return null;
+  if (request.nextUrl.searchParams.get('payment') !== 'done') return null;
+  return new NextResponse(null, { status: 303, headers: { Location: `${request.nextUrl.pathname}?payment=done` } });
+}
+
 // Keeps the Supabase auth session cookie fresh on every request.
 export async function middleware(request: NextRequest) {
-  const redirect = httpsRedirect(request);
+  const redirect = httpsRedirect(request) ?? paymentReturn(request);
   if (redirect) return redirect;
   // This owner-bound mutation authenticates its own request snapshot without
   // refreshing/persisting cookies. A late middleware cookie would defeat that

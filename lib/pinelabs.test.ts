@@ -36,15 +36,25 @@ describe('customerName', () => {
     ['அரவிந்த்', 'அரவிந்த்'],
     ['José', 'José'],
     ['  <b>Asha</b>  ', 'b Asha b'],
+    ['Asha 1️⃣', 'Asha 1'],
+    ['Asha ❤️', 'Asha'],
+    ['A⃝', 'A'],
+    ['́̂1', '1'],
+    ['क्‍ष', 'क्ष'],
+    ['D’Souza', "D'Souza"],
     ['🚀🎉', 'Guest'],
     ['()', 'Guest'],
     ['', 'Guest'],
     [null, 'Guest'],
   ])('%j -> %j', (input, out) => expect(pl.customerName(input)).toBe(out));
 
-  it('caps at 50 characters', () => {
+  // UAT accepts 50 Tamil letters (150 bytes) but not 50 astral letters (100 UTF-16 units).
+  it('caps at 50 UTF-16 units without splitting a surrogate pair', () => {
     expect(pl.customerName('x'.repeat(60))).toBe('x'.repeat(50));
     expect(pl.customerName('a'.repeat(49) + ' b')).toBe('a'.repeat(49));
+    expect(pl.customerName('அ'.repeat(60))).toBe('அ'.repeat(50));
+    expect(pl.customerName('𝓐'.repeat(30))).toBe('𝓐'.repeat(25));
+    expect(pl.customerName('x' + '𝓐'.repeat(30))).toBe('x' + '𝓐'.repeat(24));
   });
 });
 

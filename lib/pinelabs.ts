@@ -38,12 +38,25 @@ export function amountPaise(pricePerPerson: number | null | undefined): number |
   return Number.isSafeInteger(pricePerPerson * 100) ? pricePerPerson * 100 : null;
 }
 
-// Pine Labs rejects (HTTP 400) a customer first_name with brackets, emoji or
-// over 50 chars; guest names allow all of those. Keep letters, digits and
-// ' - . (verified against UAT 2026-10-26), else fall back to "Guest".
+// Pine Labs rejects (HTTP 400) a customer first_name with brackets, emoji,
+// ZWJ, curly quotes or over 50 UTF-16 units; guest names allow all of those,
+// and a rejected create locks the guest into reconciliation. Keep letters,
+// non-enclosing marks after a base, digits and ' - . (verified against UAT
+// 2026-10-26), else fall back to "Guest".
 export function customerName(guestName: string | null | undefined): string {
-  const name = Array.from((guestName ?? '').replace(/[^\p{L}\p{M}\p{N}' .-]+/gu, ' ').replace(/\s+/g, ' ').trim())
-    .slice(0, 50).join('').trim();
+  const clean = (guestName ?? '')
+    .replace(/[‘’]/g, "'")
+    .replace(/[\p{Cf}\p{Me}︀-️\u{E0100}-\u{E01EF}]/gu, '')
+    .replace(/[^\p{L}\p{M}\p{N}' .-]+/gu, ' ')
+    .replace(/(^|[^\p{L}\p{M}\p{N}])\p{M}+/gu, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  let name = '';
+  for (const ch of clean) {
+    if (name.length + ch.length > 50) break;
+    name += ch;
+  }
+  name = name.trim();
   return /[\p{L}\p{N}]/u.test(name) ? name : 'Guest';
 }
 
