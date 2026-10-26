@@ -19,6 +19,15 @@ Both guest-room implementations now expose Your payment after joining and venue 
 
 The existing server order remains authoritative. Paid orders are reused, provider status is persisted before reporting it, and a price change cannot overwrite an existing pending order. Such a conflict must be reconciled by the organizer. Provider error details are not logged because SDK errors can include credentials. Checkout URLs must be HTTPS without userinfo; amount conversion rejects unsafe integers.
 
+## UAT run (2026-10-26)
+
+Pine Labs support issued UAT merchant credentials (MID 111077); they live only in the Supabase Vault (`PINE_CLIENT_ID`, `PINE_CLIENT_SECRET`, `PINE_ENV=uat`). On muop.win, a test meetup with a ₹200 confirmed venue:
+
+- Order created, amount 20000 paise INR; a repeat Pay reused the same order.
+- Failed card attempts left our status `pending`. After Pine auto-cancelled the order (10 failed attempts), status became `cancelled` from getOrder.
+- Visa 4012 0010 3714 1112, CVV **065** (not 123), any future expiry. In-page "Enter OTP" did not accept 123456/111111/000000. "Complete on your bank's website" opens the Cardinal 3DS simulator in a popup, which shows its OTP (`1234`). Payment succeeded → status `paid`, and a repeat Pay returned the paid order without creating a new one.
+- Found two bugs: (1) Pine returns the browser to `callback_url` with a form **POST**, and `/m/:token` answered 405. Middleware now 303s it to a GET. (2) `first_name` with brackets/emoji/ZWJ/curly quotes or over 50 UTF-16 units → HTTP 400, which locked that guest into reconciliation. `customerName()` now sanitises it.
+
 ## Current verification boundary
 
 Unit tests exercise UI status transitions, explicit-only redirects, duplicate requests, closed rooms, missing configuration, unsafe URLs, toolkit arguments and status mapping. These use mocks; they are not Pine Labs UAT receipts. No real order or payment has been made.
