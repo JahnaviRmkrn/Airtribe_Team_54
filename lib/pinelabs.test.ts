@@ -26,6 +26,28 @@ describe('amountPaise', () => {
   });
 });
 
+describe('customerName', () => {
+  it.each([
+    ['Asha', 'Asha'],
+    ['Arvind (A)', 'Arvind A'],
+    ['Arvind 🚀', 'Arvind'],
+    ["D'Souza", "D'Souza"],
+    ['A.R. Rahman', 'A.R. Rahman'],
+    ['அரவிந்த்', 'அரவிந்த்'],
+    ['José', 'José'],
+    ['  <b>Asha</b>  ', 'b Asha b'],
+    ['🚀🎉', 'Guest'],
+    ['()', 'Guest'],
+    ['', 'Guest'],
+    [null, 'Guest'],
+  ])('%j -> %j', (input, out) => expect(pl.customerName(input)).toBe(out));
+
+  it('caps at 50 characters', () => {
+    expect(pl.customerName('x'.repeat(60))).toBe('x'.repeat(50));
+    expect(pl.customerName('a'.repeat(49) + ' b')).toBe('a'.repeat(49));
+  });
+});
+
 describe('mapOrderStatus', () => {
   it.each([
     ['PROCESSED', 'paid'],
