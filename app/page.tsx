@@ -31,6 +31,13 @@ async function loadDownloads(): Promise<DownloadInfo[]> {
   } catch { return []; }
 }
 
+const LISTED_ON = [
+  { name: "Startup Fame", href: "https://startupfa.me/s/muop?utm_source=muop.win" },
+  { name: "Twelve Tools", href: "https://twelve.tools" },
+  { name: "ToolPilot", href: "https://www.toolpilot.ai" },
+  { name: "Fazier", href: "https://fazier.com" },
+];
+
 const mb = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
 
 // Signed-in users skip the landing page and go straight to the organizer app.
@@ -199,6 +206,11 @@ export default async function Home() {
           <a href="/traction" className="back-top">Live traction <ArrowUpRight size={14} /></a>
           <a href="#top" className="back-top">Back to the beginning <ArrowUpRight size={14} /></a>
         </div>
+        {/* Directory listings verify a link back to them from this page; keep these followable. */}
+        <nav className="container-wide listed-on" aria-label="muop is listed on">
+          <span>Listed on</span>
+          {LISTED_ON.map((l) => <a key={l.href} href={l.href} target="_blank" rel="noopener">{l.name}</a>)}
+        </nav>
       </footer>
     </main>
   );
