@@ -13,6 +13,8 @@ export const metadata: Metadata = {
   description:
     "muop helps you nurture friendships, family, professional relationships, and community, one thoughtful check-in and meaningful meetup at a time.",
   robots: { index: true, follow: true },
+  // Google Search Console ownership (URL-prefix property https://muop.win/).
+  verification: { google: "6-5zogWuV1QW57u0Zu1hq-4lpLDs9-Bzaisvm-cRgGY" },
   openGraph: { title: TITLE, description: SHARE_DESCRIPTION, type: "website" },
   twitter: { card: "summary_large_image", title: TITLE, description: SHARE_DESCRIPTION },
 };
