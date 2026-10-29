@@ -178,6 +178,8 @@
 .home .site-footer { background:#fffdf4; }
 .home .footer-inner { min-height:92px;display:flex;align-items:center;justify-content:space-between;gap:20px; }
 .home .footer-inner .brand-mark { font-size:23px; }.home .footer-inner>span { color:#8a7961;font-size:11px; }
+.home .listed-on { display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;padding-block:0 18px;font-size:11px;color:#8a7961; }
+.home .listed-on a { color:#527c72;text-decoration:none; }.home .listed-on a:hover { text-decoration:underline; }
 .home .back-top { display:flex;align-items:center;gap:7px;color:#527c72;text-decoration:none;font-size:11px; }
 
 @media (max-width: 900px) {
