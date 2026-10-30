@@ -115,7 +115,7 @@ describe('public room privacy, using real routes and a service-role PostgreSQL a
     const response = await invoke(viewRoom);
     expect(response.status).toBe(200);
     const payload = await response.json();
-    expect(Object.keys(payload).sort()).toEqual(['amount_due_paise', 'attendees', 'is_organizer', 'leading_venue_id', 'me', 'meeting_point', 'meetup', 'payments', 'shortlist', 'shortlist_note', 'votes'].sort());
+    expect(Object.keys(payload).sort()).toEqual(['amount_due_paise', 'attendees', 'checkout_configured', 'is_organizer', 'leading_venue_id', 'me', 'meeting_point', 'meetup', 'payments', 'settle_up', 'shortlist', 'shortlist_note', 'votes'].sort());
     expect(Object.keys(payload.meetup).sort()).toEqual(['title', 'activity', 'area', 'starts_at', 'budget', 'status', 'expires_at', 'final_venue'].sort());
     expect(payload.me).toBeNull();
     expect(payload.is_organizer).toBe(false);

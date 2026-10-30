@@ -46,7 +46,10 @@ function checkoutBlocked() {
 function renderPayment() {
   const panel = $('payment-card');
   if (!panel || !view) return;
-  const eligible = !!view.me && !!view.meetup.final_venue;
+  // No card checkout on this deployment (or UPI settle-up is on): no dead-end card.
+  // A guest with any card payment keeps it, so its status and "do not pay again"
+  // guidance never disappear.
+  const eligible = !!view.me && !!view.meetup.final_venue && (!!cardPayment() || (view.checkout_configured !== false && !view.settle_up));
   panel.classList.toggle('hidden', !eligible);
   if (!eligible) return;
   const price = view.meetup.final_venue.price_per_person;
@@ -100,6 +103,201 @@ async function updatePayment(start) {
   } finally {
     if (current()) { paymentBusy = false; renderPayment(); }
   }
+}
+
+// --- UPI settle-up ---------------------------------------------------------
+// The organiser collects each share straight to their own UPI ID. Guests pay in
+// their UPI app (deep link on phones, QR on laptops) and tap "I've paid"; the
+// organiser ticks off what arrived. muop never touches the money.
+
+const QR_JS = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+const QR_SRI = 'sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k';
+let qrLoading = null;
+function loadQr() {
+  if (window.qrcode) return Promise.resolve(window.qrcode);
+  qrLoading ??= new Promise((resolve, reject) => {
+    const s = Object.assign(document.createElement('script'), { src: QR_JS, integrity: QR_SRI, crossOrigin: 'anonymous', async: true });
+    s.onload = () => (window.qrcode ? resolve(window.qrcode) : reject(new Error('QR library missing')));
+    s.onerror = () => { qrLoading = null; reject(new Error('Could not load the QR code generator')); };
+    document.head.appendChild(s);
+  });
+  return qrLoading;
+}
+
+// This guest's card (Pine Labs) payment status, if they ever started one.
+const cardPayment = () => (view && view.me && view.payments ? view.payments[view.me.attendee_id] || null : null);
+
+// Only upi://pay links built by the server are ever used as an href.
+const safeUpi = (uri) => (typeof uri === 'string' && uri.startsWith('upi://pay?') ? uri : null);
+let settleQrFor = null;
+
+function renderSettle() {
+  const panel = $('settle-card');
+  const su = view.settle_up;
+  const show = !!(view.me && su && su.upi_vpa);
+  panel.classList.toggle('hidden', !show);
+  if (!show) { settleQrFor = null; $('settle-qr').classList.add('hidden'); return; }
+  const amount = rupees(su.amount_paise / 100);
+  const mine = su.status[view.me.attendee_id];
+  const card = cardPayment();
+  // Already paid, or mid-way, by card: never offer a second way to pay.
+  const blocked = mine === 'confirmed' || !!card;
+  const uri = safeUpi(su.upi_uri);
+  $('settle-amount').innerHTML = `<strong>${esc(amount)}</strong> each to <strong>${esc(su.payee)}</strong> <span class="muted mono">${esc(su.upi_vpa)}</span>`;
+  $('settle-pay').textContent = 'Pay ' + amount + ' in a UPI app';
+  if (uri) $('settle-pay').setAttribute('href', uri); else $('settle-pay').removeAttribute('href');
+  $('settle-pay').classList.toggle('hidden', blocked);
+  $('settle-qr-btn').classList.toggle('hidden', blocked);
+  $('settle-copy').classList.toggle('hidden', blocked);
+  if (blocked && settleQrFor) toggleSettleQr();
+  $('settle-status').textContent = card === 'paid' ? '✓ You already paid by card. Nothing more to pay.'
+    : card ? 'You have a card payment in progress. Check its status in "Your payment" and do not pay again by UPI.'
+    : mine === 'confirmed' ? '✓ ' + su.payee + ' confirmed your payment. You are settled.'
+    : mine === 'claimed' ? 'Marked as paid. Waiting for ' + su.payee + ' to confirm it arrived.'
+    : 'After paying, tap "I\'ve paid" so ' + su.payee + ' knows.';
+  $('settle-claim').classList.toggle('hidden', !!mine || !!card);
+  $('settle-undo').classList.toggle('hidden', mine !== 'claimed' || !!card);
+  // A changed amount or UPI ID makes an open QR stale: rebuild it.
+  if (settleQrFor && settleQrFor !== uri) showSettleQr(uri);
+}
+
+async function showSettleQr(uri) {
+  const box = $('settle-qr');
+  if (!uri) return;
+  settleQrFor = uri;
+  box.classList.remove('hidden');
+  box.innerHTML = '<p class="muted">Loading QR code…</p>';
+  $('settle-qr-btn').textContent = 'Hide QR';
+  try {
+    const qrcode = await loadQr();
+    if (settleQrFor !== uri) return;
+    const qr = qrcode(0, 'M');
+    qr.addData(uri);
+    qr.make();
+    box.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true, alt: 'UPI payment QR code', title: 'Scan with any UPI app' })
+      + '<p class="muted">Scan with GPay, PhonePe, Paytm or your bank app.</p>';
+  } catch (e) {
+    if (settleQrFor === uri) box.innerHTML = `<p class="error">${esc(e.message || 'Could not make the QR code')}. Copy the UPI ID instead.</p>`;
+  }
+}
+
+function toggleSettleQr() {
+  if (settleQrFor) {
+    settleQrFor = null;
+    $('settle-qr').classList.add('hidden');
+    $('settle-qr-btn').textContent = 'Show QR';
+    return;
+  }
+  showSettleQr(safeUpi(view?.settle_up?.upi_uri));
+}
+
+// Organiser side. The form is rebuilt only when its state changes, so the
+// 4-second poll never wipes what the organiser is typing; the list is live.
+// The UPI ID prefill lives in sessionStorage only: it never outlasts the tab.
+let orgSettleKey = null;
+let orgSettleEditing = false;
+const SETTLE_PREFS = 'muop_settle_payee';
+function savedPayee() {
+  try { return JSON.parse(sessionStorage.getItem(SETTLE_PREFS) || 'null') || {}; } catch { return {}; }
+}
+
+function renderOrgSettle() {
+  const card = $('org-settle');
+  card.classList.toggle('hidden', !view.is_organizer);
+  if (!view.is_organizer) { orgSettleKey = null; return; }
+  const su = view.settle_up;
+  const people = view.attendees;
+  const settled = su ? people.filter((a) => su.status[a.id] === 'confirmed').length : 0;
+  $('org-settle-count').textContent = su ? settled + ' of ' + people.length + ' settled' : '';
+  const editing = !su || orgSettleEditing;
+  const key = editing ? 'form' : 'summary:' + su.amount_paise + ':' + su.upi_vpa + ':' + su.payee;
+  if (key !== orgSettleKey) {
+    orgSettleKey = key;
+    $('org-settle-form').innerHTML = editing ? settleFormHtml(su) : `
+      <p>Collecting <strong>${esc(rupees(su.amount_paise / 100))}</strong> each to <strong>${esc(su.payee)}</strong> <span class="muted mono">${esc(su.upi_vpa)}</span></p>
+      <div class="settle-actions">
+        <button type="button" class="btn sm" id="settle-edit">Change amount or UPI ID</button>
+        <button type="button" class="btn ghost sm" id="settle-stop">Stop collecting</button>
+      </div>`;
+    bindOrgSettleForm();
+  }
+  $('org-settle-list').innerHTML = su ? people.map((a) => {
+    const st = su.status[a.id];
+    const card = view.payments && view.payments[a.id];
+    if (card === 'paid') return `<li class="person">${avatar(a.guest_name)}<div><div class="person-name">${esc(a.guest_name)}</div><div class="person-tags"><span class="tag">✓ Paid by card</span></div></div></li>`;
+    const label = card ? `<span class="tag wait">Card payment ${esc(card)} - check before collecting</span>` : st === 'confirmed' ? '<span class="tag">✓ Received</span>' : st === 'claimed' ? '<span class="tag wait">Says paid - check your UPI app</span>' : '<span class="tag wait">Not yet</span>';
+    const btn = st === 'confirmed'
+      ? `<button type="button" class="btn ghost sm" data-settle="${esc(a.id)}" data-ok="0">Undo</button>`
+      : `<button type="button" class="btn sm" data-settle="${esc(a.id)}" data-ok="1">${st === 'claimed' ? 'Confirm received' : 'Mark received'}</button>`;
+    return `<li class="person">${avatar(a.guest_name)}<div><div class="person-name">${esc(a.guest_name)}</div><div class="person-tags">${label} ${btn}</div></div></li>`;
+  }).join('') : '';
+  $('org-settle-list').querySelectorAll('[data-settle]').forEach((b) => {
+    b.onclick = () => act(() => send('POST', '/settle/confirm', { attendee_id: b.dataset.settle, confirmed: b.dataset.ok === '1' }),
+      b.dataset.ok === '1' ? 'Marked as received' : 'Marked as not received');
+  });
+}
+
+function settleFormHtml(su) {
+  const saved = savedPayee();
+  const n = view.attendees.length;
+  const venuePrice = view.meetup.final_venue && view.meetup.final_venue.price_per_person;
+  const per = su ? su.amount_paise / 100 : (venuePrice || '');
+  return `
+    <p class="muted">Each guest pays you directly from their UPI app. No payment gateway, no fees, nothing to set up.</p>
+    <form id="settle-form">
+      <label class="field"><span class="field-label">Your UPI ID</span>
+        <input name="upi_vpa" required maxlength="128" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="name@okhdfcbank" value="${esc(su ? su.upi_vpa : saved.upi_vpa || '')}"></label>
+      <label class="field"><span class="field-label">Name guests will see</span>
+        <input name="upi_payee" required maxlength="60" placeholder="e.g. Arvind" value="${esc(su ? su.payee : saved.upi_payee || '')}"></label>
+      <div class="field"><span class="field-label">Amount per person (₹)</span>
+        <div class="two">
+          <input name="per_person" type="number" min="1" max="100000" step="1" inputmode="numeric" required value="${esc(per)}" aria-label="Amount per person">
+          <span></span>
+        </div></div>
+      <div class="field"><span class="field-label">Or split a total bill</span>
+        <div class="two">
+          <input name="total" type="number" min="1" step="1" inputmode="numeric" placeholder="Total bill (₹)" aria-label="Total bill">
+          <input name="people" type="number" min="1" max="500" step="1" inputmode="numeric" value="${n + 1}" aria-label="People sharing the bill, including you">
+        </div><span class="muted">People sharing it, including you. Rounded up to the rupee.</span></div>
+      <button class="btn primary" type="submit">${su ? 'Save' : 'Start collecting'}</button>
+      ${su ? '<button class="btn ghost" type="button" id="settle-cancel">Cancel</button>' : ''}
+    </form>`;
+}
+
+function bindOrgSettleForm() {
+  const form = $('settle-form');
+  if ($('settle-edit')) $('settle-edit').onclick = () => { orgSettleEditing = true; renderOrgSettle(); };
+  if ($('settle-stop')) $('settle-stop').onclick = () => {
+    if (confirm('Stop collecting? Guests will no longer see your UPI ID. What has been marked so far is kept.')) act(() => send('DELETE', '/settle'), 'Stopped collecting');
+  };
+  if ($('settle-cancel')) $('settle-cancel').onclick = () => { orgSettleEditing = false; renderOrgSettle(); };
+  if (!form) return;
+  // Total bill ÷ people, rounded up to the rupee so the organiser is never short.
+  form.total.oninput = form.people.oninput = () => {
+    const t = Number(form.total.value), p = Math.floor(Number(form.people.value));
+    if (t > 0 && p >= 1) form.per_person.value = Math.ceil(t / p);
+  };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    $('org-settle-error').textContent = '';
+    const upi_vpa = form.upi_vpa.value.trim();
+    const upi_payee = form.upi_payee.value.trim();
+    const rupeesEach = Number(form.per_person.value);
+    if (!/^[A-Za-z0-9._-]{2,64}@[A-Za-z][A-Za-z0-9.-]{1,63}$/.test(upi_vpa)) {
+      $('org-settle-error').textContent = 'Enter a UPI ID like name@okhdfcbank (find it in your UPI app under your profile).';
+      return;
+    }
+    if (!(rupeesEach >= 1 && rupeesEach <= 100000)) {
+      $('org-settle-error').textContent = 'Amount per person must be between ₹1 and ₹1,00,000.';
+      return;
+    }
+    const saved = await act(() => send('POST', '/settle', { upi_vpa, upi_payee, amount_paise: Math.round(rupeesEach * 100) }), 'Guests can now pay you by UPI');
+    if (saved) {
+      try { sessionStorage.setItem(SETTLE_PREFS, JSON.stringify({ upi_vpa, upi_payee })); } catch { /* private mode: just no prefill next time */ }
+      orgSettleEditing = false;
+      renderOrgSettle();
+    }
+  };
 }
 
 const $ = (id) => document.getElementById(id);
@@ -259,7 +457,9 @@ function render() {
 
   renderBanner();
   renderPayment();
+  renderSettle();
   renderOrganizer();
+  renderOrgSettle();
   renderPeople();
   renderSlots();
   renderShortlist();
@@ -585,6 +785,14 @@ async function savePrefs(e) {
 
 // --- boot --------------------------------------------------------------------
 
+$('settle-qr-btn').onclick = toggleSettleQr;
+$('settle-claim').onclick = () => act(() => send('POST', '/settle/paid'), 'Thanks! The organiser will confirm it.');
+$('settle-undo').onclick = () => act(() => send('DELETE', '/settle/paid'), 'Unmarked');
+$('settle-copy').onclick = async () => {
+  const vpa = view?.settle_up?.upi_vpa;
+  if (!vpa) return;
+  try { await navigator.clipboard.writeText(vpa); toast('UPI ID copied'); } catch { prompt('Copy this UPI ID:', vpa); }
+};
 $('pay-btn').onclick = () => updatePayment(true);
 $('payment-check').onclick = () => updatePayment(false);
 

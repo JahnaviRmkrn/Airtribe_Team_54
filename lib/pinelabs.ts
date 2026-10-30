@@ -1,6 +1,7 @@
 import 'server-only';
 import { allToolDefinitions, PinelabsApiClient, pinelabsEnvironment } from '@plural_pinelabs/agent-toolkit/shared';
 import { HttpError } from './http';
+import { checkoutConfigured } from './checkout-config';
 
 // Pine Labs Online checkout via the Pine Labs Agent Toolkit. Its tools are
 // called directly server-side (no LLM). The `/openai` entry imports
@@ -14,7 +15,7 @@ type Toolkit = { handleToolCall(name: string, args: unknown): Promise<string> };
 let toolkit: Toolkit | null = null;
 
 const creds = () => ({ id: process.env.PINE_CLIENT_ID?.trim(), secret: process.env.PINE_CLIENT_SECRET?.trim() });
-export const isConfigured = () => Boolean(creds().id && creds().secret);
+export const isConfigured = checkoutConfigured;
 
 function getToolkit(): Toolkit {
   if (!isConfigured()) throw new HttpError(503, 'Payments are not configured');

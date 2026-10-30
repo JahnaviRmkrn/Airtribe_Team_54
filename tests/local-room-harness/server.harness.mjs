@@ -66,6 +66,9 @@ import { GET as getGuest, PATCH as editGuest } from '../../app/api/rooms/[token]
 import { POST as vote, DELETE as unvote } from '../../app/api/rooms/[token]/vote/route';
 import { POST as confirmRoom } from '../../app/api/rooms/[token]/confirm/route';
 import { POST as closeRoom } from '../../app/api/rooms/[token]/close/route';
+import { POST as startSettle, DELETE as stopSettle } from '../../app/api/rooms/[token]/settle/route';
+import { POST as claimPaid, DELETE as unclaimPaid } from '../../app/api/rooms/[token]/settle/paid/route';
+import { POST as confirmPaid } from '../../app/api/rooms/[token]/settle/confirm/route';
 
 const MODE = process.env.TEAM54_LOCAL_HARNESS_MODE;
 const PORT = MODE === 'serve' ? 4318 : 0;
@@ -98,6 +101,8 @@ const handlers = new Map([
   ['GET ', viewRoom], ['POST /join', joinRoom], ['GET /me', getGuest],
   ['PATCH /me', editGuest], ['POST /vote', vote], ['DELETE /vote', unvote],
   ['POST /confirm', confirmRoom], ['POST /close', closeRoom],
+  ['POST /settle', startSettle], ['DELETE /settle', stopSettle], ['POST /settle/paid', claimPaid],
+  ['DELETE /settle/paid', unclaimPaid], ['POST /settle/confirm', confirmPaid],
 ]);
 let db, server, origin, tenants, timeout, stopResolve, stopPromise, queue = Promise.resolve();
 let stopped = false, servedRequests = 0, resets = 0;
@@ -245,7 +250,7 @@ async function dispatch(req, res) {
     }
     return respond(res, 200, await status(context), context);
   }
-  const match = path.match(/^\/api\/rooms\/([A-Za-z0-9_-]{20,100})(\/(?:join|me|vote|confirm|close|pay|voice-token))?$/);
+  const match = path.match(/^\/api\/rooms\/([A-Za-z0-9_-]{20,100})(\/(?:join|me|vote|confirm|close|pay|voice-token|settle|settle\/paid|settle\/confirm))?$/);
   if (!match) return respond(res, 404, { error: 'Not allowed by local harness' });
   const suffix = match[2] || '';
   if (suffix === '/pay' || suffix === '/voice-token') return respond(res, 503, { error: 'Provider disabled in local harness' });

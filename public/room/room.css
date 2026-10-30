@@ -191,3 +191,11 @@ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px 
 .rv-agent { color: #0e5f6e; }
 .rv-agent::before { content: 'muop: '; font-weight: 600; }
 @media (prefers-reduced-motion: reduce) { .rv-fab.live { animation: none; } }
+
+/* UPI settle-up */
+.settle-amount { font-size: 17px; margin: 4px 0 12px; }
+.settle-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; align-items: center; }
+#settle-qr svg { width: 220px; max-width: 100%; height: auto; background: #fff; border-radius: 8px; }
+#org-settle-list .person-tags { align-items: center; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+a.btn { text-decoration: none; display: inline-flex; align-items: center; }
